@@ -1,0 +1,1221 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}
+Adjust Sensitivity Thresholds
+{% endblock %}
+{% block content %}
+<style>
+    /* Parameter card styles */
+    .parameter-card {
+        background-color: #F8F9FA;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        border: 2px solid transparent;
+        transition: all 0.3s ease;
+    }
+
+    .parameter-card:hover {
+        border-color: #F1D500;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .parameter-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 10px;
+    }
+
+    .parameter-description {
+        font-size: 14px;
+        color: #6c757d;
+        margin-bottom: 15px;
+    }
+
+    .parameter-control {
+        margin-bottom: 15px;
+    }
+
+    .parameter-control label {
+        font-weight: 500;
+        margin-bottom: 5px;
+    }
+
+    .range-value {
+        font-weight: bold;
+        color: #F1D500;
+        background-color: #333;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        border: none;
+        width: 60px;
+        text-align: center;
+    }
+
+    /* Styles for combined multi-handle slider */
+    .multi-range-slider {
+        position: relative;
+        height: 40px;
+    }
+
+    .slider-track {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        height: 8px;
+        border-radius: 4px;
+        pointer-events: none;
+        background: linear-gradient(to right, green 0%, green 10%, orange 10%, orange 31%, red 31%, red 100%);
+        z-index: 1;
+    }
+
+    .multi-range-slider input[type=range] {
+        position: absolute;
+        left: 0;
+        width: 100%;
+        pointer-events: none;
+        appearance: none;
+        background: transparent;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* Hide the default slider track so only the custom gradient shows */
+    .multi-range-slider input[type=range]::-webkit-slider-runnable-track {
+        background: none;
+    }
+    .multi-range-slider input[type=range]::-moz-range-track {
+        background: none;
+        border: none;
+    }
+    .multi-range-slider input[type=range]::-ms-track {
+        background: transparent;
+        border-color: transparent;
+        color: transparent;
+    }
+
+    .multi-range-slider input[type=range]::-webkit-slider-thumb {
+        appearance: none;
+        -webkit-appearance: none;
+        pointer-events: all;
+        position: relative;
+        z-index: 3;
+        width: 18px;
+        height: 14px;
+        background: black;
+        border: none;
+        border-radius: 0;
+        clip-path: polygon(50% 100%, 0 0, 100% 0);
+    }
+
+    .multi-range-slider input[type=range]::-moz-range-thumb {
+        appearance: none;
+        pointer-events: all;
+        position: relative;
+        z-index: 3;
+        width: 18px;
+        height: 14px;
+        background: black;
+        border: none;
+        border-radius: 0;
+        clip-path: polygon(50% 100%, 0 0, 100% 0);
+    }
+
+    /* Asset Archetype Component Styles - MADE STICKY */
+    .archetype-card {
+        background-color: #F8F9FA;
+        border-radius: 8px;
+        border: 2px solid #dee2e6;
+        transition: all 0.3s ease;
+        height: fit-content;
+        position: sticky;
+        top: 20px;
+        z-index: 100;
+        max-height: calc(100vh - 40px);
+        overflow-y: auto;
+    }
+
+    .archetype-card:hover {
+        border-color: #F1D500;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .archetype-header {
+        background-color: #F1D500;
+        color: #000;
+        font-weight: 600;
+        padding: 15px 20px;
+        border-radius: 6px 6px 0 0;
+        margin: -2px -2px 0 -2px;
+        position: sticky;
+        top: -2px;
+        z-index: 101;
+    }
+
+    .archetype-list {
+        padding: 20px;
+        max-height: calc(100vh - 200px);
+        overflow-y: auto;
+    }
+
+    .archetype-item {
+        padding: 12px 15px;
+        border-bottom: 1px solid #e9ecef;
+        font-size: 14px;
+        color: #333;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        border-radius: 6px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+    }
+
+    .archetype-item:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+    }
+
+    .archetype-item:hover {
+        background-color: #fff8c7;
+        border-color: #F1D500;
+    }
+
+    .archetype-item.selected {
+        background-color: #F1D500;
+        color: #000;
+        font-weight: 600;
+        border: 2px solid #F1D500;
+        box-shadow: 0 2px 8px rgba(241, 213, 0, 0.3);
+    }
+
+    .archetype-item.selected .archetype-number {
+        background-color: #000;
+        color: #F1D500;
+    }
+
+    .archetype-number {
+        font-weight: 600;
+        color: #F1D500;
+        background-color: #333;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        margin-right: 12px;
+        display: inline-block;
+        min-width: 24px;
+        text-align: center;
+        transition: all 0.3s ease;
+    }
+
+    .archetype-name {
+        color: #495057;
+        flex: 1;
+        transition: all 0.3s ease;
+    }
+
+    .archetype-item.selected .archetype-name {
+        color: #000;
+    }
+
+    .no-archetypes {
+        color: #6c757d;
+        font-style: italic;
+        text-align: center;
+        padding: 20px;
+    }
+
+    /* Selected Archetype Indicator */
+    .selected-archetype-indicator {
+        background-color: #F1D500;
+        color: #000;
+        padding: 8px 15px;
+        border-radius: 6px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        border: 2px solid #F1D500;
+    }
+
+    .archetype-instructions {
+        background-color: #e7f3ff;
+        border: 1px solid #b3d7ff;
+        border-radius: 6px;
+        padding: 12px 15px;
+        margin-bottom: 20px;
+        font-size: 14px;
+        color: #0066cc;
+    }
+
+    .threshold-description {
+        font-size: 12px;
+        color: #6c757d;
+        margin-bottom: 5px;
+    }
+
+    /* Responsive adjustments for smaller screens */
+    @media (max-width: 768px) {
+        .archetype-card {
+            position: relative;
+            top: auto;
+            max-height: none;
+        }
+        
+        .archetype-list {
+            max-height: none;
+        }
+        
+        .archetype-header {
+            position: relative;
+            top: auto;
+        }
+    }
+</style>
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-6 d-flex flex-column">
+            <!-- Rounded Icon Container with Margin -->
+            <div class="icon-container">
+                <img src="{% static 'images/sgv-logo.png' %}" alt="SGV Logo">
+            </div>
+            <!-- Heading below the icon with Margin -->
+            <h1 class="page-heading">Sensitivity Analysis</h1>
+        </div>
+    </div>
+
+    <!-- Step by Step Procedure UI -->
+<div class="row mt-4 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body p-4">
+                {% include "climate_hazards_analysis_v2/steps_table.html" %}
+            </div>
+        </div>
+    </div>
+</div>
+
+    <!-- Alert Messages -->
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+    
+    {% if success_message %}
+    <div class="alert alert-success alert-dismissible fade show alert-fade" role="alert">
+        {{ success_message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+
+    <!-- Main Content: Asset Archetype + Sensitivity Parameters -->
+    <div class="row mt-4 sensitivity-parameters-content">
+        <!-- Left Column: Asset Archetype Component (STICKY) -->
+        <div class="col-md-4">
+            <div class="archetype-card">
+                <div class="archetype-header">
+                    <strong>Asset Archetype</strong>
+                </div>
+                <div class="archetype-list">
+                    {% if asset_archetypes %}
+                        <div class="archetype-instructions">
+                            <i class="fas fa-info-circle me-2"></i>
+                            Click on an asset archetype to configure its specific sensitivity parameters
+                        </div>
+                        {% for archetype in asset_archetypes %}
+                            <div class="archetype-item" onclick="selectArchetype('{{ archetype.name|escapejs }}', {{ archetype.number }}, event)" data-archetype="{{ archetype.name|escapejs }}">
+                                <span class="archetype-number">{{ archetype.number }}</span>
+                                <span class="archetype-name">{{ archetype.name }}</span>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="no-archetypes">
+                            No asset archetypes found in the uploaded file
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Adjust Sensitivity Thresholds -->
+        <div class="col-md-8">
+            <div class="card custom-card">
+                <div class="card-header no-border">
+                    <strong>Adjust Sensitivity Thresholds</strong>
+                </div>
+                <div class="card-body">
+                    <!-- Selected Archetype Indicator -->
+                    <div id="selected-archetype-indicator" class="selected-archetype-indicator" style="display: none;">
+                        
+                        Configuring parameters for: <span id="selected-archetype-name">None Selected</span>
+                    </div>
+
+                    <div id="default-instructions" class="archetype-instructions">
+                        <i class="fas fa-arrow-left me-2"></i>
+                        Please select an asset archetype from the left panel to configure its sensitivity parameters, or use the default parameters below for all archetypes.
+                    </div>
+                    
+                    <form id="sensitivity-form" method="POST" action="{% url 'climate_hazards_analysis_v2:sensitivity_parameters' %}">
+                        {% csrf_token %}
+                        
+                        <!-- Hidden field to store selected archetype -->
+                        <input type="hidden" id="selected-archetype-input" name="selected_archetype" value="">
+
+                        <!-- Flood Thresholds -->
+                        {% if 'Flood' in selected_hazards %}
+                        <div class="accordion" id="floodAccordion">
+                            <div class="accordion-item parameter-card">
+                                <h2 class="accordion-header d-flex align-items-center" id="floodHeader">
+                                    <button class="accordion-button flex-grow-1" type="button" data-bs-toggle="collapse" data-bs-target="#floodCollapse" aria-expanded="true" aria-controls="floodCollapse">
+                                        <strong>Flood Thresholds</strong>
+                                        <div class="form-check position-absolute end-0 top-50 translate-middle-y me-5">
+                                            <input class="form-check-input" type="checkbox" id="floodNotMaterial" name="flood_not_material" value="1">
+                                            <label class="form-check-label" for="floodNotMaterial">This hazard is not material to the asset</label>
+                                        </div>
+                                    </button>
+                                </h2>
+                                <div id="floodCollapse" class="accordion-collapse collapse show" aria-labelledby="floodHeader" data-bs-parent="#floodAccordion">
+                                    <div class="accordion-body">
+                                        <div class="parameter-description">Set flood depth thresholds for risk levels for the selected asset archetype</div>
+                                        <div class="parameter-control">
+                                            <div id="floodSlider" class="multi-range-slider">
+                                                <div id="floodTrack" class="slider-track"></div>
+                                                <input type="range" id="floodLow" name="flood_low" min="0" max="5" step="0.1" value="0.5" oninput="updateAllDisplayValues()">
+                                                <input type="range" id="floodHigh" name="flood_high" min="0" max="5" step="0.1" value="1.5" oninput="updateAllDisplayValues()">
+                                            </div>
+                                            <div class="d-flex justify-content-between mt-2">
+                                                <div>Low: 0.1 to <input type="number" class="range-value" id="floodLowValue" min="0" max="5" step="0.1" value="0.5" oninput="updateSliderFromInput('flood','Low', this.value)"></div>
+                                                <div>Medium: <input type="number" class="range-value" id="floodMediumLow" min="0" max="5" step="0.1" value="0.5" oninput="updateSliderFromInput('flood','Low', this.value)"> to <input type="number" class="range-value" id="floodMediumHigh" min="0" max="5" step="0.1" value="1.5" oninput="updateSliderFromInput('flood','High', this.value)"></div>
+                                                <div>High: <input type="number" class="range-value" id="floodHighValue" min="0" max="5" step="0.1" value="1.5" oninput="updateSliderFromInput('flood','High', this.value)"> to 5</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        
+                        <!-- Water Stress Thresholds -->
+                        {% if 'Water Stress' in selected_hazards %}
+                        <div class="accordion" id="waterStressAccordion">
+                            <div class="accordion-item parameter-card">
+                                <h2 class="accordion-header d-flex align-items-center" id="waterStressHeader">
+                                    <button class="accordion-button flex-grow-1" type="button" data-bs-toggle="collapse" data-bs-target="#waterStressCollapse" aria-expanded="true" aria-controls="waterStressCollapse">
+                                        <strong>Water Stress Thresholds</strong>
+                                        <div class="form-check position-absolute end-0 top-50 translate-middle-y me-5">
+                                            <input class="form-check-input" type="checkbox" id="waterStressNotMaterial" name="water_stress_not_material" value="1">
+                                            <label class="form-check-label" for="waterStressNotMaterial">This hazard is not material to the asset</label>
+                                        </div>
+                                    </button>
+                                    
+                                </h2>
+                                <div id="waterStressCollapse" class="accordion-collapse collapse show" aria-labelledby="waterStressHeader" data-bs-parent="#waterStressAccordion">
+                                    <div class="accordion-body">
+                                        <div class="parameter-description">Set water stress percentage thresholds for risk levels for the selected asset archetype</div>
+                                        <div class="parameter-control">
+                                            <div id="waterStressSlider" class="multi-range-slider">
+                                                <div id="waterStressTrack" class="slider-track"></div>
+                                                <input type="range" id="waterStressLow" name="water_stress_low" min="0" max="100" step="1" value="10" oninput="updateAllDisplayValues()">
+                                                <input type="range" id="waterStressHigh" name="water_stress_high" min="0" max="100" step="1" value="31" oninput="updateAllDisplayValues()">
+                                            </div>
+                                            <div class="d-flex justify-content-between mt-2">
+                                                <div>Low: 0% to <input type="number" class="range-value" id="waterStressLowValue" min="0" max="100" step="1" value="10" oninput="updateSliderFromInput('waterStress','Low', this.value)"> %</div>
+                                                <div>Medium: <input type="number" class="range-value" id="waterStressMediumLow" min="0" max="100" step="1" value="10" oninput="updateSliderFromInput('waterStress','Low', this.value)"> % to <input type="number" class="range-value" id="waterStressMediumHigh" min="0" max="100" step="1" value="31" oninput="updateSliderFromInput('waterStress','High', this.value)"> %</div>
+                                                <div>High: <input type="number" class="range-value" id="waterStressHighValue" min="0" max="100" step="1" value="31" oninput="updateSliderFromInput('waterStress','High', this.value)"> to 100%</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Tropical Cyclones Thresholds -->
+                        {% if 'Tropical Cyclones' in selected_hazards %}
+                        <div class="accordion" id="tropicalCycloneAccordion">
+                            <div class="accordion-item parameter-card">
+                                <h2 class="accordion-header d-flex align-items-center" id="tropicalCycloneHeader">
+                                    <button class="accordion-button flex-grow-1" type="button" data-bs-toggle="collapse" data-bs-target="#tropicalCycloneCollapse" aria-expanded="true" aria-controls="tropicalCycloneCollapse">
+                                        <strong>Tropical Cyclones Thresholds</strong>
+                                        <div class="form-check position-absolute end-0 top-50 translate-middle-y me-5">
+                                            <input class="form-check-input" type="checkbox" id="tropicalCycloneNotMaterial" name="tropical_cyclone_not_material" value="1">
+                                            <label class="form-check-label" for="tropicalCycloneNotMaterial">This hazard is not material to the asset</label>
+                                        </div>
+                                    </button>
+                                </h2>
+                                <div id="tropicalCycloneCollapse" class="accordion-collapse collapse show" aria-labelledby="tropicalCycloneHeader" data-bs-parent="#tropicalCycloneAccordion">
+                                    <div class="accordion-body">
+                                        <div class="parameter-description">Set wind speed thresholds for risk levels for the selected asset archetype</div>
+                                        <div class="parameter-control">
+                                            <div id="tropicalCycloneSlider" class="multi-range-slider">
+                                                <div id="tropicalCycloneTrack" class="slider-track"></div>
+                                                <input type="range" id="tropicalCycloneLow" name="tropical_cyclone_low" min="0" max="300" step="1" value="119" oninput="updateAllDisplayValues()">
+                                                <input type="range" id="tropicalCycloneHigh" name="tropical_cyclone_high" min="0" max="300" step="1" value="178" oninput="updateAllDisplayValues()">
+                                            </div>
+                                            <div class="d-flex justify-content-between mt-2">
+                                                <div>Low: 0 to <input type="number" class="range-value" id="tropicalCycloneLowValue" min="0" max="300" step="1" value="119" oninput="updateSliderFromInput('tropicalCyclone','Low', this.value)"></div>
+                                                <div>Medium: <input type="number" class="range-value" id="tropicalCycloneMediumLow" min="0" max="300" step="1" value="119" oninput="updateSliderFromInput('tropicalCyclone','Low', this.value)"> to <input type="number" class="range-value" id="tropicalCycloneMediumHigh" min="0" max="300" step="1" value="178" oninput="updateSliderFromInput('tropicalCyclone','High', this.value)"></div>
+                                                <div>High: <input type="number" class="range-value" id="tropicalCycloneHighValue" min="0" max="300" step="1" value="178" oninput="updateSliderFromInput('tropicalCyclone','High', this.value)"> to 300</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {% endif %}
+                        
+                        <!-- Hidden field to track which button was clicked -->
+
+                        <!-- Heat Thresholds -->
+                        {% if 'Heat' in selected_hazards %}
+                        <div class="accordion" id="heatAccordion">
+                            <div class="accordion-item parameter-card">
+                                <h2 class="accordion-header d-flex align-items-center" id="heatHeader">
+                                    <button class="accordion-button flex-grow-1" type="button" data-bs-toggle="collapse" data-bs-target="#heatCollapse" aria-expanded="true" aria-controls="heatCollapse">
+                                        <strong>Heat Thresholds</strong>
+                                        <div class="form-check position-absolute end-0 top-50 translate-middle-y me-5">
+                                            <input class="form-check-input" type="checkbox" id="heatNotMaterial" name="heat_not_material" value="1">
+                                            <label class="form-check-label" for="heatNotMaterial">This hazard is not material to the asset</label>
+                                        </div>
+                                    </button>
+                                </h2>
+                                <div id="heatCollapse" class="accordion-collapse collapse show" aria-labelledby="heatHeader" data-bs-parent="#heatAccordion">
+                                    <div class="accordion-body">
+                                        <div class="parameter-description">Set heat days thresholds for risk levels for the selected asset archetype</div>
+                                        <div class="parameter-control">
+                                            <div id="heatSlider" class="multi-range-slider">
+                                                <div id="heatTrack" class="slider-track"></div>
+                                                <input type="range" id="heatLow" name="heat_low" min="0" max="366" step="1" value="10" oninput="updateAllDisplayValues()">
+                                                <input type="range" id="heatHigh" name="heat_high" min="0" max="366" step="1" value="45" oninput="updateAllDisplayValues()">
+                                            </div>
+                                            <div class="d-flex justify-content-between mt-2">
+                                                <div>Low: 0 to <input type="number" class="range-value" id="heatLowValue" min="0" max="366" step="1" value="10" oninput="updateSliderFromInput('heat','Low', this.value)"></div>
+                                                <div>Medium: <input type="number" class="range-value" id="heatMediumLow" min="0" max="366" step="1" value="10" oninput="updateSliderFromInput('heat','Low', this.value)"> to <input type="number" class="range-value" id="heatMediumHigh" min="0" max="366" step="1" value="45" oninput="updateSliderFromInput('heat','High', this.value)"></div>
+                                                <div>High: <input type="number" class="range-value" id="heatHighValue" min="0" max="366" step="1" value="45" oninput="updateSliderFromInput('heat','High', this.value)"> to 366</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Storm Surge Thresholds -->
+                        {% if 'Storm Surge' in selected_hazards %}
+                        <div class="accordion" id="stormSurgeAccordion">
+                            <div class="accordion-item parameter-card">
+                                <h2 class="accordion-header d-flex align-items-center" id="stormSurgeHeader">
+                                    <button class="accordion-button flex-grow-1" type="button" data-bs-toggle="collapse" data-bs-target="#stormSurgeCollapse" aria-expanded="true" aria-controls="stormSurgeCollapse">
+                                        <strong>Storm Surge Thresholds</strong>
+                                        <div class="form-check position-absolute end-0 top-50 translate-middle-y me-5">
+                                            <input class="form-check-input" type="checkbox" id="stormSurgeNotMaterial" name="storm_surge_not_material" value="1">
+                                            <label class="form-check-label" for="stormSurgeNotMaterial">This hazard is not material to the asset</label>
+                                        </div>
+                                    </button>
+                                </h2>
+                                <div id="stormSurgeCollapse" class="accordion-collapse collapse show" aria-labelledby="stormSurgeHeader" data-bs-parent="#stormSurgeAccordion">
+                                    <div class="accordion-body">
+                                        <div class="parameter-description">Set storm surge flood depth thresholds for risk levels for the selected asset archetype</div>
+                                        <div class="parameter-control">
+                                            <div id="stormSurgeSlider" class="multi-range-slider">
+                                                <div id="stormSurgeTrack" class="slider-track"></div>
+                                                <input type="range" id="stormSurgeLow" name="storm_surge_low" min="0" max="5" step="0.1" value="0.5" oninput="updateAllDisplayValues()">
+                                                <input type="range" id="stormSurgeHigh" name="storm_surge_high" min="0" max="5" step="0.1" value="1.5" oninput="updateAllDisplayValues()">
+                                            </div>
+                                            <div class="d-flex justify-content-between mt-2">
+                                                <div>Low: 0.1 to <input type="number" class="range-value" id="stormSurgeLowValue" min="0" max="5" step="0.1" value="0.5" oninput="updateSliderFromInput('stormSurge','Low', this.value)"></div>
+                                                <div>Medium: <input type="number" class="range-value" id="stormSurgeMediumLow" min="0" max="5" step="0.1" value="0.5" oninput="updateSliderFromInput('stormSurge','Low', this.value)"> to <input type="number" class="range-value" id="stormSurgeMediumHigh" min="0" max="5" step="0.1" value="1.5" oninput="updateSliderFromInput('stormSurge','High', this.value)"></div>
+                                                <div>High: <input type="number" class="range-value" id="stormSurgeHighValue" min="0" max="5" step="0.1" value="1.5" oninput="updateSliderFromInput('stormSurge','High', this.value)"> to 5</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Rainfall-Induced Landslide Thresholds -->
+                        {% if 'Rainfall Induced Landslide' in selected_hazards %}
+                        <div class="accordion" id="landslideAccordion">
+                            <div class="accordion-item parameter-card">
+                                <h2 class="accordion-header d-flex align-items-center" id="landslideHeader">
+                                    <button class="accordion-button flex-grow-1" type="button" data-bs-toggle="collapse" data-bs-target="#landslideCollapse" aria-expanded="true" aria-controls="landslideCollapse">
+                                        <strong>Rainfall-Induced Landslide Thresholds</strong>
+                                        <div class="form-check position-absolute end-0 top-50 translate-middle-y me-5">
+                                            <input class="form-check-input" type="checkbox" id="landslideNotMaterial" name="landslide_not_material" value="1">
+                                            <label class="form-check-label" for="landslideNotMaterial">This hazard is not material to the asset</label>
+                                        </div>
+                                    </button>
+                                </h2>
+                                <div id="landslideCollapse" class="accordion-collapse collapse show" aria-labelledby="landslideHeader" data-bs-parent="#landslideAccordion">
+                                    <div class="accordion-body">
+                                        <div class="parameter-description">Set factor of safety thresholds for risk levels for the selected asset archetype</div>
+                                        <div class="parameter-control">
+                                            <div id="landslideSlider" class="multi-range-slider">
+                                                <div id="landslideTrack" class="slider-track"></div>
+                                                <input type="range" id="landslideLow" name="landslide_low" min="0" max="3" step="0.1" value="1" oninput="updateAllDisplayValues()">
+                                                <input type="range" id="landslideHigh" name="landslide_high" min="0" max="3" step="0.1" value="1.5" oninput="updateAllDisplayValues()">
+                                            </div>
+                                            <div class="d-flex justify-content-between mt-2">
+                                                <div>High: 0 to <input type="number" class="range-value" id="landslideLowValue" min="0" max="3" step="0.1" value="1" oninput="updateSliderFromInput('landslide','Low', this.value)"></div>
+                                                <div>Medium: <input type="number" class="range-value" id="landslideMediumLow" min="0" max="3" step="0.1" value="1" oninput="updateSliderFromInput('landslide','Low', this.value)"> to <input type="number" class="range-value" id="landslideMediumHigh" min="0" max="3" step="0.1" value="1.5" oninput="updateSliderFromInput('landslide','High', this.value)"></div>
+                                                <div>Low: &gt; <input type="number" class="range-value" id="landslideHighValue" min="0" max="3" step="0.1" value="1.5" oninput="updateSliderFromInput('landslide','High', this.value)"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <input type="hidden" id="submit-type" name="submit_type" value="">
+                        
+                        <!-- Action Buttons -->
+                        <div class="d-flex justify-content-between mt-4">
+                            <div class="d-flex gap-2">
+                                <a href="{% url 'climate_hazards_analysis_v2:show_results' %}" class="btn btn-secondary">
+                                    <i class="fas fa-arrow-left me-2"></i> Back to Adjust Magnitude with Local Conditions
+                                </a>
+                                <button type="button" class="btn btn-outline-secondary" onclick="resetToDefaults()">
+                                    <i class="fas fa-undo me-2"></i> Reset to Default
+                                </button>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-info" onclick="saveArchetypeParameters()" id="save-archetype-btn" style="display: none;">
+                                    <i class="fas fa-save me-2"></i> Save Parameters for This Archetype
+                                </button>
+                                <button type="submit" id="apply-parameters-btn" class="btn btn-warning btn-lg" onclick="document.getElementById('submit-type').value='apply-parameters-btn';">
+                                    <strong>Apply Parameters & Generate Sensitivity Results</strong>
+                                    <i class="fas fa-arrow-right ms-2"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Variables to store archetype-specific parameters
+    let archetypeParameters = {};
+    let currentSelectedArchetype = null;
+    let defaultParameters = null;
+    let isAccordionEnabled = false;
+    let hasBeenReset = false;
+
+    // Mapping from UI prefix to parameter prefix used in defaultParameters
+    const paramKeyMap = {
+        waterStress: 'water_stress',
+        flood: 'flood',
+        heat: 'heat',
+        tropicalCyclone: 'tropical_cyclone',
+        stormSurge: 'storm_surge',
+        landslide: 'landslide'
+    };
+
+    // Function to capture current parameters for all hazards
+    function getCurrentParameters() {
+        const params = {};
+        if (document.getElementById('floodLow')) {
+            params.flood_low = document.getElementById('floodLow').value;
+            params.flood_high = document.getElementById('floodHigh').value;
+            params.flood_not_material = document.getElementById('floodNotMaterial').checked ? 1 : 0;
+        }
+        if (document.getElementById('waterStressLow')) {
+            params.water_stress_low = document.getElementById('waterStressLow').value;
+            params.water_stress_high = document.getElementById('waterStressHigh').value;
+            params.water_stress_not_material = document.getElementById('waterStressNotMaterial').checked ? 1 : 0;
+        }
+        if (document.getElementById('tropicalCycloneLow')) {
+            params.tropical_cyclone_low = document.getElementById('tropicalCycloneLow').value;
+            params.tropical_cyclone_high = document.getElementById('tropicalCycloneHigh').value;
+            params.tropical_cyclone_not_material = document.getElementById('tropicalCycloneNotMaterial').checked ? 1 : 0;
+        }
+        if (document.getElementById('heatLow')) {
+            params.heat_low = document.getElementById('heatLow').value;
+            params.heat_high = document.getElementById('heatHigh').value;
+            params.heat_not_material = document.getElementById('heatNotMaterial').checked ? 1 : 0;
+        }
+        if (document.getElementById('stormSurgeLow')) {
+            params.storm_surge_low = document.getElementById('stormSurgeLow').value;
+            params.storm_surge_high = document.getElementById('stormSurgeHigh').value;
+            params.storm_surge_not_material = document.getElementById('stormSurgeNotMaterial').checked ? 1 : 0;
+        }
+        if (document.getElementById('landslideLow')) {
+            params.landslide_low = document.getElementById('landslideLow').value;
+            params.landslide_high = document.getElementById('landslideHigh').value;
+            params.landslide_not_material = document.getElementById('landslideNotMaterial').checked ? 1 : 0;
+        }
+        return params;
+    }
+
+    // Function to apply parameters to form
+    function applyParameters(params) {
+        if (!params) return;
+
+        if (document.getElementById('floodLow')) {
+            document.getElementById('floodLow').value = params.flood_low !== undefined ? params.flood_low : 0.5;
+            document.getElementById('floodHigh').value = params.flood_high !== undefined ? params.flood_high : 1.5;
+            document.getElementById('floodNotMaterial').checked = !!params.flood_not_material;
+        }
+        if (document.getElementById('waterStressLow')) {
+            document.getElementById('waterStressLow').value = params.water_stress_low !== undefined ? params.water_stress_low : 10;
+            document.getElementById('waterStressHigh').value = params.water_stress_high !== undefined ? params.water_stress_high : 31;
+            document.getElementById('waterStressNotMaterial').checked = !!params.water_stress_not_material;
+        }
+        if (document.getElementById('tropicalCycloneLow')) {
+            document.getElementById('tropicalCycloneLow').value = params.tropical_cyclone_low !== undefined ? params.tropical_cyclone_low : 119;
+            document.getElementById('tropicalCycloneHigh').value = params.tropical_cyclone_high !== undefined ? params.tropical_cyclone_high : 178;
+            document.getElementById('tropicalCycloneNotMaterial').checked = !!params.tropical_cyclone_not_material;
+        }
+        if (document.getElementById('heatLow')) {
+            document.getElementById('heatLow').value = params.heat_low !== undefined ? params.heat_low : 10;
+            document.getElementById('heatHigh').value = params.heat_high !== undefined ? params.heat_high : 45;
+            document.getElementById('heatNotMaterial').checked = !!params.heat_not_material;
+        }
+        if (document.getElementById('stormSurgeLow')) {
+            document.getElementById('stormSurgeLow').value = params.storm_surge_low !== undefined ? params.storm_surge_low : 0.5;
+            document.getElementById('stormSurgeHigh').value = params.storm_surge_high !== undefined ? params.storm_surge_high : 1.5;
+            document.getElementById('stormSurgeNotMaterial').checked = !!params.storm_surge_not_material;
+        }
+        if (document.getElementById('landslideLow')) {
+            document.getElementById('landslideLow').value = params.landslide_low !== undefined ? params.landslide_low : 1;
+            document.getElementById('landslideHigh').value = params.landslide_high !== undefined ? params.landslide_high : 1.5;
+            document.getElementById('landslideNotMaterial').checked = !!params.landslide_not_material;
+        }
+
+        updateAllDisplayValues();
+        toggleHazard('flood');
+        toggleHazard('waterStress');
+        toggleHazard('tropicalCyclone');
+        toggleHazard('heat');
+        toggleHazard('stormSurge');
+        toggleHazard('landslide');
+    }
+
+    // Ensure slider handles remain in logical order
+    function enforceSliderOrder(prefix) {
+        const low = document.getElementById(prefix + 'Low');
+        const high = document.getElementById(prefix + 'High');
+        if (!low || !high) return;
+
+        if (parseFloat(low.value) > parseFloat(high.value)) {
+            high.value = low.value;
+        }
+    }
+
+    // Update gradient track based on handle positions
+    function updateSliderTrack(prefix) {
+        const lowEl = document.getElementById(prefix + 'Low');
+        const highEl = document.getElementById(prefix + 'High');
+        if (!lowEl || !highEl) return;
+        const low = parseFloat(lowEl.value);
+        const high = parseFloat(highEl.value);
+        const min = parseFloat(lowEl.min);
+        const max = parseFloat(lowEl.max);
+        const lowPct = ((low - min) / (max - min)) * 100;
+        const highPct = ((high - min) / (max - min)) * 100;
+        document.getElementById(prefix + 'Track').style.background =
+            prefix === 'landslide'
+                ? `linear-gradient(to right, red 0%, red ${lowPct}%, orange ${lowPct}%, orange ${highPct}%, green ${highPct}%, green 100%)`
+                : `linear-gradient(to right, green 0%, green ${lowPct}%, orange ${lowPct}%, orange ${highPct}%, red ${highPct}%, red 100%)`;
+    }
+
+    // Update slider values when numeric inputs change
+    function updateSliderFromInput(prefix, bound, value) {
+        const slider = document.getElementById(prefix + bound);
+        if (slider) {
+            slider.value = value;
+            updateAllDisplayValues();
+        }
+    }
+
+    // Function to update all range value displays
+    function updateAllDisplayValues() {
+        ['waterStress', 'flood', 'heat', 'tropicalCyclone', 'stormSurge', 'landslide'].forEach(prefix => {
+            const lowEl = document.getElementById(prefix + 'Low');
+            const highEl = document.getElementById(prefix + 'High');
+            if (!lowEl || !highEl) return;
+            enforceSliderOrder(prefix);
+            const lowVal = lowEl.value;
+            const highVal = highEl.value;
+            ['LowValue', 'MediumLow'].forEach(suffix => {
+                const el = document.getElementById(prefix + suffix);
+                if (el) el.value = lowVal;
+            });
+            ['HighValue', 'MediumHigh'].forEach(suffix => {
+                const el = document.getElementById(prefix + suffix);
+                if (el) el.value = highVal;
+            });
+            updateSliderTrack(prefix);
+        });
+    }
+
+    // Function to select an archetype
+    function selectArchetype(archetypeName, archetypeNumber, event) {
+        // Input validation
+        if (!archetypeName || archetypeNumber == null) {
+            console.error('Invalid archetype parameters:', { archetypeName, archetypeNumber });
+            return;
+        }
+
+        try {
+            // Save current parameters if an archetype was previously selected
+            if (currentSelectedArchetype) {
+                archetypeParameters[currentSelectedArchetype] = getCurrentParameters();
+            } else if (!defaultParameters) {
+                // Save default parameters on first selection
+                defaultParameters = getCurrentParameters();
+            }
+
+            // Update UI
+            document.querySelectorAll('.archetype-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+
+            // Use event parameter instead of global event object
+            if (event && event.currentTarget) {
+                event.currentTarget.classList.add('selected');
+            } else {
+                // Fallback: find the archetype item by data attribute
+                const archetypeItem = document.querySelector(`[data-archetype="${archetypeName}"]`);
+                if (archetypeItem) {
+                    archetypeItem.classList.add('selected');
+                }
+            }
+
+            // Show selected archetype indicator
+            document.getElementById('selected-archetype-indicator').style.display = 'block';
+            document.getElementById('selected-archetype-name').textContent = archetypeName;
+            document.getElementById('default-instructions').style.display = 'none';
+            document.getElementById('save-archetype-btn').style.display = 'block';
+
+            // Update hidden form field
+            document.getElementById('selected-archetype-input').value = archetypeName;
+
+            // Load parameters for this archetype (or default if not set)
+            const paramsToLoad = archetypeParameters[archetypeName] || defaultParameters;
+            if (paramsToLoad) {
+                applyParameters(paramsToLoad);
+            }
+
+            currentSelectedArchetype = archetypeName;
+            isAccordionEnabled = true;
+
+            // Clear reset flag when an archetype is selected
+            hasBeenReset = false;
+
+            updateAccordionState();
+        } catch (error) {
+            console.error('Error in selectArchetype:', error);
+            // Optionally show user-friendly error message
+            alert('An error occurred while selecting the archetype. Please try again.');
+        }
+    }
+
+    // Function to save parameters for current archetype
+    function saveArchetypeParameters() {
+        try {
+            if (!currentSelectedArchetype) {
+                console.warn('No archetype selected for saving parameters');
+                alert('Please select an archetype first.');
+                return;
+            }
+
+            const currentParams = getCurrentParameters();
+            if (!currentParams) {
+                console.error('Failed to get current parameters for saving');
+                alert('Error: Could not retrieve current parameters. Please try again.');
+                return;
+            }
+
+            archetypeParameters[currentSelectedArchetype] = currentParams;
+
+            // Show success feedback
+            const saveBtn = document.getElementById('save-archetype-btn');
+            if (saveBtn) {
+                const originalText = saveBtn.innerHTML;
+                saveBtn.innerHTML = '<i class="fas fa-check me-2"></i> Saved!';
+                saveBtn.classList.add('btn-success');
+                saveBtn.classList.remove('btn-info');
+
+                setTimeout(() => {
+                    saveBtn.innerHTML = originalText;
+                    saveBtn.classList.remove('btn-success');
+                    saveBtn.classList.add('btn-info');
+                }, 2000);
+            }
+
+            console.log(`Parameters saved for archetype: ${currentSelectedArchetype}`, currentParams);
+        } catch (error) {
+            console.error('Error saving archetype parameters:', error);
+            alert('An error occurred while saving parameters. Please try again.');
+        }
+    }
+
+    // Update accordion state based on whether the hazard is marked not material
+    // and whether an archetype has been selected
+    function updateAccordionState() {
+        try {
+            ['waterStress', 'flood', 'heat', 'tropicalCyclone', 'stormSurge', 'landslide'].forEach(prefix => {
+                try {
+                    const checkbox = document.getElementById(prefix + 'NotMaterial');
+                    const accordionButton = document.querySelector('#' + prefix + 'Header button');
+                    const collapseEl = document.getElementById(prefix + 'Collapse');
+                    const sliderInputs = document.querySelectorAll('#' + prefix + 'Slider input');
+
+                    if (!checkbox || !accordionButton || !collapseEl) {
+                        console.warn(`Missing elements for prefix: ${prefix}`);
+                        return;
+                    }
+
+                    const disabled = !isAccordionEnabled || checkbox.checked;
+                    accordionButton.disabled = disabled;
+                    sliderInputs.forEach(input => input.disabled = disabled);
+                    checkbox.disabled = !isAccordionEnabled;
+
+                    // Safely handle Bootstrap collapse
+                    if (typeof bootstrap !== 'undefined' && bootstrap.Collapse) {
+                        const collapse = bootstrap.Collapse.getOrCreateInstance(collapseEl, {toggle: false});
+                        if (disabled) {
+                            collapse.hide();
+                        } else {
+                            collapse.show();
+                        }
+                    } else {
+                        console.warn('Bootstrap Collapse not available');
+                    }
+                } catch (prefixError) {
+                    console.error(`Error updating accordion state for ${prefix}:`, prefixError);
+                }
+            });
+        } catch (error) {
+            console.error('Error in updateAccordionState:', error);
+        }
+    }
+
+    // Enable/disable hazard accordion when checkbox changes
+    function toggleHazard(prefix) {
+        try {
+            const checkbox = document.getElementById(prefix + 'NotMaterial');
+            if (!checkbox) {
+                console.warn(`Checkbox not found for prefix: ${prefix}`);
+                return;
+            }
+
+            if (checkbox.checked) {
+                // When marked as "not material", reset to default values if different
+                const keyPrefix = paramKeyMap[prefix] || prefix.toLowerCase();
+                const lowSlider = document.getElementById(prefix + 'Low');
+                const highSlider = document.getElementById(prefix + 'High');
+
+                if (defaultParameters && lowSlider && highSlider) {
+                    const currentLow = lowSlider.value;
+                    const currentHigh = highSlider.value;
+                    const defaultLow = defaultParameters[keyPrefix + '_low'];
+                    const defaultHigh = defaultParameters[keyPrefix + '_high'];
+
+                    if (currentLow != defaultLow || currentHigh != defaultHigh) {
+                        applyParameters(defaultParameters);
+                    }
+                }
+            } else {
+                // When unchecked (material), ensure sliders show correct values
+                // This ensures the form reflects the current archetype parameters if any
+                if (currentSelectedArchetype && archetypeParameters[currentSelectedArchetype]) {
+                    const archetypeParams = archetypeParameters[currentSelectedArchetype];
+                    const keyPrefix = paramKeyMap[prefix] || prefix.toLowerCase();
+                    const lowSlider = document.getElementById(prefix + 'Low');
+                    const highSlider = document.getElementById(prefix + 'High');
+
+                    if (lowSlider && archetypeParams[keyPrefix + '_low'] !== undefined) {
+                        lowSlider.value = archetypeParams[keyPrefix + '_low'];
+                    }
+                    if (highSlider && archetypeParams[keyPrefix + '_high'] !== undefined) {
+                        highSlider.value = archetypeParams[keyPrefix + '_high'];
+                    }
+                    updateAllDisplayValues();
+                }
+            }
+
+            updateAccordionState();
+        } catch (error) {
+            console.error(`Error in toggleHazard for ${prefix}:`, error);
+        }
+    }
+
+    // Function to reset all parameters to defaults
+    function resetToDefaults() {
+        if (confirm('Are you sure you want to reset all Water Stress, Flood, Tropical Cyclones, Heat, Storm Surge, and Rainfall-Induced Landslide parameters to their default values?')) {
+            try {
+                // Define default values
+                const defaultValues = {
+                    waterStress: { low: 10, high: 31, notMaterial: false },
+                    flood: { low: 0.5, high: 1.5, notMaterial: false },
+                    heat: { low: 10, high: 45, notMaterial: false },
+                    tropicalCyclone: { low: 119, high: 178, notMaterial: false },
+                    stormSurge: { low: 0.5, high: 1.5, notMaterial: false },
+                    landslide: { low: 1, high: 1.5, notMaterial: false }
+                };
+
+                // Reset each hazard systematically
+                Object.keys(defaultValues).forEach(prefix => {
+                    const values = defaultValues[prefix];
+
+                    // Reset slider values
+                    const lowSlider = document.getElementById(prefix + 'Low');
+                    const highSlider = document.getElementById(prefix + 'High');
+                    const checkbox = document.getElementById(prefix + 'NotMaterial');
+
+                    if (lowSlider) lowSlider.value = values.low;
+                    if (highSlider) highSlider.value = values.high;
+
+                    // Properly reset checkbox and trigger change event
+                    if (checkbox) {
+                        checkbox.checked = values.notMaterial;
+                        // Trigger change event to ensure UI updates
+                        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                });
+
+                // Update all display values
+                updateAllDisplayValues();
+
+                // Force update accordion state for all hazards
+                ['waterStress', 'flood', 'heat', 'tropicalCyclone', 'stormSurge', 'landslide'].forEach(prefix => {
+                    toggleHazard(prefix);
+                });
+
+                // Clear archetype-specific parameters completely
+                archetypeParameters = {};
+                currentSelectedArchetype = null;
+
+                // Reset default parameters to the actual default values we just set
+                defaultParameters = getCurrentParameters();
+
+                // Set flag to indicate reset has occurred
+                hasBeenReset = true;
+
+                // Reset UI
+                document.querySelectorAll('.archetype-item').forEach(item => {
+                    item.classList.remove('selected');
+                });
+
+                document.getElementById('selected-archetype-indicator').style.display = 'none';
+                document.getElementById('default-instructions').style.display = 'block';
+                document.getElementById('save-archetype-btn').style.display = 'none';
+                document.getElementById('selected-archetype-input').value = '';
+
+                isAccordionEnabled = false;
+                updateAccordionState();
+
+                console.log('Reset to defaults completed', defaultParameters);
+            } catch (error) {
+                console.error('Error resetting to defaults:', error);
+                alert('An error occurred while resetting to defaults. Please refresh the page and try again.');
+            }
+        }
+    }
+
+    // Add parameter validation function
+    function validateParameters() {
+        try {
+            const params = getCurrentParameters();
+
+            // Validate that low values are less than high values
+            const hazards = ['flood', 'water_stress', 'tropical_cyclone', 'heat', 'storm_surge', 'landslide'];
+            for (const hazard of hazards) {
+                const low = parseFloat(params[hazard + '_low']);
+                const high = parseFloat(params[hazard + '_high']);
+
+                if (!isNaN(low) && !isNaN(high) && low >= high) {
+                    alert(`Error: ${hazard.replace('_', ' ')} low threshold must be less than high threshold`);
+                    return false;
+                }
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Error validating parameters:', error);
+            return false;
+        }
+    }
+
+    // Initialize on page load - consolidated handler
+    document.addEventListener('DOMContentLoaded', function() {
+        try {
+            // Capture default parameters
+            defaultParameters = getCurrentParameters();
+            updateAllDisplayValues();
+
+            // Initially keep the accordion disabled until an archetype is selected
+            updateAccordionState();
+
+            // Setup hazard checkbox event listeners
+            ['waterStress', 'flood', 'heat', 'tropicalCyclone', 'stormSurge', 'landslide'].forEach(prefix => {
+                const el = document.getElementById(prefix + 'NotMaterial');
+                if (el) {
+                    el.addEventListener('change', () => toggleHazard(prefix));
+                    el.addEventListener('click', e => e.stopPropagation());
+                }
+            });
+
+            // Path-based step highlighting
+            const path = window.location.pathname;
+            let currentStep = 1;
+            if (path.includes('sensitivity-results')) {
+                currentStep = 5;
+            } else if (path.includes('sensitivity-parameters')) {
+                currentStep = 4;
+            } else if (path.includes('results')) {
+                currentStep = 3;
+            } else if (path.includes('select-hazards')) {
+                currentStep = 2;
+            }
+            highlightHeaders(currentStep);
+            highlightSteps(currentStep);
+        } catch (error) {
+            console.error('Error during initialization:', error);
+        }
+    });
+
+    // Handle form submission to collect all archetype parameters
+    document.getElementById('sensitivity-form').addEventListener('submit', function(e) {
+        try {
+            // Validate parameters before submission
+            if (!validateParameters()) {
+                e.preventDefault();
+                return false;
+            }
+
+            // Save current archetype parameters if one is selected
+            if (currentSelectedArchetype) {
+                const currentParams = getCurrentParameters();
+                if (currentParams) {
+                    archetypeParameters[currentSelectedArchetype] = currentParams;
+                } else {
+                    console.error('Failed to get current parameters');
+                    e.preventDefault();
+                    alert('Error: Could not retrieve current parameters. Please try again.');
+                    return false;
+                }
+            }
+
+            // If no archetype-specific parameters were set, use current form values as default
+            if (Object.keys(archetypeParameters).length === 0) {
+                let paramsToUse;
+
+                if (hasBeenReset && defaultParameters && Object.keys(defaultParameters).length > 0) {
+                    // After reset, always use the stored default parameters
+                    paramsToUse = defaultParameters;
+                    console.log('Using stored default parameters after reset:', paramsToUse);
+                } else if (defaultParameters && Object.keys(defaultParameters).length > 0) {
+                    // Use stored defaults if available
+                    paramsToUse = defaultParameters;
+                    console.log('Using stored default parameters:', paramsToUse);
+                } else {
+                    // Fallback to current form state
+                    paramsToUse = getCurrentParameters();
+                    console.log('Using current form parameters as default:', paramsToUse);
+                }
+
+                if (paramsToUse) {
+                    archetypeParameters['_default'] = paramsToUse;
+                    // Clear the reset flag after using the defaults
+                    hasBeenReset = false;
+                } else {
+                    console.error('Failed to get default parameters');
+                    e.preventDefault();
+                    alert('Error: Could not retrieve default parameters. Please try again.');
+                    return false;
+                }
+            }
+
+            // Create hidden inputs for all archetype parameters
+            const form = e.target;
+
+            // Remove any existing archetype parameter inputs
+            const existingInputs = form.querySelectorAll('input[name^="archetype_params"]');
+            existingInputs.forEach(input => input.remove());
+
+            // Add hidden inputs for each archetype's parameters
+            Object.keys(archetypeParameters).forEach(archetype => {
+                const params = archetypeParameters[archetype];
+                if (params && typeof params === 'object') {
+                    Object.keys(params).forEach(paramKey => {
+                        try {
+                            const input = document.createElement('input');
+                            input.type = 'hidden';
+                            input.name = `archetype_params[${archetype}][${paramKey}]`;
+                            input.value = params[paramKey];
+                            form.appendChild(input);
+                        } catch (inputError) {
+                            console.error(`Error creating input for ${archetype}.${paramKey}:`, inputError);
+                        }
+                    });
+                }
+            });
+
+            console.log('Submitting archetype parameters:', archetypeParameters);
+
+            // Allow form submission to proceed
+            return true;
+        } catch (error) {
+            console.error('Error during form submission:', error);
+            e.preventDefault();
+            alert('An error occurred while preparing the form submission. Please try again.');
+            return false;
+        }
+    });
+
+    function highlightHeaders(currentStep) {
+        const overlay = document.getElementById('overlay-header');
+        const override = document.getElementById('override-header');
+        const sensitivity = document.getElementById('sensitivity-header');
+        const impact = document.getElementById('impact-header');
+
+        [overlay, override, sensitivity, impact].forEach(el => el.classList.remove('active-step-header'));
+
+        if (currentStep >= 1) {
+            overlay.classList.add('active-step-header');
+        } if (currentStep >= 3) {
+            override.classList.add('active-step-header');
+        } if (currentStep >= 4) {
+            sensitivity.classList.add('active-step-header');
+        } if (currentStep >= 6) {
+            impact.classList.add('active-step-header');
+        }
+    }
+
+    function highlightSteps(currentStep) {
+        const steps = document.querySelectorAll('.step-item');
+        steps.forEach((step, index) => {
+            const circle = step.querySelector('.step-circle');
+            const label = step.querySelector('.step-label');
+            if (!circle || !label) return;
+            if (index + 1 === currentStep) {
+                circle.style.backgroundColor = '#F1D500';
+                circle.style.color = '#000';
+                label.style.color = '#000';
+            } else {
+                circle.style.backgroundColor = '#e9ecef';
+                circle.style.color = '#6c757d';
+                label.style.color = '#6c757d';
+            }
+        });
+    }
+
+
+</script>
+{% endblock %}

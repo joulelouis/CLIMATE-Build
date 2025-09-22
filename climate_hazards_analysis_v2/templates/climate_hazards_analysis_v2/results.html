@@ -1,0 +1,1664 @@
+{% extends "base.html" %}
+{% load static %}
+{% load float_filters %}
+{% load my_filters %}
+
+{% block title %}
+Climate Hazard Analysis Results
+{% endblock %}
+
+{% block content %}
+<!-- Add CSRF token for AJAX requests -->
+{% csrf_token %}
+
+<style>
+
+    /* Custom Table Styling */
+    .custom-table {
+        background-color: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        border: none;
+        width: 100%;
+        border-collapse: collapse;
+        border-spacing: 0 8px;
+    }
+
+    .custom-table th,
+    .custom-table td {
+        border-right: 1px solid #ccc;
+        padding: 8px;
+    }
+
+    .custom-table-header {
+        background-color: #F8F8F8;
+        color: #495057;
+        font-weight: 600;
+        text-align: center;
+        border: none;
+        padding: 15px 10px;
+        vertical-align: middle;
+        font-size: 14px;
+    }
+
+    .custom-table-row:nth-child(even) {
+        background-color: #f8f9fa;
+    }
+
+    .custom-table-row:hover {
+        background-color: #e9ecef;
+        transition: background-color 0.3s ease;
+    }
+
+    .custom-table td {
+        border: none;
+        padding: 12px 10px;
+        text-align: center;
+        vertical-align: middle;
+        font-size: 13px;
+    }
+
+    /* Custom Card Styling */
+    .custom-card {
+        border: none;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .custom-card .card-header {
+        background-color: #f8f9fa;
+        border-bottom: none;
+        border-radius: 15px 15px 0 0;
+        padding: 20px;
+        font-weight: 600;
+        color: #495057;
+    }
+
+    .no-border {
+        border: none !important;
+    }
+
+    /* Tab Styling */
+    .custom-tabs-nav {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+    }
+    
+    .custom-tabs-nav .nav-item {
+        flex: 0 0 auto;
+    }
+    
+    .custom-tab-link {
+        border: none;
+        color: #495057;
+        font-weight: 500;
+        padding: 12px 20px;
+        margin-right: 5px;
+        border-radius: 10px 10px 0 0;
+        background-color: transparent;
+        transition: all 0.3s ease;
+    }
+
+    .custom-tab-link.active {
+        background-color: #F1D500;
+        color: #000;
+        font-weight: 600;
+    }
+
+    .custom-tab-link:hover {
+        background-color: #ffeaa7;
+        color: #000;
+    }
+
+    /* Alert fade animation */
+    .alert-fade {
+        animation: fadeOut 5s forwards;
+    }
+
+    @keyframes fadeOut {
+        0% { opacity: 1; }
+        80% { opacity: 1; }
+        100% { opacity: 0; }
+    }
+
+    /* Column selector card styling */
+    .column-selector {
+        max-height: 500px;
+        overflow-y: auto;
+    }
+    
+    .column-selector .form-check {
+        margin-bottom: 0.5rem;
+    }
+    
+    .column-selector .fw-bold {
+        font-weight: bold !important;
+    }
+
+    .column-selector-card {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+
+    .column-selector-card h6 {
+        color: #495057;
+        font-weight: 600;
+        margin-bottom: 15px;
+    }
+
+    .form-check {
+        margin-bottom: 8px;
+    }
+
+    .form-check-input:checked {
+        background-color: #F1D500;
+        border-color: #F1D500;
+    }
+
+    .form-check-label {
+        font-size: 14px;
+        color: #495057;
+    }
+
+    /* Group header styling */
+    .group-header th {
+        font-weight: bold;
+        text-align: center;
+        border: 1px solid #ddd;
+        padding: 8px;
+        color: #333;
+    }
+
+    /* Sub-header colors for hazard scenarios */
+    .sub-group-header th {
+        background-color: #fafafa;
+        font-weight: bold;
+        text-align: center;
+        border: 1px solid #ddd;
+        padding: 6px;
+    }
+
+    .sub-group-header th.baseline-header {
+        background-color: #d4edda;
+    }
+
+    .sub-group-header th.moderate-header {
+        background-color: #ffe5b4;
+    }
+
+    .sub-group-header th.worstcase-header {
+        background-color: #f8d7da;
+    }
+
+    /* Improved table layout for proportionate columns */
+    .dataTables_wrapper {
+        overflow-x: auto;
+        width: 100%;
+    }
+
+    /* Allow table to take full width */
+    .dataTables_scrollHeadInner,
+    .dataTables_scrollHeadInner table,
+    .dataTables_scrollBody,
+    .dataTables_scrollBody table {
+        width: 100% !important;
+    }
+
+    /* Better header wrapping */
+    .custom-table thead th {
+        white-space: normal;
+        word-wrap: break-word;
+        vertical-align: top;
+        padding: 8px 4px;
+    }
+
+    /* Better cell styling for uniform look */
+    .custom-table td {
+        text-align: center;
+        vertical-align: middle;
+        padding: 8px 4px;
+        word-break: break-word;
+    }
+
+    /* Keep header text centered as well */
+    .custom-table th {
+        text-align: center;
+        vertical-align: middle;
+    }
+
+    /* Class that DataTables can use for header wrapping */
+    .dt-head-wrap {
+        white-space: normal !important;
+    }
+
+    /* Make sure the fixed first column looks good */
+    .DTFC_LeftBodyLiner {
+        overflow-x: hidden !important;
+    }
+
+    /* Ensure vertical scroll shows when needed */
+    .dataTables_scrollBody {
+        max-height: 600px;
+    }
+
+    /* Center content in DataTables fixed columns too */
+    .DTFC_LeftWrapper td, 
+    .DTFC_LeftWrapper th {
+        text-align: center;
+        vertical-align: middle;
+    }
+
+    /* EDITABLE TABLE STYLES */
+    .editable-cell {
+        cursor: pointer;
+        position: relative;
+    }
+
+    .editable-cell:hover {
+        background-color: #f8f9ff !important;
+        border: 1px dashed #007bff;
+    }
+
+    .editable-cell:hover::after {
+        content: "✏️";
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        font-size: 10px;
+    }
+
+    .cell-changed {
+        background-color: #fff3cd !important;
+        border-left: 3px solid #ffc107;
+    }
+
+    .editing {
+        padding: 2px !important;
+    }
+
+    .edit-input {
+        font-size: 12px !important;
+        padding: 2px 4px !important;
+        height: auto !important;
+        min-height: 25px !important;
+    }
+
+    #changes-indicator {
+        clear: both;
+        display: block;
+    }
+
+    /* Simple Override Modal */
+    .override-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1050;
+    }
+
+    .override-modal:target {
+        display: flex;
+    }
+
+    .override-modal-content {
+        background: #fff;
+        padding: 20px;
+        border-radius: 8px;
+        width: 90%;
+        max-width: 1200px;
+        max-height: 90vh;
+        overflow-y: auto;
+        text-align: left;
+    }
+
+    .override-modal-close {
+        margin-top: 10px;
+    }
+
+    .override-input-fields .form-label {
+        white-space: normal;
+    }
+
+    #facility-inputs {
+        max-height: 70vh;
+        overflow-y: auto;
+    }
+</style>
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-6 d-flex flex-column">
+            <!-- Rounded Icon Container with Margin -->
+            <div class="icon-container">
+                <img src="{% static 'images/sgv-logo.png' %}" alt="SGV Logo">
+            </div>
+            <!-- Heading below the icon with Margin -->
+            <h1 class="page-heading">Exposure Override</h1>
+        </div>
+    </div>
+
+    <!-- Step by Step Procedure UI -->
+<div class="row mt-4 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body p-4">
+                {% include "climate_hazards_analysis_v2/steps_table.html" %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Alert Messages -->
+{% if error %}
+<div class="alert alert-danger alert-dismissible fade show" role="alert">
+    {{ error }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+{% if success_message %}
+<div class="alert alert-success alert-dismissible fade show alert-fade" role="alert">
+    {{ success_message }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<!-- Placeholder for JavaScript errors -->
+<div id="js-error" class="alert alert-danger alert-dismissible fade show d-none" role="alert">
+    <span id="js-error-text"></span>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+
+<!-- Results Content -->
+<div class="container-fluid mt-4">
+    <div class="row">
+        <!-- Left Column: Column Selector -->
+        <div class="col-md-3">
+            {% include "climate_hazards_analysis_v2/column_selector.html" %}
+        </div>
+        
+        <!-- Right Column: Results Table -->
+        <div class="col-md-9">
+            <div class="card custom-card">
+                <div class="card-header no-border">
+                    <strong>Hazard Analysis Results</strong>
+                </div>
+                <div class="card-body">
+                    <!-- Tabs Navigation -->
+                    <ul class="nav nav-tabs mt-2 custom-tabs-nav" id="hazardTabs" role="tablist">
+                        <li class="nav-item">
+                            <a class="nav-link custom-tab-link active" id="table-tab" data-bs-toggle="tab" href="#table-content" role="tab" aria-controls="table-content" aria-selected="true">
+                                Hazard Exposure Table
+                            </a>
+                        </li>
+
+                        {% for hazard in selected_hazards %}
+                            {% if hazard == "Heat" %}
+                            <li class="nav-item">
+                                <a class="nav-link custom-tab-link" id="heat-exposure-map-tab" data-bs-toggle="tab" href="#heat-map" role="tab" aria-controls="map-content" aria-selected="false">
+                                    Heat Exposure Map
+                                </a>
+                            </li>
+                            {% elif hazard == "Sea Level Rise" %}
+                            <li class="nav-item">
+                                <a class="nav-link custom-tab-link" id="sea-level-rise-map-tab" data-bs-toggle="tab" href="#sea-map" role="tab" aria-controls="map-content" aria-selected="false">
+                                    Sea Level Rise Exposure Map
+                                </a>
+                            </li>
+                            {% elif hazard == "Flood" %}
+                            <li class="nav-item">
+                                <a class="nav-link custom-tab-link" id="flood-exposure-map-tab" data-bs-toggle="tab" href="#flood-map" role="tab" aria-controls="map-content" aria-selected="false">
+                                    Flood Exposure Map
+                                </a>
+                            </li>
+                            {% elif hazard == "Water Stress" %}
+                            <li class="nav-item">
+                                <a class="nav-link custom-tab-link" id="water-stress-map-tab" data-bs-toggle="tab" href="#water-map" role="tab" aria-controls="map-content" aria-selected="false">
+                                    Water Stress Exposure Map
+                                </a>
+                            </li>
+                            {% elif hazard == "Tropical Cyclones" %}
+                            <li class="nav-item">
+                                <a class="nav-link custom-tab-link" id="tropical-cyclone-map-tab" data-bs-toggle="tab" href="#cyclone-map" role="tab" aria-controls="map-content" aria-selected="false">
+                                    Tropical Cyclone Exposure Map
+                                </a>
+                            </li>
+                            {% endif %}
+                        {% endfor %}
+                    </ul>
+              
+                    <!-- Tab Content -->
+                    <div class="tab-content mt-3" id="hazardTabsContent">
+                        <!-- Facility Locations Table Tab -->
+                        <div class="tab-pane fade show active" id="table-content" role="tabpanel" aria-labelledby="table-tab">
+                            <!-- Styled Table -->
+                            <div class="table-responsive">
+                                <table id="data-table" class="table custom-table">
+                                    <thead>
+                                        <!-- Grouping header row -->
+                                        <tr class="group-header">
+                                            {% for group, count in groups.items %}
+                                                {% if count > 0 %}
+                                                    <th colspan="{{ count }}" class="text-center">{{ group }}</th>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </tr>
+                                        <tr class="sub-group-header">
+                                            {% for group, count in groups.items %}
+                                                {% if group == 'Heat' %}
+                                                    {% if heat_baseline_count %}
+                                                       <th colspan="{{ heat_baseline_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if heat_basecase_count %}
+                                                        <th colspan="{{ heat_basecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                    {% endif %}
+                                                    {% if heat_worstcase_count %}
+                                                        <th colspan="{{ heat_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+                                                {% elif group == 'Tropical Cyclones' %}
+                                                    {% if tc_baseline_count %}
+                                                        <th colspan="{{ tc_baseline_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if tc_basecase_count %}
+                                                        <th colspan="{{ tc_basecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                    {% endif %}
+                                                    {% if tc_worstcase_count %}
+                                                        <th colspan="{{ tc_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+
+                                                {% elif group == 'Water Stress' %}
+                                                    {% if ws_baseline_count %}
+                                                        <th colspan="{{ ws_baseline_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if ws_moderatecase_count %}
+                                                        <th colspan="{{ ws_moderatecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                    {% endif %}
+                                                    {% if ws_worstcase_count %}
+                                                        <th colspan="{{ ws_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+
+                                                {% elif group == 'Storm Surge' %}
+                                                    {% if ss_baseline_count %}
+                                                        <th colspan="{{ ss_baseline_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if ss_worstcase_count %}
+                                                        <th colspan="{{ ss_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+
+                                                 {% elif group == 'Sea Level Rise' %}
+                                                      {% if slr_moderatecase_count %}
+                                                          <th colspan="{{ slr_moderatecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                      {% endif %}
+                                                      {% if slr_worstcase_count %}
+                                                          <th colspan="{{ slr_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                      {% endif %}
+
+                                                {% elif group == 'Rainfall-Induced Landslide' %}
+                                                    {% if ls_baseline_count %}
+                                                        <th colspan="{{ ls_baseline_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if ls_moderatecase_count %}
+                                                        <th colspan="{{ ls_moderatecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                    {% endif %}
+                                                    {% if ls_worstcase_count %}
+                                                        <th colspan="{{ ls_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+                                                
+                                                {% else %}
+                                                    <th colspan="{{ count }}"></th>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </tr> 
+                                        <tr class="custom-table-header">
+                                            {% for column in columns %}
+                                                <th data-column-name="{{ column }}">{{ column }}</th>
+                                            {% endfor %}
+                                        </tr>
+                                    </thead>
+                                    
+                                    <tbody>
+    {% for row in data %}
+        <tr class="custom-table-row">
+            {% for key in columns %}
+                {% with value=row|get_item:key %}
+                <td>
+                    {# Water Stress Exposure styling #}
+                    {% if "Water Stress Exposure" in key and value != "N/A" %}
+                        {% with val=value|to_float %}
+                            {% if val < 10 %}
+                                <span style="color: green; font-weight: bold;">{{ value }}</span>
+                            {% elif val >= 10 and val <= 30 %}
+                                <span style="color: orange; font-weight: bold;">{{ value }}</span>
+                            {% elif val > 30 %}
+                                <span style="color: red; font-weight: bold;">{{ value }}</span>
+                            {% else %}
+                                {{ value }}
+                            {% endif %}
+                        {% endwith %}
+                    
+                    {# Flood Depth styling #}
+                    {% elif key == "Flood Depth (meters)" and value != "N/A" %}
+                        {% with numeric=value|to_float %}
+                            {% if value == "Little to none" or numeric < 0.1 %}
+                                <span style="color: black; font-weight: bold;">Little to none</span>
+                            {% elif value == "0.1 to 0.5" or numeric >= 0.1 and numeric < 0.5 %}
+                                <span style="color: green; font-weight: bold;">0.1 to 0.5</span>
+                            {% elif value == "0.5 to 1.5" or numeric >= 0.5 and numeric < 1.5 %}
+                                <span style="color: orange; font-weight: bold;">0.5 to 1.5</span>
+                            {% elif value == ">1.5" or value == "> 1.5" or value == "Greater than 1.5" or value == ">= 1.5" or value == "≥ 1.5" or value == "Greater than or equal to 1.5" or numeric >= 1.5 %}
+                                <span style="color: red; font-weight: bold;">&gt; 1.5</span>
+                            {% else %}
+                                {{ value }}
+                            {% endif %}
+                        {% endwith %}
+                    
+                    {# Heat indicators styling #}
+                    {% elif "Days over" in key and "Celsius" in key and value != "N/A" %}
+                        {% with num=value|to_float %}
+                            {% if num >= 45 %}
+                                <span style="color: red; font-weight: bold;">{{ value }}</span>
+                            {% elif num >= 10 %}
+                                <span style="color: orange; font-weight: bold;">{{ value }}</span>
+                            {% else %}
+                                <span style="color: green; font-weight: bold;">{{ value }}</span>
+                            {% endif %}
+                        {% endwith %}
+                    
+                    {# Sea Level Rise styling #}
+                    {% elif "Sea Level Rise" in key and value != "N/A" %}
+                        {% with val=value|to_float %}
+                            {% if val > 0.5 %}
+                                <span style="color: red; font-weight: bold;">{{ value }}</span>
+                            {% elif val > 0.3 %}
+                                <span style="color: orange; font-weight: bold;">{{ value }}</span>
+                            {% else %}
+                                <span style="color: green; font-weight: bold;">{{ value }}</span>
+                            {% endif %}
+                        {% endwith %}
+                    
+                    {# Tropical Cyclone Wind Speed styling #}
+                    {% elif "Windspeed" in key and "km/h" in key %}
+                        {% if value == "Data not available" %}
+                            <span style="color: black; font-weight: bold;">{{ value }}</span>
+                        {% elif value != "N/A" %}
+                            {% with val=value|to_float %}
+                                {% if val >= 178 %}
+                                    <span style="color: red; font-weight: bold;">{{ value }}</span>
+                                {% elif val >= 119 %}
+                                    <span style="color: orange; font-weight: bold;">{{ value }}</span>
+                                {% else %}
+                                    <span style="color: green; font-weight: bold;">{{ value }}</span>
+                                {% endif %}
+                            {% endwith %}
+                        {% else %}
+                            {{ value }}
+                        {% endif %}
+                    
+                    {# Storm Surge styling #}
+                    {% elif "Storm Surge Flood Depth (meters)" in key and value != "N/A" %}
+                        {% with val=value|to_float %}
+                            {% if val >= 1.5 %}
+                                <span style="color: red; font-weight: bold;">&gt; 1.5</span>
+                            {% elif val >= 0.5 %}
+                                <span style="color: orange; font-weight: bold;">0.5 to 1.5</span>
+                            {% elif val >= 0.1 %}
+                                <span style="color: green; font-weight: bold;">0.1 to 0.5</span>
+                            {% else %}
+                                <span style="color: black; font-weight: bold;">Little to none</span>
+                            {% endif %}
+                        {% endwith %}
+                    
+                    {# Rainfall-Induced Landslide styling #}
+                    {% elif "Landslide (factor of safety" in key and value != "N/A" %}
+                        {% with val=value|to_float %}
+                            {% if value|lower == "generally stable" or val > 2.5 %}
+                                <span style="color: black; font-weight: bold;">Generally Stable</span>
+                            {% elif val > 1.5 %}
+                                <span style="color: green; font-weight: bold;">&gt; 1.5</span>
+                            {% elif val >= 1 %}
+                                <span style="color: orange; font-weight: bold;">1 to 1.5</span>
+                            {% else %}
+                                <span style="color: red; font-weight: bold;">&lt; 1</span>
+                            {% endif %}
+                        {% endwith %}
+                    
+                    {# Default cell display #}
+                    {% else %}
+                        {{ value }}
+                    {% endif %}
+                </td>
+                {% endwith %}
+            {% endfor %}
+        </tr>
+    {% endfor %}
+</tbody>
+                                </table>
+                            </div>
+
+                            <!-- After table controls -->
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <!-- Legend on the left -->
+                            <ul class="legend d-flex" style="list-style: none; padding: 0; margin: 0;">
+                                <li class="low" style="display: flex; align-items: center; margin-right: 15px;">
+                                    <span style="display: inline-block; width: 15px; height: 15px; background-color: green; margin-right: 8px;"></span>
+                                    Low Exposure
+                                </li>
+                                <li class="medium" style="display: flex; align-items: center; margin-right: 15px;">
+                                    <span style="display: inline-block; width: 15px; height: 15px; background-color: orange; margin-right: 8px;"></span>
+                                    Medium Exposure
+                                </li>
+                                <li class="high" style="display: flex; align-items: center;">
+                                    <span style="display: inline-block; width: 15px; height: 15px; background-color: red; margin-right: 8px;"></span>
+                                    High Exposure
+                                </li>
+                            </ul>
+                           
+                        </div>
+                        </div>
+
+                        <!-- Override Cell Modal -->
+                        <div class="modal fade" id="overrideModal" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog">
+                                <form id="override-form" class="modal-content" enctype="multipart/form-data">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">Override Value</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+
+                                    <div class="modal-body">
+                                        <div class="mb-3">
+                                            <label class="form-label"><strong>Specific Asset</strong></label>
+                                            <input type="text" id="override-facility" class="form-control" readonly>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label"><strong>Climate Hazard Field</strong></label>
+                                            <input type="text" id="override-field" class="form-control" readonly>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label"><strong>Override Value</strong></label>
+                                            <input type="text" id="override-value" class="form-control">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label"><strong>Reason/Explanation</strong></label>
+                                            <textarea id="override-reason" class="form-control"></textarea>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label"><strong>Upload Supporting Documents</strong></label>
+                                            <input type="file" id="override-file" class="form-control" accept="image/png, image/jpeg">
+                                        </div>
+
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                            <button type="submit" class="btn btn-primary">Submit</button>
+                                        </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- Individual Hazard Map Tabs -->
+                        {% for hazard in selected_hazards %}
+                            {% if hazard == "Heat" %}
+                            <div class="tab-pane fade text-center" id="heat-map" role="tabpanel" aria-labelledby="heat-exposure-map-tab">
+                                <h2>Heat Exposure Map</h2>
+                                <div id="heat-map-content"></div>
+                            </div>
+                            {% elif hazard == "Sea Level Rise" %}
+                            <div class="tab-pane fade text-center" id="sea-map" role="tabpanel" aria-labelledby="sea-level-rise-map-tab">
+                                <h2>Sea Level Rise Exposure Map</h2>
+                                <div id="sea-map-content"></div>
+                            </div>
+                            {% elif hazard == "Flood" %}
+                            <div class="tab-pane fade text-center" id="flood-map" role="tabpanel" aria-labelledby="flood-exposure-map-tab">
+                                <h2>Flood Exposure Map</h2>
+                                <div id="flood-map-content"></div>
+                            </div>
+                            {% elif hazard == "Water Stress" %}
+                            <div class="tab-pane fade text-center" id="water-map" role="tabpanel" aria-labelledby="water-stress-map-tab">
+                                <h2>Water Stress Exposure Map</h2>
+                                <div id="water-map-content"></div>
+                            </div>
+                            {% elif hazard == "Tropical Cyclones" %}
+                            <div class="tab-pane fade text-center" id="cyclone-map" role="tabpanel" aria-labelledby="tropical-cyclone-map-tab">
+                                <h2>Tropical Cyclone Exposure Map</h2>
+                                <div id="cyclone-map-content"></div>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Navigation buttons -->
+<div class="row mt-4 mb-5">
+    <div class="col-12 d-flex justify-content-between">
+        <div class="d-flex gap-2">
+            <a href="{% url 'climate_hazards_analysis_v2:select_hazards' %}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left me-2"></i> Back to Select Hazards and Scenarios
+            </a>
+            <a href="{% url 'climate_hazards_analysis_v2:view_map' %}" class="btn btn-primary">
+                <i class="fas fa-arrow-left me-2"></i> Return to Upload Asset Data
+            </a>
+        </div>
+        <div>
+            <a href="#" class="btn btn-warning btn-lg" onclick="proceedToSensitivityParameters()">
+                <strong>Proceed to Adjust Sensitivity Thresholds</strong>
+                <i class="fas fa-arrow-right ms-2"></i>
+            </a>
+        </div>
+    </div>
+</div>
+</div>
+
+<!-- Include DataTables CSS & JS -->
+<link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
+<link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.3.6/css/buttons.dataTables.min.css">
+<link rel="stylesheet" href="https://cdn.datatables.net/fixedcolumns/4.2.2/css/fixedColumns.dataTables.min.css">
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>window.jQuery || document.write('<script src="{% static "js/jquery-3.6.0.min.js" %}"><\\/script>')</script>
+<script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+<script>if (!window.jQuery || !$.fn.DataTable) document.write('<script src="{% static "js/jquery.dataTables.min.js" %}"><\\/script>')</script>
+<script src="https://cdn.datatables.net/buttons/2.3.6/js/dataTables.buttons.min.js"></script>
+<script>if (!($.fn && $.fn.dataTable && $.fn.dataTable.Buttons)) document.write('<script src="{% static "js/dataTables.buttons.min.js" %}"><\\/script>')</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script>window.JSZip || document.write('<script src="{% static "js/jszip.min.js" %}"><\\/script>')</script>
+<script src="https://cdn.datatables.net/buttons/2.3.6/js/buttons.html5.min.js"></script>
+<script>if (!($.fn && $.fn.dataTable && $.fn.dataTable.Buttons)) document.write('<script src="{% static "js/buttons.html5.min.js" %}"><\\/script>')</script>
+<script src="https://cdn.datatables.net/buttons/2.3.6/js/buttons.print.min.js"></script>
+<script>if (!($.fn && $.fn.dataTable && $.fn.dataTable.Buttons)) document.write('<script src="{% static "js/buttons.print.min.js" %}"><\\/script>')</script>
+<script src="https://cdn.datatables.net/fixedcolumns/4.2.2/js/dataTables.fixedColumns.min.js"></script>
+<script>if (!($.fn && $.fn.dataTable && $.fn.dataTable.FixedColumns)) document.write('<script src="{% static "js/dataTables.fixedColumns.min.js" %}"><\\/script>')</script>
+
+<script>
+
+let dataTable;
+let cellChanges = {};
+let currentEditCell = null;
+let columnIndexMap = {};
+
+function showError(message) {
+    const container = document.getElementById('js-error');
+    const textEl = document.getElementById('js-error-text');
+    if (container && textEl) {
+        textEl.textContent = message;
+        container.classList.remove('d-none');
+    } else {
+        alert(message);
+    }
+}
+
+if (typeof window.jQuery === 'undefined') {
+    console.error("jQuery failed to load for column selector");
+    showError('jQuery failed to load. Page functionality will be limited.');
+} else {
+    $(document).ready(function() {
+        try {
+            if (!$.fn.DataTable) {
+                throw new Error('DataTables library not loaded');
+            }
+            console.log('Initializing Adjust Magnitude with Local Conditions...');
+
+        dataTable = $('#data-table').DataTable({
+            scrollX: true,
+            scrollCollapse: true,
+            fixedHeader: true,
+            autoWidth: true,
+            dom: 'Bfrtip',
+            buttons: [
+                {
+                    extend: 'excelHtml5',
+                    text: '<i class="fas fa-file-excel"></i> Save to Excel',
+                    className: 'btn btn-outline-secondary',
+                    exportOptions: {
+                        columns: ':visible'
+                    }
+                },
+                {
+                    text: '<i class="fas fa-undo"></i> Reset Changes',
+                    className: 'btn btn-warning',
+                    action: function(e, dt, node, config) {
+                        resetAllChanges();
+                    }
+                }
+            ],
+            fixedColumns: {
+                leftColumns: 1
+            },
+            columnDefs: [
+                { targets: [1, 2], visible: false },
+                { width: '18%', targets: 0 },
+                { width: '10%', targets: '_all' },
+                { className: "dt-head-center dt-body-center", targets: "_all" },
+                {
+                    targets: '_all',
+                    createdCell: function(td, cellData, rowData, row, col) {
+                        console.log("this line has been parsed")
+                        setTimeout(function() {
+                            
+                            const dt = $('#data-table').DataTable();
+                            const headerEl = dt.column(col).header();
+
+                            if (!headerEl) {
+                                return;
+                            }
+
+                            const columnName = $(headerEl).data('column-name') || headerEl.textContent.trim();
+                            const nonEditableColumns = [
+                                'Facility',
+                                'Lat',
+                                'Long',
+                                '2030 Sea Level Rise (meters) - Moderate Case',
+                                '2040 Sea Level Rise (meters) - Moderate Case',
+                                '2050 Sea Level Rise (meters) - Moderate Case',
+                                '2030 Sea Level Rise (meters) - Worst Case',
+                                '2040 Sea Level Rise (meters) - Worst Case',
+                                '2050 Sea Level Rise (meters) - Worst Case'
+                            ];
+                            if (!nonEditableColumns.includes(columnName)) {
+                                $(td).addClass('editable-cell');
+                                $(td).attr('data-original-value', $(td).text().trim());
+                                $(td).attr('data-column', columnName);
+                                $(td).attr('data-row', row);
+                                $(td).attr('title', 'Click to edit');
+                            }
+                        }, 10);
+                    }
+                }
+            ],
+            initComplete: function() {
+                console.log('DataTable initialization complete');
+                setTimeout(() => {
+                    buildColumnIndexMap();
+                    setupColumnSelector();
+                    updateColumnVisibility();
+                    setTimeout(() => {
+                        attachEditableHandlers();
+                        console.log('All functionality initialized');
+                    }, 200);
+                }, 100);
+            },
+            drawCallback: function() {
+                setTimeout(() => {
+                    attachEditableHandlers();
+                }, 100);
+            }
+        });
+
+        console.log('DataTable initialized successfully');
+
+    } catch (error) {
+        console.error('Error initializing DataTable:', error);
+        showError('Error initializing DataTable: ' + error.message);
+    }
+
+    let resizeTimeout;
+    $(window).on('resize', function() {
+        if (dataTable) {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(function() {
+                dataTable.columns.adjust();
+            }, 250);
+        }
+    });
+    });
+}
+
+window.addEventListener('error', function (event) {
+    showError('JavaScript error: ' + event.message);
+});
+
+// FIXED: Improved editable table functionality
+function attachEditableHandlers() {
+    // Remove any existing handlers to prevent duplicates
+    $('.editable-cell').off('click.editable');
+    
+    // Add click handlers to editable cells
+    $('.editable-cell').on('click.editable', function() {
+        openOverrideModal($(this));
+    });
+    
+    const editableCount = $('.editable-cell').length;
+    console.log(`Attached handlers to ${editableCount} editable cells`);
+}
+
+let overrideModalInstance;
+
+function openOverrideModal($cell) {
+    currentEditCell = $cell;
+    const facilityName = $cell.closest('tr').find('td').first().text().trim();
+    $('#override-facility').val(facilityName);
+    $('#override-field').val($cell.attr('data-column'));
+    const currentValue = $cell.attr('data-original-value') || $cell.text().trim();
+    $('#override-value').val(currentValue);
+    $('#override-reason').val($cell.attr('data-reason') || '');
+    $('#override-file').val('');
+    if (!overrideModalInstance) {
+        overrideModalInstance = new bootstrap.Modal(document.getElementById('overrideModal'));
+    }
+    overrideModalInstance.show();
+}
+
+$(document).on('submit', '#override-form', function(e) {
+    e.preventDefault();
+    if (!currentEditCell) return;
+    const newValue = $('#override-value').val().trim();
+    const reason = $('#override-reason').val().trim();
+    const columnName = currentEditCell.attr('data-column');
+    const rowIndex = parseInt(currentEditCell.attr('data-row'), 10);
+    const $tempInput = $('<input>').val(newValue);
+    saveCell(currentEditCell, $tempInput, rowIndex, columnName);
+    currentEditCell.attr('data-reason', reason)
+        .attr('title', reason)
+        .attr('data-bs-toggle', 'tooltip');
+    new bootstrap.Tooltip(currentEditCell[0]);
+    overrideModalInstance.hide();
+});
+
+function editCell($cell) {
+    if ($cell.hasClass('editing')) {
+        return;
+    }
+    
+    const currentValue = $cell.attr('data-original-value') || $cell.text().trim();
+    const columnName = $cell.attr('data-column');
+    const rowIndex = parseInt($cell.attr('data-row'), 10);
+    
+    const inputType = getInputType(columnName, currentValue);
+    let $input;
+    if (inputType === 'select') {
+        $input = $('<select class="form-control edit-input"></select>');
+        const options = [
+            'Little to none',
+            '0.1 to 0.5',
+            '0.5 to 1.5',
+            'Greater than or equal to 1.5'
+        ];
+        options.forEach(opt => {
+            const option = $('<option></option>').val(opt).text(opt);
+            $input.append(option);
+        });
+        let category;
+        if (columnName.includes('Storm Surge Flood Depth (meters)')) {
+            category = categorizeStormSurge(currentValue).text;
+        } else {
+            category = categorizeFloodDepth(currentValue).text;
+        }
+        let selected = category;
+        if (category === '> 1.5' || category === '≥ 1.5' || category === '>1.5') {
+            selected = 'Greater than or equal to 1.5';
+        }
+        $input.val(selected);
+    } else {
+        let valueForInput = currentValue;
+        if (inputType === 'number' && isNaN(parseFloat(currentValue))) {
+            valueForInput = '';
+        }
+        $input = $(`<input type="${inputType}" step="any" class="form-control edit-input" value="${valueForInput}">`);
+        
+    }
+    
+    $input.css({
+        'width': '100%',
+        'border': '2px solid #007bff',
+        'background-color': '#f8f9ff'
+    });
+    
+    $cell.addClass('editing').html($input);
+    $input.focus().select();
+    
+    $input.on('blur keydown', function(e) {
+        if (e.type === 'blur' || e.key === 'Enter') {
+            e.preventDefault();
+            saveCell($cell, $input, rowIndex, columnName);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            cancelEdit($cell, currentValue);
+        }
+    });
+}
+
+function getInputType(columnName, currentValue) {
+    if (columnName.startsWith('Water Stress Exposure')) {
+        return 'number';
+    }
+    const numberColumns = [
+        'Flood Depth (meters)', 'Days over 30° Celsius', 'Days over 33° Celsius',
+        'Days over 35° Celsius', 'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
+        '2030 Sea Level Rise (meters) - Moderate Case', '2040 Sea Level Rise (meters) - Moderate Case', '2050 Sea Level Rise (meters) - Moderate Case', '2030 Sea Level Rise (meters) - Worst Case', '2040 Sea Level Rise (meters) - Worst Case', '2050 Sea Level Rise (meters) - Worst Case',
+        'Extreme Windspeed 10 year Return Period (km/h)',
+        'Extreme Windspeed 20 year Return Period (km/h)',
+        'Extreme Windspeed 50 year Return Period (km/h)',
+        'Extreme Windspeed 100 year Return Period (km/h)',
+        'Storm Surge Flood Depth (meters)',
+        'Storm Surge Flood Depth (meters) - Worst Case',
+        'Rainfall-Induced Landslide (factor of safety)',
+        'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
+        'Rainfall-Induced Landslide (factor of safety) - Worst Case'
+    ];
+
+    
+    if (numberColumns.includes(columnName)) {
+        return 'number';
+    }
+
+    const numericValue = parseFloat(currentValue);
+    if (!isNaN(numericValue)) {
+        return 'number';
+    }
+    return 'text';
+}
+
+function categorizeFloodDepth(value) {
+    const match = String(value).match(/-?\d+(?:\.\d+)?/);
+    const num = match ? parseFloat(match[0]) : NaN;
+
+    if (!isNaN(num)) {
+        if (num >= 1.5) {
+            return { text: '≥ 1.5', color: 'red' };
+        }
+        if (num >= 0.5) {
+            return { text: '0.5 to 1.5', color: 'orange' };
+        }
+        if (num >= 0.1) {
+            return { text: '0.1 to 0.5', color: 'green' };
+        }
+        return { text: 'Little to none', color: 'black' };
+    }
+
+    const normalized = String(value).toLowerCase();
+    if (normalized.includes('little')) {
+        return { text: 'Little to none', color: 'black' };
+    }
+    if (normalized.includes('0.1') && normalized.includes('0.5')) {
+        return { text: '0.1 to 0.5', color: 'green' };
+    }
+    if (normalized.includes('0.5') && normalized.includes('1.5')) {
+        return { text: '0.5 to 1.5', color: 'orange' };
+    }
+    if (normalized.includes('1.5')) {
+        return { text: '≥ 1.5', color: 'red' };
+    }
+    return { text: value, color: 'black' };
+}
+
+function categorizeStormSurge(value) {
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+        if (num >= 1.5) {
+            return { text: '≥ 1.5', color: 'red' };
+        }
+        if (num >= 0.5) {
+            return { text: '0.5 to 1.5', color: 'orange' };
+        }
+        if (num >= 0.1) {
+            return { text: '0.1 to 0.5', color: 'green' };
+        }
+        return { text: 'Little to none', color: 'black' };
+    }
+
+    const normalized = String(value).toLowerCase();
+    if (normalized.includes('little')) {
+        return { text: 'Little to none', color: 'black' };
+    }
+    if (normalized.includes('0.1') && normalized.includes('0.5')) {
+        return { text: '0.1 to 0.5', color: 'green' };
+    }
+    if (normalized.includes('0.5') && normalized.includes('1.5')) {
+        return { text: '0.5 to 1.5', color: 'orange' };
+    }
+    if (normalized.includes('1.5')) {
+        return { text: '≥ 1.5', color: 'red' };
+    }
+    return { text: value, color: 'black' };
+}
+
+function categorizeWaterStress(value) {
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+        if (num > 30) {
+            return { text: value, color: 'red' };
+        }
+        if (num >= 10) {
+            return { text: value, color: 'orange' };
+        }
+        if (num < 10) {
+            return { text: value, color: 'green' };
+        }
+    }
+    return { text: value, color: 'black' };
+}
+
+function categorizeExtremeWindspeed(value) {
+    if (value === 'Data not available') {
+        return { text: value, color: 'black' };
+    }
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+        if (num >= 178) {
+            return { text: value, color: 'red' };
+        }
+        if (num >= 119) {
+            return { text: value, color: 'orange' };
+        }
+        if (num < 119) {
+            return { text: value, color: 'green' };
+        }
+    }
+    return { text: value, color: 'black' };
+}
+
+function categorizeHeatDays(value) {
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+        if (num >= 45) {
+            return { text: value, color: 'red' };
+        }
+        if (num >= 10) {
+            return { text: value, color: 'orange' };
+        }
+        if (num < 10) {
+            return { text: value, color: 'green' };
+        }
+    }
+    return { text: value, color: 'black' };
+}
+
+function categorizeLandslideFOS(value) {
+    const match = String(value).match(/-?\d+(?:\.\d+)?/);
+    const num = match ? parseFloat(match[0]) : NaN;
+
+    if (!isNaN(num)) {
+        if (num > 2.5) {
+            return { text: 'Generally Stable', color: 'black' };
+        } else if (num > 1.5) {
+            return { text: '> 1.5', color: 'green' };
+        } else if (num >= 1) {
+            return { text: '1 to 1.5', color: 'orange' };
+        }
+        return { text: '< 1', color: 'red' };
+    }
+
+    const normalized = String(value).toLowerCase().trim();
+    if (normalized.includes('generally')) {
+        return { text: 'Generally Stable', color: 'black' };
+    } else if (normalized.includes('> 1.5')) {
+        return { text: '> 1.5', color: 'green' };
+    } else if (normalized.includes('1 to 1.5')) {
+        return { text: '1 to 1.5', color: 'orange' };
+    } else if (normalized.includes('< 1')) {
+        return { text: '< 1', color: 'red' };
+    }
+
+    return { text: value, color: 'black' };
+}
+
+function saveCell($cell, $input, rowIndex, columnName) {
+    let newValue = $input.val().trim();
+    const originalValue = $cell.attr('data-original-value');
+
+    let displayHTML = newValue;
+
+    if (columnName === 'Flood Depth (meters)' && newValue !== 'N/A') {
+        const fd = categorizeFloodDepth(newValue);
+        displayHTML = `<span style="color: ${fd.color}; font-weight: bold;">${fd.text}</span>`;
+        newValue = fd.text;
+    }
+
+    if (columnName.includes('Storm Surge Flood Depth (meters)') && newValue !== 'N/A') {
+        const ss = categorizeStormSurge(newValue);
+        displayHTML = `<span style="color: ${ss.color}; font-weight: bold;">${ss.text}</span>`;
+        newValue = ss.text;
+    }
+
+    if (columnName.startsWith('Water Stress Exposure') && newValue !== 'N/A') {
+        const ws = categorizeWaterStress(newValue);
+        displayHTML = `<span style="color: ${ws.color}; font-weight: bold;">${ws.text}</span>`;
+    }
+
+    if (columnName.includes('Extreme Windspeed') && newValue !== 'N/A') {
+        const ew = categorizeExtremeWindspeed(newValue);
+        displayHTML = `<span style="color: ${ew.color}; font-weight: bold;">${ew.text}</span>`;
+    }
+
+    if (columnName.includes('Days over') && columnName.includes('Celsius') && newValue !== 'N/A') {
+        const hd = categorizeHeatDays(newValue);
+        displayHTML = `<span style="color: ${hd.color}; font-weight: bold;">${hd.text}</span>`;
+    }
+
+    if (columnName.startsWith('Rainfall-Induced Landslide (factor of safety') && newValue !== 'N/A') {
+        const ls = categorizeLandslideFOS(newValue);
+        displayHTML = `<span style="color: ${ls.color}; font-weight: bold;">${ls.text}</span>`;
+        newValue = ls.text;
+    }
+    
+    if (!validateCellValue(newValue, columnName)) {
+        alert(`Invalid value for ${columnName}. Please enter a valid number.`);
+        cancelEdit($cell, $cell.text().trim());
+        return;
+    }
+    
+    $cell.removeClass('editing').html(displayHTML);
+
+    const cellKey = `${rowIndex}-${columnName}`;
+    
+    if (newValue !== originalValue) {
+        $cell.addClass('cell-changed');
+        const facilityName = $cell.closest('tr').find('td').first().text().trim();
+        cellChanges[cellKey] = {
+            rowIndex: rowIndex,
+            column: columnName,
+            oldValue: originalValue,
+            newValue: newValue,
+            facilityName: facilityName
+        };
+        updateChangeIndicator();
+        autoSaveChange(cellChanges[cellKey]);
+    } else {
+        $cell.removeClass('cell-changed');
+        delete cellChanges[cellKey];
+        updateChangeIndicator();
+    }
+}
+
+function cancelEdit($cell, originalValue) {
+    $cell.removeClass('editing').html(originalValue);
+}
+
+function validateCellValue(value, columnName) {
+    if (value === '' || value === null || value === undefined) {
+        return false;
+    }
+
+    if (columnName.startsWith('Water Stress Exposure')) {
+        const numValue = parseFloat(value);
+        return !isNaN(numValue) && isFinite(numValue);
+    }
+    
+    const numberColumns = [
+        'Flood Depth (meters)',
+        'Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius',
+        'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
+        'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
+        '2030 Sea Level Rise (meters) - Moderate Case', '2040 Sea Level Rise (meters) - Moderate Case', '2050 Sea Level Rise (meters) - Moderate Case', '2030 Sea Level Rise (meters) - Worst Case', '2040 Sea Level Rise (meters) - Worst Case', '2050 Sea Level Rise (meters) - Worst Case',
+        'Extreme Windspeed 10 year Return Period (km/h)',
+        'Extreme Windspeed 20 year Return Period (km/h)',
+        'Extreme Windspeed 50 year Return Period (km/h)',
+        'Extreme Windspeed 100 year Return Period (km/h)',
+        'Storm Surge Flood Depth (meters)',
+        'Storm Surge Flood Depth (meters) - Worst Case',
+        'Rainfall-Induced Landslide (factor of safety)',
+        'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
+        'Rainfall-Induced Landslide (factor of safety) - Worst Case'
+    ];
+
+    if (columnName === 'Flood Depth (meters)') {
+        const numValue = parseFloat(value);
+        if (!isNaN(numValue) && isFinite(numValue)) {
+            return true;
+        }
+        const normalized = String(value).toLowerCase();
+        return ['little to none', '0.1 to 0.5', '0.5 to 1.5', '>1.5', '>= 1.5', '≥ 1.5', 'greater than 1.5', 'greater than or equal to 1.5'].includes(normalized);
+    }
+
+    if (columnName.startsWith('Storm Surge Flood Depth (meters)')) {
+        const numValue = parseFloat(value);
+        if (!isNaN(numValue) && isFinite(numValue)) {
+            return true;
+        }
+        const normalized = String(value).toLowerCase();
+        return ['little to none', '0.1 to 0.5', '0.5 to 1.5', '≥ 1.5', '>= 1.5', '>1.5', 'greater than 1.5'].includes(normalized);
+    }
+
+    if (columnName.startsWith('Rainfall-Induced Landslide (factor of safety')) {
+        const numValue = parseFloat(value);
+        if (!isNaN(numValue) && isFinite(numValue)) {
+            return true;
+        }
+        const normalized = String(value).toLowerCase();
+        return ['generally stable', '< 1', '1 to 1.5', '> 1.5'].includes(normalized);
+    }
+    
+    if (numberColumns.includes(columnName)) {
+        if (value === 'Data not available') {
+            return true;
+        }
+        const numValue = parseFloat(value);
+        return !isNaN(numValue) && isFinite(numValue);
+    }
+    
+    return true;
+}
+
+function updateChangeIndicator() {
+    const changeCount = Object.keys(cellChanges).length;
+    let indicator = $('#changes-indicator');
+    
+    if (changeCount > 0) {
+        if (indicator.length === 0) {
+            indicator = $('<div id="changes-indicator" class="alert alert-warning mt-2"></div>');
+            $('.dt-buttons').after(indicator);
+        }
+        indicator.html(`<strong>⚠️ ${changeCount} unsaved change(s)</strong> - saving automatically...`);
+    } else {
+        indicator.remove();
+    }
+}
+
+function setupColumnSelector() {
+    if (!dataTable || typeof dataTable.column !== 'function') {
+        console.error('DataTable not ready for column selector');
+        return;
+    }
+
+    try {
+
+    $('.base-column, .hazard-column').on('change', function () {
+        if ($(this).hasClass('hazard-column')) {
+            updateParentCheckboxState($(this));
+        }
+        updateColumnVisibility();
+    });
+
+    $('.hazard-group').on('change', function () {
+        const group = $(this).data('hazard');
+        const isChecked = $(this).is(':checked');
+        $(`.hazard-column.${group}`).prop('checked', isChecked);
+        updateParentCheckboxes();
+        updateColumnVisibility();
+    });
+
+    // Delegated events bound to the document so replacements still work
+    $(document).off('click', '#show-all-columns');
+    $(document).on('click', '#show-all-columns', function (e) {
+        e.preventDefault();
+        $('.hazard-column').prop('checked', true);
+        $('.base-column:not([disabled])').prop('checked', true);
+        updateParentCheckboxes();
+        updateColumnVisibility();
+    });
+
+    $(document).off('click', '#hide-all-columns');
+    $(document).on('click', '#hide-all-columns', function (e) {
+        e.preventDefault();
+        $('.hazard-column').prop('checked', false);
+        $('.base-column:not([disabled])').prop('checked', false);
+        updateParentCheckboxes();
+        updateColumnVisibility();
+    });
+    } catch (error) {
+        console.error('Error setting up column selector:', error);
+        showError('Error setting up column selector: ' + error.message);
+    }
+}
+
+function buildColumnIndexMap() {
+    columnIndexMap = {};
+    dataTable.columns().every(function(index) {
+        const $header = $(this.header());
+        const name = $header.data('column-name') || $header.text().trim();
+        if (!(name in columnIndexMap)) {
+            columnIndexMap[name] = index;
+        }
+    });
+}
+
+// FIXED: Improved column visibility update function
+function updateColumnVisibility() {
+    if (!dataTable) {
+        console.error("DataTable not initialized");
+        return;
+    }
+
+    if (Object.keys(columnIndexMap).length === 0) {
+        buildColumnIndexMap();
+    }
+    
+    try {
+        console.log('Updating column visibility...');
+        
+        // Always show Facility column
+        const visibleColumns = new Set(['Facility']);
+        
+        // Handle base columns (Lat/Long)
+        $('.base-column').each(function() {
+            const columnName = $(this).data('column');
+            const isChecked = $(this).prop('checked');
+            
+            if (isChecked && columnIndexMap.hasOwnProperty(columnName)) {
+                visibleColumns.add(columnName);
+                console.log(`Will show base column: ${columnName}`);
+            }
+        });
+        
+        // Handle hazard columns
+        $('.hazard-column').each(function() {
+            const columnName = $(this).data('column');
+            const isChecked = $(this).prop('checked');
+            
+            console.log(`Checkbox for "${columnName}": ${isChecked}`);
+            
+            if (isChecked && columnIndexMap.hasOwnProperty(columnName)) {
+                visibleColumns.add(columnName);
+                console.log(`Will show hazard column: ${columnName}`);
+            }
+        });
+        
+        // Update column visibility
+        let changesCount = 0;
+        dataTable.columns().every(function() {
+            const $header = $(this.header());
+            const name = $header.data('column-name') || $header.text().trim();
+            const shouldBeVisible = visibleColumns.has(name);
+            
+            if (this.visible() !== shouldBeVisible) {
+                this.visible(shouldBeVisible, false); // false = no immediate redraw
+                changesCount++;
+            }
+        });
+        
+        console.log(`Changed visibility for ${changesCount} columns`);
+        
+        // Single redraw after all changes
+        if (changesCount > 0) {
+            dataTable.columns.adjust().draw(false);
+        }
+        
+        // Re-attach editable handlers after column changes
+        setTimeout(function() {
+            attachEditableHandlers();
+            $(window).trigger('resize');
+        }, 100);
+        
+        console.log('Column visibility update complete');
+        
+    } catch (error) {
+        console.error("Error updating column visibility:", error);
+        showError('Error updating column visibility: ' + error.message);
+    }
+}
+
+// Helper function to update a specific parent checkbox state
+function updateParentCheckboxState(changedCheckbox) {
+    const classes = changedCheckbox.attr('class').split(' ');
+    const hazardClasses = classes.filter(cls =>
+        cls !== 'form-check-input' && cls !== 'hazard-column' && cls !== 'facility-info');
+    
+    hazardClasses.forEach(function(hazardClass) {
+        const parentCheckbox = $(`.hazard-group[data-hazard="${hazardClass}"]`);
+        const childCheckboxes = $(`.hazard-column.${hazardClass}`);
+        const checkedChilds = $(`.hazard-column.${hazardClass}:checked`);
+
+        if (parentCheckbox.length > 0) {
+            parentCheckbox.prop('checked', checkedChilds.length > 0);
+            parentCheckbox.prop('indeterminate',
+                checkedChilds.length > 0 && checkedChilds.length < childCheckboxes.length);
+        }
+    });
+}
+
+// Helper function to update all parent checkbox states
+function updateParentCheckboxes() {
+    $('.hazard-group').each(function() {
+        const hazardClass = $(this).data('hazard');
+        const childCheckboxes = $(`.hazard-column.${hazardClass}`);
+        const checkedChilds = $(`.hazard-column.${hazardClass}:checked`);
+        
+        $(this).prop('checked', checkedChilds.length > 0);
+        $(this).prop('indeterminate', 
+            checkedChilds.length > 0 && checkedChilds.length < childCheckboxes.length);
+    });
+}
+
+function autoSaveChange(change) {
+
+    if (!change || typeof change.column === 'undefined') {
+        console.error('autoSaveChange called with invalid change:', change);
+        updateChangeIndicator();
+        return;
+    }
+    
+    const changesData = {
+        changes: [change],
+        csrf_token: $('[name=csrfmiddlewaretoken]').val()
+    };
+    
+    $.ajax({
+        url: '/climate-hazards-analysis-v2/save-table-changes/',
+        method: 'POST',
+        data: JSON.stringify(changesData),
+        contentType: 'application/json',
+        headers: {
+            'X-CSRFToken': $('[name=csrfmiddlewaretoken]').val()
+        },
+        success: function(response) {
+            if (response.success) {
+                const $cell = $(`.editable-cell[data-row="${change.rowIndex}"][data-column="${change.column}"]`);
+                $cell.attr('data-original-value', change.newValue);
+                $cell.removeClass('cell-changed');
+                const key = `${change.rowIndex}-${change.column}`;
+                delete cellChanges[key];
+            } else {
+                alert('Error saving change: ' + (response.error || 'Unknown error'));
+            }
+        },
+        error: function(xhr, status, error) {
+            alert('Error saving change: ' + error);
+            console.error('Save error:', xhr.responseText);
+        },
+        complete: function() {
+            updateChangeIndicator();
+        }
+    });
+}
+
+function resetAllChanges() {
+    if (!confirm('Are you sure you want to reset all changes?')) {
+        return;
+    }
+    
+    $.ajax({
+        url: '/climate-hazards-analysis-v2/reset-table-data/',
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': $('[name=csrfmiddlewaretoken]').val()
+        },
+        success: function(response) {
+            if (response.success) {
+                location.reload();
+            } else {
+                alert(response.error || 'Failed to reset data.');
+            }
+        },
+        error: function() {
+            alert('Failed to reset data.');
+        }
+    });
+}
+
+// Proceed to sensitivity parameters function
+function proceedToSensitivityParameters() {
+    window.location.href = "{% url 'climate_hazards_analysis_v2:sensitivity_parameters' %}";
+}
+
+function highlightHeaders(currentStep) {
+    const overlay = document.getElementById('overlay-header');
+    const override = document.getElementById('override-header');
+    const sensitivity = document.getElementById('sensitivity-header');
+    const impact = document.getElementById('impact-header');
+
+    [overlay, override, sensitivity, impact].forEach(el => el.classList.remove('active-step-header'));
+
+    if (currentStep >= 1) {
+        overlay.classList.add('active-step-header');
+    } if (currentStep >= 3) {
+        override.classList.add('active-step-header');
+    } if (currentStep >= 4) {
+        sensitivity.classList.add('active-step-header');
+    } if (currentStep >= 6) {
+        impact.classList.add('active-step-header');
+    }
+}
+
+function highlightSteps(currentStep) {
+    const steps = document.querySelectorAll('.step-item');
+    steps.forEach((step, index) => {
+        const circle = step.querySelector('.step-circle');
+        const label = step.querySelector('.step-label');
+        if (!circle || !label) return;
+        if (index + 1 === currentStep) {
+            circle.style.backgroundColor = '#F1D500';
+            circle.style.color = '#000';
+            label.style.color = '#000';
+        } else {
+            circle.style.backgroundColor = '#e9ecef';
+            circle.style.color = '#6c757d';
+            label.style.color = '#6c757d';
+        }
+    });
+}
+
+function setupOverrideModal() {
+    const select = document.getElementById('facility-select');
+    const inputsContainer = document.getElementById('facility-inputs');
+    if (select && inputsContainer) {
+        const inputs = inputsContainer.querySelectorAll('input');
+        inputs.forEach(input => input.disabled = true);
+        select.addEventListener('change', function() {
+            const disabled = !this.value;
+            inputs.forEach(input => input.disabled = disabled);
+        });
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const path = window.location.pathname;
+    let currentStep = 1;
+    if (path.includes('sensitivity-results')) {
+        currentStep = 5;
+    } else if (path.includes('sensitivity-parameters')) {
+        currentStep = 4;
+    } else if (path.includes('results')) {
+        currentStep = 3;
+    } else if (path.includes('select-hazards')) {
+        currentStep = 2;
+    }
+    highlightHeaders(currentStep);
+    highlightSteps(currentStep);
+    setupOverrideModal();
+});
+
+</script>
+
+{% endblock %}

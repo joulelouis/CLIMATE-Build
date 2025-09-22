@@ -1,0 +1,86 @@
+{% load static %}
+<div class="sidebar p-0 d-none d-md-block"> <!-- Removed border classes -->
+    <div class="sidebar-content" id="sidebarMenu" aria-labelledby="sidebarMenuLabel">
+        <div class="sidebar-body d-flex flex-column p-0 pt-lg-3 overflow-y-auto h-100">
+            
+            <!-- Logo Section (Aligned Left) -->
+            <div class="sidebar-logo text-start">
+                <img src="{% static 'images/sgv-logo.png' %}" alt="SGV Logo" class="sidebar-img">
+            </div>
+
+            <hr class="my-3">
+
+            <!-- Navigation Links -->
+            <ul class="nav flex-column">
+                <li class="nav-item">
+                    <a class="nav-link d-flex align-items-center gap-2" aria-current="page" href="/">
+                        <i class="fa-solid fa-house sidebar-icon"></i>
+                        <span class="sidebar-text">Dashboard</span> 
+                    </a>
+                </li>
+                {% comment %} <li class="nav-item">
+                    <a class="nav-link d-flex align-items-center gap-2" href="/climate-hazards-analysis">
+                        <i class="fa-solid fa-earth-asia"></i>
+                        <span class="sidebar-text">Climate Hazard Exposure Analysis</span>
+                    </a>
+                </li> {% endcomment %}
+                <li class="nav-item">
+                    <a class="nav-link d-flex align-items-center gap-2" href="/climate-hazards-analysis-v2">
+                        <i class="fa-solid fa-earth-asia"></i>
+                        <span class="sidebar-text">Climate Hazard Exposure Analysis</span>
+                    </a>
+                </li>
+                {% comment %} <li class="nav-item">
+                    <a class="nav-link d-flex align-items-center gap-2" href="/delta_method">
+                        <i class="fa-solid fa-caret-up sidebar-icon"></i>
+                        <span class="sidebar-text">Heat Exposure Analysis</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link d-flex align-items-center gap-2" href="/sea-level-rise-analysis">
+                        <i class="fa-solid fa-city sidebar-icon"></i>
+                        <span class="sidebar-text">Sea Level Rise Analysis</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link d-flex align-items-center gap-2" href="/flood-exposure-analysis">
+                        <i class="fa-solid fa-droplet sidebar-icon"></i>
+                        <span class="sidebar-text">Flood Exposure Analysis</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link d-flex align-items-center gap-2" href="/water-stress">
+                        <i class="fa-solid fa-gauge-high sidebar-icon"></i>
+                        <span class="sidebar-text">Water Stress Analysis</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link d-flex align-items-center gap-2" href="/tropical-cyclone-analysis">
+                        <i class="fa-solid fa-hurricane"></i>
+                        <span class="sidebar-text">Tropical Cyclone Analysis</span>
+                    </a>
+                </li> {% endcomment %}
+            </ul>
+
+            <!-- Push Settings and Sign Out to Bottom -->
+            <div class="mt-auto">
+                <hr class="my-3">
+                <ul class="nav flex-column mb-auto">
+                    <li class="nav-item">
+                        <a class="nav-link d-flex align-items-center gap-2" href="#">
+                            <i class="fa-solid fa-gear sidebar-icon"></i>
+                            <span class="sidebar-text">Settings</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link d-flex align-items-center gap-2" href="#">
+                            <i class="fa-solid fa-right-from-bracket sidebar-icon"></i>
+                            <span class="sidebar-text">Sign Out</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+        </div>
+    </div>
+</div>

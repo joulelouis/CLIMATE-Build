@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}
+    Climate Hazards Analysis
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+      <div class="col-6 d-flex flex-column">
+        <!-- Rounded Icon Container with Margin -->
+        
+        <div class="icon-container">
+            
+            {% comment %} <i class="fa-solid fa-earth-asia icon-style"></i> {% endcomment %}
+            
+            <img src="{% static 'images/sgv-logo.png' %}" alt="SGV Logo">
+        </div>
+        
+        <!-- Heading below the icon with Margin -->
+        <h1 class="page-heading">Climate Hazard Exposure Analysis</h1>
+      </div>
+    </div>
+
+        <div class="row">
+            <div class="col-md-12">
+                <form action="{% url 'climate_hazards_analysis:upload_facility_csv' %}" method="POST" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <div class="row d-flex align-items-stretch">
+                    <!-- First Card: Dynamic Fields -->
+                    <div class="col-md-6">
+                        <div class="card h-100 mb-3 custom-card">
+                        <div class="card-header no-border">
+                            <strong>Select Climate/Weather Hazards</strong>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                            {% comment %} <label class="control-label">Select hazards to include in analysis.</label> {% endcomment %}
+                            <div class="checkbox-grid">
+                                {% for field in climate_hazards_fields %}
+                                <div class="form-check checkbox-container">
+                                    <!-- Custom Checkbox -->
+                                    <input type="checkbox" class="form-check-input custom-checkbox" name="fields" value="{{ field }}" id="{{ field }}" onclick="toggleCheckbox(this)">
+                                    <label class="form-check-label custom-checkbox-label" for="{{ field }}">
+                                    {{ field }}
+                                    </label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            </div>
+                        </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Second Card: File Upload -->
+                    <div class="col-md-6">
+                        <div class="card h-100 mb-3 custom-card">
+                            <div class="card-header no-border upload-card-header">
+                                <strong>Upload Asset Data Excel Sheet</strong>
+                            </div>
+                        <div class="card-body upload-card-body">
+                            <!-- Label Container -->
+                            <div class="upload-label-container">
+                                {% comment %} <label class="control-label">
+                                    Please upload the facility location CSV.
+                                </label> {% endcomment %}
+                            </div>
+
+                            <div class="download-template mt-2">
+                                <a href="{% static 'sample/asset_template.csv' %}" download>Download Template</a>
+                            </div>
+
+                            <div class="file-input-wrapper">
+                            <!-- File Input Container -->
+                                <div class="file-upload-box" onclick="document.getElementById('facilityCsv').click()">
+                                    <!-- Upload Icon -->
+                                    <i class="fas fa-upload upload-icon"></i>
+                                    
+                                    <!-- Choose File Text -->
+                                    <label for="facilityCsv" class="upload-label">
+                                    Choose File
+                                    </label>
+                                    
+                                    <!-- File Name Display -->
+                                    <p id="file-name" class="file-name-display">No file chosen</p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Moved Card Footer Inside the Card -->
+                        <div class="card-footer text-center card-footer-no-border">
+                            <div class="footer-button-wrapper d-flex justify-content-center gap-2">
+                                <!-- Preview Button now triggers modal -->
+                                <button type="button" class="btn btn-warning preview-button flex-fill" 
+                                        data-bs-toggle="modal" data-bs-target="#csvPreviewModal" onclick="previewCSV()">
+                                    <strong>Preview Excel Upload</strong>
+                                </button>
+                                <button type="submit" class="btn btn-warning upload-button flex-fill">
+                                    <strong>Generate Exposure Data</strong>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                        <!-- Hidden File Input (using Bootstrap’s d-none class) -->
+                        <input type="file" name="facility_csv" id="facilityCsv" accept=".csv" class="d-none" onchange="updateFileName()">
+                    </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Modal for CSV Preview -->
+<div class="modal fade" id="csvPreviewModal" tabindex="-1" aria-labelledby="csvPreviewModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="csvPreviewModalLabel">CSV Preview</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Datatable for CSV Preview -->
+          <div class="table-responsive">
+            <table id="preview-data-table" class="table custom-table">
+              <thead>
+                <tr id="preview-table-header">
+                  <!-- Headers will be inserted dynamically -->
+                </tr>
+              </thead>
+              <tbody id="preview-table-body">
+                <!-- CSV rows will be inserted dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-danger mt-3">{{ error }}</div>
+  {% endif %}
+</div>
+
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>window.jQuery || document.write('<script src="{% static "js/jquery-3.6.0.min.js" %}"><\\/script>')</script>
+<!-- Bootstrap Tabs JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  function toggleCheckbox(checkbox) {
+      let container = checkbox.closest('.checkbox-container');
+
+      if (checkbox.checked) {
+          container.style.backgroundColor = '#FFF8C7'; // Change background to light yellow
+          container.style.border = '2px solid #F1D500'; // Add yellow border
+          checkbox.style.backgroundColor = '#000'; // Change checkbox to black
+          checkbox.style.borderColor = '#000'; // Keep border black
+      } else {
+          container.style.backgroundColor = '#F8F9FA'; // Revert background to gray
+          container.style.border = '2px solid transparent'; // Remove border
+          checkbox.style.backgroundColor = '#F7F7F7'; // Reset checkbox background to gray
+          checkbox.style.borderColor = '#000'; // Keep border black
+      }
+  }
+
+  function updateFileName() {
+      var input = document.getElementById("facilityCsv");
+      var fileNameDisplay = document.getElementById("file-name");
+
+      if (input.files.length > 0) {
+          fileNameDisplay.textContent = input.files[0].name;
+      } else {
+          fileNameDisplay.textContent = "No file chosen";
+      }
+  }
+
+  // Function to read the CSV file and populate the preview table in the modal
+  function previewCSV() {
+    var input = document.getElementById("facilityCsv");
+    if (input.files.length > 0) {
+        var file = input.files[0];
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var csvData = e.target.result;
+            var lines = csvData.split("\n");
+            var headerHtml = "";
+            var bodyHtml = "";
+            if (lines.length > 0) {
+                // Assume the first line contains headers
+                var headers = lines[0].split(",");
+                headerHtml += headers.map(function(header) {
+                    return "<th>" + header.trim() + "</th>";
+                }).join("");
+            }
+            // Process each row after the header
+            for (var i = 1; i < lines.length; i++) {
+                if (lines[i].trim() === "") continue;
+                var cells = lines[i].split(",");
+                var rowHtml = cells.map(function(cell) {
+                    return "<td>" + cell.trim() + "</td>";
+                }).join("");
+                bodyHtml += "<tr>" + rowHtml + "</tr>";
+            }
+            document.getElementById("preview-table-header").innerHTML = headerHtml;
+            document.getElementById("preview-table-body").innerHTML = bodyHtml;
+            // Optionally, you can initialize a DataTable here:
+            // $('#preview-data-table').DataTable();
+        };
+        reader.readAsText(file);
+    }
+    }
+</script>
+{% endblock %}

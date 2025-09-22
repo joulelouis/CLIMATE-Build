@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}
+    Select Climate/Weather Hazards
+{% endblock %}
+
+{% block content %}
+<style>
+    /* Checkbox styles */
+    .hazard-checkbox-container {
+        background-color: #F8F9FA;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 16px;
+        transition: all 0.3s ease;
+        border: 2px solid transparent;
+        cursor: pointer;
+    }
+    
+    .hazard-checkbox-container.checked {
+        background-color: #FFF8C7;
+        border: 2px solid #F1D500;
+    }
+    
+    .hazard-checkbox {
+        width: 20px;
+        height: 20px;
+        margin-right: 12px;
+    }
+
+    .hazard-checkbox:checked {
+        accent-color: #F1D500;
+    }
+    
+    .hazard-icon {
+        width: 40px;
+        height: 40px;
+        background-color: #F1D500;
+        border-radius: 50%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-right: 15px;
+    }
+    
+    .hazard-name {
+        font-size: 16px;
+        font-weight: 500;
+    }
+    
+    .hazard-description {
+        margin-top: 10px;
+        font-size: 14px;
+        color: #6c757d;
+    }
+
+    .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.7);
+        z-index: 9999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    
+    .loading-container {
+        background-color: white;
+        padding: 30px;
+        border-radius: 10px;
+        text-align: center;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+    }
+    
+    .loading-text {
+        font-size: 16px;
+        font-weight: 500;
+        color: #333;
+        margin-top: 10px;
+    }
+</style>
+
+<div class="container-fluid mt-4">
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="loading-container">
+            <div class="spinner-border text-warning mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="progress mb-3" style="width: 300px; height: 20px;">
+                <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+            </div>
+            <div id="loading-text" class="loading-text">Generating asset exposure data...</div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-6 d-flex flex-column">
+            <!-- Rounded Icon Container with Margin -->
+            <div class="icon-container">
+                <img src="{% static 'images/sgv-logo.png' %}" alt="SGV Logo">
+            </div>
+            
+            <!-- Heading below the icon with Margin -->
+            <h1 class="page-heading">Exposure Overlay</h1>
+        </div>
+    </div>
+    
+   <!-- Step by Step Procedure UI -->
+<div class="row mt-4 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body p-4">
+                {% include "climate_hazards_analysis_v2/steps_table.html" %}
+            </div>
+        </div>
+    </div>
+</div>
+    
+    <!-- Alert Messages -->
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+    
+    {% if success_message %}
+    <div class="alert alert-success alert-dismissible fade show alert-fade" role="alert">
+        {{ success_message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+    
+    <div class="row mt-4">
+        <div class="col-md-8 mx-auto">
+            <div class="card custom-card">
+                <div class="card-header no-border">
+                    <strong>Select Climate/Weather Hazards</strong>
+                </div>
+                <div class="card-body">
+                    <p class="mb-4">You have {{ facility_count }} assets loaded. Select the climate/weather hazards you want to analyze:</p>
+                    
+                    <form id="hazard-form" method="POST" action="{% url 'climate_hazards_analysis_v2:select_hazards' %}" onsubmit="showLoading()">
+                        {% csrf_token %}
+                        
+                        <div class="row">
+                            {% for hazard in hazard_types %}
+                            <div class="col-md-6">
+                                <div class="hazard-checkbox-container d-flex align-items-center{% if hazard in selected_hazards %} checked{% endif %}" onclick="toggleCheckbox('hazard-{{ forloop.counter }}')">
+                                    <input type="checkbox" class="hazard-checkbox" id="hazard-{{ forloop.counter }}" name="hazards" value="{{ hazard }}" {% if hazard in selected_hazards %}checked{% endif %}>
+                                    <div class="hazard-icon">
+                                        {% if hazard == 'Flood' %}
+                                        <i class="fas fa-water"></i>
+                                        {% elif hazard == 'Water Stress' %}
+                                        <i class="fas fa-tint-slash"></i>
+                                        {% elif hazard == 'Heat' %}
+                                        <i class="fas fa-temperature-high"></i>
+                                        {% elif hazard == 'Sea Level Rise' %}
+                                        <i class="fas fa-water"></i>
+                                        {% elif hazard == 'Tropical Cyclones' %}
+                                        <i class="fas fa-wind"></i>
+                                        {% elif hazard == 'Storm Surge' %}
+                                        <i class="fas fa-water"></i>
+                                        {% elif hazard == 'Rainfall Induced Landslide' %}
+                                        <i class="fas fa-mountain"></i>
+                                        {% else %}
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                        {% endif %}
+                                    </div>
+                                    <div>
+                                        <div class="hazard-name">{{ hazard }}</div>
+                                        <div class="hazard-description">
+                                            {% if hazard == 'Flood' %}
+                                            Analyze flood depth for your facilities.
+                                            {% elif hazard == 'Water Stress' %}
+                                            Asses water stress levels.
+                                            {% elif hazard == 'Heat' %}
+                                            Evaluate heat exposure days.
+                                            {% elif hazard == 'Sea Level Rise' %}
+                                            Project sea level rise on coastal facilities.
+                                            {% elif hazard == 'Tropical Cyclones' %}
+                                            Analyze extreme windspeeds.
+                                            {% elif hazard == 'Storm Surge' %}
+                                            Assess flooding from storm surge events.
+                                            {% elif hazard == 'Rainfall Induced Landslide' %}
+                                            Evaluate landslide hazard exposure from heavy rainfall.
+                                            {% else %}
+                                            Analyze general climate hazard exposure
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        
+                        <div class="d-flex justify-content-between mt-4">
+                            <a href="{% url 'climate_hazards_analysis_v2:view_map' %}" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left me-2"></i> Back to Upload Asset Data
+                            </a>
+                            <button type="submit" id="generate-btn" class="btn btn-warning">
+                                <strong>Generate Asset Exposure</strong>
+                                <i class="fas fa-arrow-right ms-2"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function toggleCheckbox(id) {
+        const checkbox = document.getElementById(id);
+        const container = checkbox.closest('.hazard-checkbox-container');
+        
+        checkbox.checked = !checkbox.checked;
+        
+        if (checkbox.checked) {
+            container.classList.add('checked');
+        } else {
+            container.classList.remove('checked');
+        }
+    }
+
+    function highlightHeaders(currentStep) {
+        const overlay = document.getElementById('overlay-header');
+        const override = document.getElementById('override-header');
+        const sensitivity = document.getElementById('sensitivity-header');
+        const impact = document.getElementById('impact-header');
+
+        [overlay, override, sensitivity, impact].forEach(el => el.classList.remove('active-step-header'));
+
+        if (currentStep >= 1) {
+            overlay.classList.add('active-step-header');
+        } if (currentStep >= 3) {
+            override.classList.add('active-step-header');
+        } if (currentStep >= 4) {
+            sensitivity.classList.add('active-step-header');
+        } if (currentStep >= 6) {
+            impact.classList.add('active-step-header');
+        }
+    }
+
+    function highlightSteps(currentStep) {
+        const steps = document.querySelectorAll('.step-item');
+        steps.forEach((step, index) => {
+            const circle = step.querySelector('.step-circle');
+            const label = step.querySelector('.step-label');
+            if (!circle || !label) return;
+            if (index + 1 === currentStep) {
+                circle.style.backgroundColor = '#F1D500';
+                circle.style.color = '#000';
+                label.style.color = '#000';
+            } else {
+                circle.style.backgroundColor = '#e9ecef';
+                circle.style.color = '#6c757d';
+                label.style.color = '#6c757d';
+            }
+        });
+    }
+
+    // Initialize with current step
+    document.addEventListener('DOMContentLoaded', function() {
+        // Determine which page we're on and set the current step
+        const path = window.location.pathname;
+        let currentStep = 1; // Default to step 1
+        
+        if (path.includes('sensitivity-results')) {
+            currentStep = 5;
+        } else if (path.includes('sensitivity-parameters')) {
+            currentStep = 4;
+        } else if (path.includes('results')) {
+            currentStep = 3;
+        } else if (path.includes('select-hazards')) {
+            currentStep = 2;
+        }
+        
+        highlightHeaders(currentStep);
+        highlightSteps(currentStep);
+    });
+
+    // Function to show loading overlay with simulated progress
+    function showLoading() {
+        // Get the number of selected hazards to estimate processing time
+        const selectedHazards = document.querySelectorAll('input[name="hazards"]:checked').length;
+        if (selectedHazards === 0) {
+            alert('Please select at least one hazard type.');
+            return false;
+        }
+        
+        // Disable the submit button to prevent double submission
+        document.getElementById('generate-btn').disabled = true;
+        
+        // Show the loading overlay
+        const loadingOverlay = document.getElementById('loading-overlay');
+        loadingOverlay.style.display = 'flex';
+        
+        // Set up progress bar simulation
+        const progressBar = document.getElementById('progress-bar');
+        const loadingText = document.getElementById('loading-text');
+        
+        // Start with 0%
+        let progress = 0;
+        
+        // Calculate total estimated time based on number of selected hazards
+        // For each hazard, we estimate ~10 seconds of processing time
+        const totalSteps = 100;
+        const stepTime = selectedHazards * 100; // milliseconds per step (adjust based on your actual processing time)
+        
+        // Update progress bar periodically
+        const progressInterval = setInterval(() => {
+            if (progress >= 99) {
+                clearInterval(progressInterval);
+                return;
+            }
+            
+            // Calculate next progress step (slow down as it gets closer to 100%)
+            if (progress < 30) {
+                progress += 2; // Faster at start
+            } else if (progress < 60) {
+                progress += 1; // Medium speed
+            } else if (progress < 90) {
+                progress += 0.5; // Slower
+            } else {
+                progress += 0.1; // Very slow approaching 100%
+            }
+            
+            // Update progress bar
+            progressBar.style.width = `${progress}%`;
+            progressBar.setAttribute('aria-valuenow', progress);
+            progressBar.textContent = `${Math.round(progress)}%`;
+            
+            // Update loading text based on progress
+            if (progress < 25) {
+                loadingText.textContent = "Preparing hazard data...";
+            } else if (progress < 50) {
+                loadingText.textContent = "Analyzing facility locations...";
+            } else if (progress < 75) {
+                loadingText.textContent = "Computing exposure levels...";
+            } else {
+                loadingText.textContent = "Finalizing results...";
+            }
+        }, stepTime);
+        
+        // Allow the form to submit after showing the loading overlay
+        return true;
+    }
+</script>
+{% endblock %}
