@@ -502,7 +502,12 @@ Climate Hazard Analysis Results
         <tr class="custom-table-row">
             {% for key in columns %}
                 {% with value=row|get_item:key %}
-                <td>
+                {% if key != "Facility" and key != "Asset Archetype" %}
+                  <td class="editable-cell" data-column="{{ key }}" data-row="{{ forloop.parentloop.counter0 }}" data-original-value="{{ value }}">
+                  {% else %}
+                  <td>
+                  {% endif %}
+
                     {# Asset Archetype styling - Yellow badge similar to sensitivity analysis #}
                     {% if key == "Asset Archetype" and value != "N/A" %}
                         <span class="badge" style="background-color: #F1D500; color: #000; font-weight: 600;">{{ value }}</span>

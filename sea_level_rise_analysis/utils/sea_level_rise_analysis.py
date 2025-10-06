@@ -71,6 +71,8 @@ def generate_sea_level_rise_analysis(facility_csv_path):
             '2030_SLR_SSP585_m': '2030 Sea Level Rise (meters) - Worst Case',
             '2040_SLR_SSP585_m': '2040 Sea Level Rise (meters) - Worst Case',
             '2050_SLR_SSP585_m': '2050 Sea Level Rise (meters) - Worst Case',
+            'LAT': 'Lat',
+            'LON': 'Long'
         }
         df_master.rename(columns=rename_map, inplace=True)
 

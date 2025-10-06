@@ -35,3 +35,5 @@ heat_exposure_analysis/static/input_files/
 
 # .zip files
 .zip
+
+.claude

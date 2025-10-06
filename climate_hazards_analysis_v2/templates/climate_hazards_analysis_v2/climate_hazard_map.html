@@ -1,7 +1,27 @@
 {% load static %}
 
+<!-- Mapbox GL Draw CSS -->
+<link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.css" type="text/css">
+
 <!-- Map Container -->
-<div id="climate-hazard-map" style="width: 100%; height: 600px;"></div>
+<div id="climate-hazard-map" style="width: 100%; height: 600px; position: relative;">
+  <!-- Drawing Mode Toggle Button -->
+  <div id="draw-polygon-controls" style="position: absolute; top: 10px; left: 10px; z-index: 1000;">
+    <button id="toggle-draw-mode" class="btn btn-warning btn-sm shadow" onclick="toggleDrawMode()">
+      <i class="fas fa-draw-polygon"></i> Draw Polygon Asset
+    </button>
+  </div>
+
+  <!-- Drawing Instructions (shown during draw mode) -->
+  <div id="draw-instructions" style="position: absolute; top: 50px; left: 10px; z-index: 1000; display: none; background: rgba(255, 255, 255, 0.95); padding: 10px 15px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+    <h6 class="mb-2" style="font-size: 14px; font-weight: bold;">Drawing Polygon:</h6>
+    <ul class="mb-0" style="font-size: 12px; padding-left: 20px; margin: 0;">
+      <li>Click on map to add points</li>
+      <li>Click on first point to close polygon</li>
+      <li>Or press <kbd>Enter</kbd> key to finish</li>
+    </ul>
+  </div>
+</div>
 
 <!-- Sidebar (initially hidden off-canvas) -->
 <style>
@@ -82,12 +102,54 @@
   </div>
 </div>
 
+<!-- Polygon Asset Modal -->
+<div class="modal fade" id="polygonAssetModal" tabindex="-1" aria-labelledby="polygonAssetModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="polygonAssetModalLabel">Add Polygon Asset</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="polygon-asset-form">
+          <div class="mb-3">
+            <label for="polygon-asset-name" class="form-label">Asset Name <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="polygon-asset-name" placeholder="Enter asset name" required>
+            <div class="invalid-feedback">
+              Asset name is required.
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="polygon-asset-archetype" class="form-label">Asset Archetype</label>
+            <input type="text" class="form-control" id="polygon-asset-archetype" placeholder="Enter archetype (optional)" value="default archetype">
+            <small class="form-text text-muted">Default: "default archetype"</small>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Centroid Coordinates</label>
+            <p id="polygon-centroid-coordinates" class="mb-0 text-muted">Lat: 0, Lng: 0</p>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="cancelPolygonAsset()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="confirmPolygonAsset()">Add Asset</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
 <script>
 
   // Variables to hold map state
   let multiHazardMap;
   let userMarker = null;
   let clickedLngLat = null;
+  let draw;
+  let isDrawMode = false;
+  let drawnPolygonData = null;
 
 
 
@@ -118,6 +180,14 @@
     .addControl(new mapboxgl.GeolocateControl())
     .addControl(new mapboxgl.ScaleControl())
     .addControl(new mapboxgl.FullscreenControl());
+
+    // Initialize Mapbox Draw
+    draw = new MapboxDraw({
+      displayControlsDefault: false,
+      controls: {},
+      defaultMode: 'simple_select'
+    });
+    multiHazardMap.addControl(draw);
 
     // When map loads, add base layers
     multiHazardMap.on('load', () => {
@@ -150,8 +220,15 @@
       loadFacilityData();
     });
 
-    // On map click: show add facility panel
+    // Handle polygon drawing completion
+    multiHazardMap.on('draw.create', handlePolygonDrawn);
+    multiHazardMap.on('draw.update', handlePolygonDrawn);
+
+    // On map click: show add facility panel (only when not in draw mode)
     multiHazardMap.on('click', (e) => {
+      // Skip if in draw mode
+      if (isDrawMode) return;
+
       clickedLngLat = [e.lngLat.lng, e.lngLat.lat];
 
       // Remove previous temporary marker if it exists
@@ -173,6 +250,94 @@
       // Show the add facility panel
       document.getElementById('add-facility-panel').style.display = 'block';
     });
+  }
+
+  // Toggle drawing mode
+  function toggleDrawMode() {
+    isDrawMode = !isDrawMode;
+    const button = document.getElementById('toggle-draw-mode');
+    const instructions = document.getElementById('draw-instructions');
+
+    if (isDrawMode) {
+      // Enable draw mode
+      draw.changeMode('draw_polygon');
+      button.classList.remove('btn-warning');
+      button.classList.add('btn-danger');
+      button.innerHTML = '<i class="fas fa-times"></i> Cancel Drawing';
+
+      // Show drawing instructions
+      if (instructions) {
+        instructions.style.display = 'block';
+      }
+
+      // Hide add facility panel if visible
+      document.getElementById('add-facility-panel').style.display = 'none';
+      if (userMarker) {
+        userMarker.remove();
+        userMarker = null;
+      }
+    } else {
+      // Disable draw mode
+      draw.changeMode('simple_select');
+      button.classList.remove('btn-danger');
+      button.classList.add('btn-warning');
+      button.innerHTML = '<i class="fas fa-draw-polygon"></i> Draw Polygon Asset';
+
+      // Hide drawing instructions
+      if (instructions) {
+        instructions.style.display = 'none';
+      }
+
+      // Clear any drawn polygons
+      draw.deleteAll();
+      drawnPolygonData = null;
+    }
+  }
+
+  // Handle polygon drawn event
+  function handlePolygonDrawn(e) {
+    // Wait a bit for draw to complete
+    setTimeout(() => {
+      const data = draw.getAll();
+      if (data.features.length === 0) return;
+
+      const polygon = data.features[0];
+
+      // Validate polygon has at least 3 points
+      if (!polygon.geometry || !polygon.geometry.coordinates ||
+          !polygon.geometry.coordinates[0] ||
+          polygon.geometry.coordinates[0].length < 4) {
+        console.log('Polygon not complete yet, waiting...');
+        return;
+      }
+
+      // Calculate centroid using Turf.js
+      const centroid = turf.centroid(polygon);
+      const [lng, lat] = centroid.geometry.coordinates;
+
+      // Store polygon data
+      drawnPolygonData = {
+        geometry: polygon.geometry,
+        centroid: { lat, lng }
+      };
+
+      // Exit draw mode
+      isDrawMode = false;
+      draw.changeMode('simple_select');
+      const button = document.getElementById('toggle-draw-mode');
+      button.classList.remove('btn-danger');
+      button.classList.add('btn-warning');
+      button.innerHTML = '<i class="fas fa-draw-polygon"></i> Draw Polygon Asset';
+
+      // Hide drawing instructions
+      const instructions = document.getElementById('draw-instructions');
+      if (instructions) {
+        instructions.style.display = 'none';
+      }
+
+      // Show the polygon asset modal
+      showPolygonAssetModal(lat, lng);
+    }, 100);
   }
 
   // Functions for sidebar
@@ -206,18 +371,18 @@
       alert('No location selected. Please click on the map.');
       return;
     }
-    
+
     // Get the facility name from the input field
-    const facilityName = document.getElementById('facility-name').value.trim() || 
+    const facilityName = document.getElementById('facility-name').value.trim() ||
       `New Facility at ${clickedLngLat[1].toFixed(4)}, ${clickedLngLat[0].toFixed(4)}`;
-    
+
     // Create facility data
     const facilityData = {
       name: facilityName,
       lat: clickedLngLat[1],
       lng: clickedLngLat[0]
     };
-    
+
     // Send to server
     fetch('/climate-hazards-analysis-v2/api/add-facility/', {
       method: 'POST',
@@ -235,17 +400,17 @@
           userMarker.remove();
           userMarker = null;
         }
-        
+
         // Add the new facility marker
         addFacilityMarker({
           Facility: facilityData.name,
           Lat: facilityData.lat,
           Long: facilityData.lng
         });
-        
+
         // Hide the add facility panel
         document.getElementById('add-facility-panel').style.display = 'none';
-        
+
         // Reset the form
         document.getElementById('facility-name').value = '';
       } else {
@@ -255,6 +420,98 @@
     .catch(error => {
       console.error('Error:', error);
       alert('Error adding facility');
+    });
+  }
+
+  // Show polygon asset modal
+  function showPolygonAssetModal(lat, lng) {
+    // Update coordinates display
+    document.getElementById('polygon-centroid-coordinates').textContent =
+      `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
+
+    // Reset form
+    document.getElementById('polygon-asset-name').value = '';
+    document.getElementById('polygon-asset-archetype').value = 'default archetype';
+    document.getElementById('polygon-asset-name').classList.remove('is-invalid');
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('polygonAssetModal'));
+    modal.show();
+  }
+
+  // Cancel polygon asset
+  function cancelPolygonAsset() {
+    // Clear drawn polygons
+    draw.deleteAll();
+    drawnPolygonData = null;
+
+    // Hide modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('polygonAssetModal'));
+    if (modal) modal.hide();
+  }
+
+  // Confirm polygon asset
+  function confirmPolygonAsset() {
+    const assetName = document.getElementById('polygon-asset-name').value.trim();
+    const assetArchetype = document.getElementById('polygon-asset-archetype').value.trim() || 'default archetype';
+
+    // Validate asset name
+    if (!assetName) {
+      document.getElementById('polygon-asset-name').classList.add('is-invalid');
+      return;
+    }
+
+    if (!drawnPolygonData) {
+      alert('No polygon data found. Please draw a polygon first.');
+      return;
+    }
+
+    // Create facility data with polygon geometry
+    const facilityData = {
+      name: assetName,
+      archetype: assetArchetype,
+      lat: drawnPolygonData.centroid.lat,
+      lng: drawnPolygonData.centroid.lng,
+      geometry: drawnPolygonData.geometry
+    };
+
+    // Send to server
+    fetch('/climate-hazards-analysis-v2/api/add-facility/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken')
+      },
+      body: JSON.stringify(facilityData)
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        // Clear the drawing
+        draw.deleteAll();
+
+        // Add the new facility marker with polygon
+        addFacilityMarker({
+          Facility: facilityData.name,
+          Archetype: facilityData.archetype,
+          Lat: facilityData.lat,
+          Long: facilityData.lng,
+          geometry: facilityData.geometry
+        });
+
+        // Hide modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('polygonAssetModal'));
+        if (modal) modal.hide();
+
+        // Reset drawn polygon data
+        drawnPolygonData = null;
+      } else {
+        alert('Error adding asset: ' + data.error);
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+      alert('Error adding asset');
     });
   }
 
@@ -272,6 +529,8 @@ function addFacilityMarker(facility) {
   let sidebarContent = `
     <h4><strong>${facility.Facility}</strong></h4>
     <p><strong>Coordinates:</strong> ${facility.Lat.toFixed(6)}, ${facility.Long.toFixed(6)}</p>
+    ${facility.Archetype ? `<p><strong>Archetype:</strong> ${facility.Archetype}</p>` : ''}
+    ${facility.geometry ? `<p><span class="badge bg-info">Polygon Asset</span></p>` : ''}
     <hr>
     <h5>Hazard Profile</h5>
     <div style="text-align: center; margin-bottom: 10px;">

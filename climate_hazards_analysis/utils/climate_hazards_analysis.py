@@ -338,36 +338,48 @@ def process_water_stress_analysis(facility_csv_path, selected_fields, buffer_siz
 def process_sea_level_rise_analysis(facility_csv_path, selected_fields):
     """
     Process sea level rise analysis if selected.
-    
+
     Args:
         facility_csv_path (str): Path to facility CSV
         selected_fields (list): List of selected hazard types
-        
+
     Returns:
         tuple: (DataFrame with SLR values, list of plot paths)
     """
     if 'Sea Level Rise' not in selected_fields:
+        logger.info("Sea Level Rise not in selected fields, skipping")
         return None, []
-        
-    logger.info("Integrating Sea Level Rise Analysis")
+
+    logger.info("=== STARTING SEA LEVEL RISE ANALYSIS ===")
+    logger.info(f"Facility CSV path: {facility_csv_path}")
     plot_paths = []
-    
+
     try:
+        logger.info("Calling generate_sea_level_rise_analysis...")
         slr_res = generate_sea_level_rise_analysis(facility_csv_path)
-        
+        logger.info(f"SLR analysis result keys: {slr_res.keys() if slr_res else 'None'}")
+
         if 'error' in slr_res:
-            logger.warning(f"Warning in Sea Level Rise Analysis: {slr_res['error']}")
+            logger.error(f"ERROR in Sea Level Rise Analysis: {slr_res['error']}")
             return None, []
-            
+
         if not slr_res.get('combined_csv_paths'):
+            logger.warning("No combined_csv_paths in SLR result")
             return None, plot_paths
             
         # Read the SLR analysis CSV with proper encoding handling
+        slr_csv_path = slr_res['combined_csv_paths'][0]
+        logger.info(f"Reading SLR CSV from: {slr_csv_path}")
+        logger.info(f"SLR CSV exists: {os.path.exists(slr_csv_path)}")
+
         try:
-            df_slr = pd.read_csv(slr_res['combined_csv_paths'][0], encoding='utf-8')
+            df_slr = pd.read_csv(slr_csv_path, encoding='utf-8')
         except UnicodeDecodeError:
-            df_slr = pd.read_csv(slr_res['combined_csv_paths'][0], encoding='latin-1')
-        
+            df_slr = pd.read_csv(slr_csv_path, encoding='latin-1')
+
+        logger.info(f"SLR DataFrame shape: {df_slr.shape}")
+        logger.info(f"SLR DataFrame columns: {df_slr.columns.tolist()}")
+
         # Standardize column names
         rename_map = {
             'Site': 'Facility',
@@ -378,9 +390,12 @@ def process_sea_level_rise_analysis(facility_csv_path, selected_fields):
             'LONG': 'Long',
             'longitude': 'Long'
         }
+        logger.info(f"Applying rename map: {rename_map}")
         for old, new in rename_map.items():
             if old in df_slr.columns and new not in df_slr.columns:
                 df_slr.rename(columns={old: new}, inplace=True)
+
+        logger.info(f"SLR DataFrame columns after renaming: {df_slr.columns.tolist()}")
         
         # Standardize sea level rise column names
         rename_fields = {
@@ -406,18 +421,27 @@ def process_sea_level_rise_analysis(facility_csv_path, selected_fields):
         if 'Elevation (meter above sea level)' in df_slr.columns:
             slr_cols.insert(0, 'Elevation (meter above sea level)')
         available_slr_cols = slr_cols
-        
+
+        logger.info(f"Available SLR columns found: {available_slr_cols}")
+
         if not available_slr_cols:
             logger.warning("No SLR columns found in analysis output")
             return None, plot_paths
-            
+
         # Create SLR values dataframe
-        slr_values = df_slr[['Facility', 'Lat', 'Long'] + available_slr_cols].copy()
-        
+        required_cols = ['Facility', 'Lat', 'Long']
+        logger.info(f"Required columns for merge: {required_cols}")
+        logger.info(f"Checking if required columns exist in df_slr: {[col in df_slr.columns for col in required_cols]}")
+
+        slr_values = df_slr[required_cols + available_slr_cols].copy()
+        logger.info(f"Created SLR values dataframe with shape: {slr_values.shape}")
+        logger.info(f"SLR values columns: {slr_values.columns.tolist()}")
+
         # Collect plot paths
         if slr_res.get('png_paths'):
             plot_paths.extend(slr_res['png_paths'])
-            
+
+        logger.info("=== SEA LEVEL RISE ANALYSIS COMPLETED SUCCESSFULLY ===")
         return slr_values, plot_paths
         
     except Exception as e:
@@ -863,11 +887,21 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         
         for df_values, name in data_frames:
             if df_values is not None:
-                logger.info(f"Merging {name} values with {len(df_values)} rows")
+                logger.info(f"=== MERGING {name.upper()} ===")
+                logger.info(f"  {name} dataframe shape: {df_values.shape}")
+                logger.info(f"  {name} columns: {df_values.columns.tolist()}")
+                logger.info(f"  Combined DF before merge - shape: {combined_df.shape}")
+                logger.info(f"  Combined DF columns before merge: {combined_df.columns.tolist()}")
+
                 combined_df = combined_df.merge(
                     df_values, on=['Facility', 'Lat', 'Long'], how='left'
                 )
-                logger.info(f"Combined DF after {name} merge - shape: {combined_df.shape}")
+
+                logger.info(f"  Combined DF after {name} merge - shape: {combined_df.shape}")
+                logger.info(f"  Combined DF columns after merge: {combined_df.columns.tolist()}")
+                logger.info(f"=== END {name.upper()} MERGE ===")
+            else:
+                logger.info(f"Skipping {name} - dataframe is None")
 
         # Add future tropical cyclone values if TC analysis was performed
         if 'Tropical Cyclones' in selected_fields:

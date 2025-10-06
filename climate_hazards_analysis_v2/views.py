@@ -94,15 +94,6 @@ def view_map(request):
             df = standardize_facility_dataframe(df)
 
 
-            # Determine CSV path and save standardized data
-            if ext in ['.xls', '.xlsx', '.shp', '.zip']:
-                csv_path = os.path.splitext(file_path)[0] + '.csv'
-            else:
-                csv_path = file_path
-                
-            df.to_csv(csv_path, index=False)
-            request.session['climate_hazards_v2_facility_csv_path'] = csv_path
-            
             # Store facility data in session for map display
             if ext in ['.shp', '.zip']:
                 facility_data = []
@@ -116,14 +107,17 @@ def view_map(request):
                     facility_data.append(record)
             else:
                 facility_data = df.to_dict(orient='records')
-            
+
             # Debug: Log the facility data
             logger.info(f"Processed {len(facility_data)} facilities from file: {str(facility_data)[:200]}...")
-            
+
             # Explicitly store in session
             request.session['climate_hazards_v2_facility_data'] = facility_data
             request.session.modified = True  # Ensure session is saved
-            
+
+            # Save facility data to CSV (creates standardized CSV file)
+            csv_path = _save_facility_data_to_csv(request, facility_data)
+
             # Add success message to context
             context['success_message'] = f"Successfully loaded {len(facility_data)} facilities from {file.name}"
             
@@ -188,6 +182,7 @@ def preview_uploaded_file(request):
 def add_facility(request):
     """
     API endpoint to add a new facility from coordinates clicked on the map.
+    Supports both point-based facilities and polygon-based assets.
     """
     if request.method == 'POST':
         try:
@@ -195,35 +190,93 @@ def add_facility(request):
             lat = data.get('lat')
             lng = data.get('lng')
             name = data.get('name', f"New Facility at {lat:.4f}, {lng:.4f}")
-            
+            archetype = data.get('archetype', 'default archetype')
+            geometry = data.get('geometry')  # Polygon geometry if provided
+
             # Get existing facility data or initialize empty list
             facility_data = request.session.get('climate_hazards_v2_facility_data', [])
-            
-            # Add new facility
+
+            # Add new facility with optional archetype and geometry
             new_facility = {
                 'Facility': name,
                 'Lat': lat,
-                'Long': lng
+                'Long': lng,
+                'Archetype': archetype
             }
+
+            # Add polygon geometry if provided
+            if geometry:
+                new_facility['geometry'] = geometry
+
             facility_data.append(new_facility)
-            
+
             # Update session
             request.session['climate_hazards_v2_facility_data'] = facility_data
-            
+            request.session.modified = True
+
+            # Create/update CSV file from facility data
+            _save_facility_data_to_csv(request, facility_data)
+
+            # Log for debugging
+            logger.info(f"Added new facility: {name} at ({lat}, {lng}) with archetype '{archetype}'" +
+                       (f" and polygon geometry" if geometry else ""))
+
             return JsonResponse({
                 'success': True,
                 'facility': new_facility
             })
         except Exception as e:
+            logger.exception(f"Error adding facility: {str(e)}")
             return JsonResponse({
                 'success': False,
                 'error': str(e)
             }, status=400)
-    
+
     return JsonResponse({
         'success': False,
         'error': 'Only POST method is allowed'
     }, status=405)
+
+
+def _save_facility_data_to_csv(request, facility_data):
+    """
+    Helper function to save facility data from session to a CSV file.
+    This ensures compatibility with the analysis functions that expect a CSV file path.
+    """
+    if not facility_data:
+        return None
+
+    # Create upload directory if it doesn't exist
+    upload_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
+    os.makedirs(upload_dir, exist_ok=True)
+
+    # Generate a filename (use session key for uniqueness)
+    csv_filename = f"facility_data_{request.session.session_key or 'default'}.csv"
+    csv_path = os.path.join(upload_dir, csv_filename)
+
+    # Convert facility data to DataFrame (excluding geometry for CSV)
+    df_data = []
+    for facility in facility_data:
+        row = {
+            'Facility': facility.get('Facility'),
+            'Lat': facility.get('Lat'),
+            'Long': facility.get('Long'),
+            'Archetype': facility.get('Archetype', 'default archetype')
+        }
+        df_data.append(row)
+
+    df = pd.DataFrame(df_data)
+
+    # Save to CSV
+    df.to_csv(csv_path, index=False)
+
+    # Update session with CSV path
+    request.session['climate_hazards_v2_facility_csv_path'] = csv_path
+    request.session.modified = True
+
+    logger.info(f"Saved facility data to CSV: {csv_path}")
+
+    return csv_path
 
 def select_hazards(request):
     """
@@ -232,32 +285,38 @@ def select_hazards(request):
     """
     # Get facility data from session
     facility_data = request.session.get('climate_hazards_v2_facility_data', [])
-    
+
+    # Ensure CSV file exists for facility data (important for polygon/point-drawn assets)
+    facility_csv_path = request.session.get('climate_hazards_v2_facility_csv_path')
+    if facility_data and (not facility_csv_path or not os.path.exists(facility_csv_path)):
+        logger.info("CSV file not found, creating from session data...")
+        _save_facility_data_to_csv(request, facility_data)
+
     # Define available hazard types
     hazard_types = [
         'Flood',
         'Water Stress',
         'Heat',
-        'Sea Level Rise', 
+        'Sea Level Rise',
         'Tropical Cyclones',
         'Storm Surge',
         'Rainfall Induced Landslide'
     ]
-    
+
     context = {
         'facility_count': len(facility_data),
         'hazard_types': hazard_types,
         'selected_hazards': request.session.get('climate_hazards_v2_selected_hazards', []),
     }
-    
+
     # Handle form submission
     if request.method == 'POST':
         selected_hazards = request.POST.getlist('hazards')
         request.session['climate_hazards_v2_selected_hazards'] = selected_hazards
-        
+
         # Redirect to results page
         return redirect('climate_hazards_analysis_v2:show_results')
-        
+
     # For GET requests, just display the hazard selection form
     return render(request, 'climate_hazards_analysis_v2/select_hazards.html', context)
 
@@ -282,18 +341,33 @@ def show_results(request):
         logger.info(f"Selected hazards: {selected_hazards}")
         logger.info(f"Facility CSV path: {facility_csv_path}")
         
-        # Verify facility CSV file exists
+        # Verify facility CSV file exists, create if needed (for polygon/point-drawn assets)
         if not facility_csv_path or not os.path.exists(facility_csv_path):
-            logger.error(f"Facility CSV file not found: {facility_csv_path}")
-            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
-                'error': 'Facility CSV file not found. Please upload your facility data again.',
-                'facility_count': len(facility_data),
-                'hazard_types': [
-                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise', 
-                    'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
-                ],
-                'selected_hazards': selected_hazards
-            })
+            logger.warning(f"Facility CSV file not found: {facility_csv_path}, creating from session data...")
+            if facility_data:
+                facility_csv_path = _save_facility_data_to_csv(request, facility_data)
+                if not facility_csv_path or not os.path.exists(facility_csv_path):
+                    logger.error(f"Failed to create CSV file from facility data")
+                    return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                        'error': 'Failed to create facility data file. Please try uploading your data again.',
+                        'facility_count': len(facility_data),
+                        'hazard_types': [
+                            'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
+                            'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
+                        ],
+                        'selected_hazards': selected_hazards
+                    })
+            else:
+                logger.error(f"No facility data in session")
+                return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                    'error': 'Facility data not found. Please upload your facility data again.',
+                    'facility_count': 0,
+                    'hazard_types': [
+                        'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
+                        'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
+                    ],
+                    'selected_hazards': selected_hazards
+                })
         
         # Re-use the generate_climate_hazards_analysis function from the original module
         logger.info("Calling generate_climate_hazards_analysis...")
