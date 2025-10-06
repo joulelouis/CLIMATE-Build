@@ -12,26 +12,6 @@ Climate Hazard Analysis Results
 {% csrf_token %}
 
 <style>
-    /* === Step Header Styles === */
-    .step-header {
-        background-color: #f8f9fa;
-        color: #495057;
-        font-weight: bold;
-        padding: 10px;
-        border: 2px solid transparent;
-        transition: all 0.3s ease;
-    }
-
-    .step-header.active-step-header {
-        border: 2px solid #F1D500;
-        background-color: #fff8e1;
-        color: #495057;
-    }
-
-    .step-header.arrow::after {
-        content: "→";
-        margin-left: 10px;
-    }
 
     /* Custom Table Styling */
     .custom-table {
@@ -463,7 +443,7 @@ Climate Hazard Analysis Results
                         <div class="tab-pane fade show active" id="table-content" role="tabpanel" aria-labelledby="table-tab">
                             <!-- Styled Table -->
                             <div class="table-responsive">
-                                <table id="hazard-data-table" class="table custom-table">
+                                <table id="data-table" class="table custom-table">
                                     <thead>
                                         <!-- Grouping header row -->
                                         <tr class="group-header">
@@ -480,15 +460,87 @@ Climate Hazard Analysis Results
                                             {% endfor %}
                                         </tr>
                                         <tr class="sub-group-header">
-                                            <!-- This will be populated dynamically by JavaScript -->
+                                            {% for group, count in groups.items %}
+                                                {% if group == 'Heat' %}
+                                                    {% if heat_baseline_count %}
+                                                       <th colspan="{{ heat_baseline_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if heat_basecase_count %}
+                                                        <th colspan="{{ heat_basecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                    {% endif %}
+                                                    {% if heat_worstcase_count %}
+                                                        <th colspan="{{ heat_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+                                                {% elif group == 'Tropical Cyclones' %}
+                                                    {% if tc_baseline_count %}
+                                                        <th colspan="{{ tc_baseline_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if tc_basecase_count %}
+                                                        <th colspan="{{ tc_basecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                    {% endif %}
+                                                    {% if tc_worstcase_count %}
+                                                        <th colspan="{{ tc_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+
+                                                {% elif group == 'Water Stress' %}
+                                                    {% if ws_baseline_count %}
+                                                        <th colspan="{{ ws_baseline_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if ws_moderatecase_count %}
+                                                        <th colspan="{{ ws_moderatecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                    {% endif %}
+                                                    {% if ws_worstcase_count %}
+                                                        <th colspan="{{ ws_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+
+                                                {% elif group == 'Storm Surge' %}
+                                                    {% if ss_baseline_count %}
+                                                        <th colspan="{{ ss_baseline_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if ss_worstcase_count %}
+                                                        <th colspan="{{ ss_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+
+                                                 {% elif group == 'Sea Level Rise' %}
+                                                      {% if slr_moderatecase_count %}
+                                                          <th colspan="{{ slr_moderatecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                      {% endif %}
+                                                      {% if slr_worstcase_count %}
+                                                          <th colspan="{{ slr_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                      {% endif %}
+
+                                                {% elif group == 'Rainfall-Induced Landslide' %}
+                                                    {% if ls_baseline_count %}
+                                                        <th colspan="{{ ls_baseline_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if ls_moderatecase_count %}
+                                                        <th colspan="{{ ls_moderatecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                    {% endif %}
+                                                    {% if ls_worstcase_count %}
+                                                        <th colspan="{{ ls_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+
+                                                {% elif group == 'Flood' %}
+                                                    {% if flood_current_count %}
+                                                        <th colspan="{{ flood_current_count }}" class="text-center baseline-header">Current</th>
+                                                    {% endif %}
+                                                    {% if flood_moderate_count %}
+                                                        <th colspan="{{ flood_moderate_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                                                    {% endif %}
+                                                    {% if flood_worst_count %}
+                                                        <th colspan="{{ flood_worst_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                                                    {% endif %}
+
+                                                {% else %}
+                                                    <th colspan="{{ count }}"></th>
+                                                {% endif %}
+                                            {% endfor %}
                                         </tr> 
                                         <tr class="custom-table-header">
                                             {% for column in columns %}
                                                 <th data-column-name="{{ column }}">
                                                     {% if column == "Facility" %}
                                                         Asset
-                                                    {% elif column == "Asset Archetype" %}
-                                                        Asset Archetype
                                                     {% else %}
                                                         {{ column }}
                                                     {% endif %}
@@ -503,12 +555,8 @@ Climate Hazard Analysis Results
             {% for key in columns %}
                 {% with value=row|get_item:key %}
                 <td>
-                    {# Asset Archetype styling - Yellow badge similar to sensitivity analysis #}
-                    {% if key == "Asset Archetype" and value != "N/A" %}
-                        <span class="badge" style="background-color: #F1D500; color: #000; font-weight: 600;">{{ value }}</span>
-
                     {# Water Stress Exposure styling #}
-                    {% elif "Water Stress Exposure" in key and value != "N/A" %}
+                    {% if "Water Stress Exposure" in key and value != "N/A" %}
                         {% with val=value|to_float %}
                             {% if val < 10 %}
                                 <span style="color: green; font-weight: bold;">{{ value }}</span>
@@ -615,18 +663,18 @@ Climate Hazard Analysis Results
                             <!-- After table controls -->
                         <div class="d-flex justify-content-between align-items-center mt-3">
                             <!-- Legend on the left -->
-                            <ul class="legend d-flex" style="list-style: none; padding: 0; margin: 0; align-items: center;">
-                                <li class="low" style="display: flex; align-items: center; margin-right: 20px;">
-                                    <span style="display: inline-block; width: 16px; height: 16px; background-color: #28a745; border-radius: 50%; margin-right: 10px; box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);"></span>
-                                    <span style="font-size: 14px; font-weight: 500; color: #495057;">Low Exposure</span>
+                            <ul class="legend d-flex" style="list-style: none; padding: 0; margin: 0;">
+                                <li class="low" style="display: flex; align-items: center; margin-right: 15px;">
+                                    <span style="display: inline-block; width: 15px; height: 15px; background-color: green; margin-right: 8px;"></span>
+                                    Low Exposure
                                 </li>
-                                <li class="medium" style="display: flex; align-items: center; margin-right: 20px;">
-                                    <span style="display: inline-block; width: 16px; height: 16px; background-color: #fd7e14; border-radius: 50%; margin-right: 10px; box-shadow: 0 2px 4px rgba(253, 126, 20, 0.3);"></span>
-                                    <span style="font-size: 14px; font-weight: 500; color: #495057;">Medium Exposure</span>
+                                <li class="medium" style="display: flex; align-items: center; margin-right: 15px;">
+                                    <span style="display: inline-block; width: 15px; height: 15px; background-color: orange; margin-right: 8px;"></span>
+                                    Medium Exposure
                                 </li>
                                 <li class="high" style="display: flex; align-items: center;">
-                                    <span style="display: inline-block; width: 16px; height: 16px; background-color: #dc3545; border-radius: 50%; margin-right: 10px; box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3);"></span>
-                                    <span style="font-size: 14px; font-weight: 500; color: #495057;">High Exposure</span>
+                                    <span style="display: inline-block; width: 15px; height: 15px; background-color: red; margin-right: 8px;"></span>
+                                    High Exposure
                                 </li>
                             </ul>
                            
@@ -772,30 +820,98 @@ if (typeof window.jQuery === 'undefined') {
 } else {
     $(document).ready(function() {
         try {
-            console.log('Initializing enhanced manual table...');
+            if (!$.fn.DataTable) {
+                throw new Error('DataTables library not loaded');
+            }
+            console.log('Initializing Adjust Magnitude with Local Conditions...');
 
-            // Initialize manual table setup
-            buildColumnHeaderMap();
-            storeTableRows();
-            setupColumnSelector();
-            updateColumnVisibility();
-            setupSorting();
-            setupPagination();
-            setupSearch();
+        dataTable = $('#data-table').DataTable({
+            scrollX: true,
+            scrollCollapse: true,
+            fixedHeader: true,
+            autoWidth: true,
+            dom: 'Bfrtip',
+            buttons: [
+                {
+                    extend: 'excelHtml5',
+                    text: '<i class="fas fa-file-excel"></i> Save to Excel',
+                    className: 'btn btn-outline-secondary',
+                    exportOptions: {
+                        columns: ':visible'
+                    }
+                },
+                {
+                    text: '<i class="fas fa-undo"></i> Reset Changes',
+                    className: 'btn btn-warning',
+                    action: function(e, dt, node, config) {
+                        resetAllChanges();
+                    }
+                }
+            ],
+            fixedColumns: {
+                leftColumns: 1
+            },
+            columnDefs: [
+                { targets: [1, 2], visible: false },
+                { width: '18%', targets: 0 },
+                { width: '10%', targets: '_all' },
+                { className: "dt-head-center dt-body-center", targets: "_all" },
+                {
+                    targets: '_all',
+                    createdCell: function(td, cellData, rowData, row, col) {
+                        console.log("this line has been parsed")
+                        setTimeout(function() {
+                            
+                            const dt = $('#data-table').DataTable();
+                            const headerEl = dt.column(col).header();
 
-            // Initial setup
-            renderTable();
-            updatePaginationControls();
+                            if (!headerEl) {
+                                return;
+                            }
 
-            // Initialize header alignment
-            updateGroupAndScenarioHeaders();
+                            const columnName = $(headerEl).data('column-name') || headerEl.textContent.trim();
+                            const nonEditableColumns = [
+                                'Facility',
+                                'Lat',
+                                'Long',
+                                '2030 Sea Level Rise (meters) - Moderate Case',
+                                '2040 Sea Level Rise (meters) - Moderate Case',
+                                '2050 Sea Level Rise (meters) - Moderate Case',
+                                '2030 Sea Level Rise (meters) - Worst Case',
+                                '2040 Sea Level Rise (meters) - Worst Case',
+                                '2050 Sea Level Rise (meters) - Worst Case'
+                            ];
+                            if (!nonEditableColumns.includes(columnName)) {
+                                $(td).addClass('editable-cell');
+                                $(td).attr('data-original-value', $(td).text().trim());
+                                $(td).attr('data-column', columnName);
+                                $(td).attr('data-row', row);
+                                $(td).attr('title', 'Click to edit');
+                            }
+                        }, 10);
+                    }
+                }
+            ],
+            initComplete: function() {
+                console.log('DataTable initialization complete');
+                setTimeout(() => {
+                    buildColumnIndexMap();
+                    setupColumnSelector();
+                    updateColumnVisibility();
+                    setTimeout(() => {
+                        attachEditableHandlers();
+                        console.log('All functionality initialized');
+                    }, 200);
+                }, 100);
+            },
+            drawCallback: function() {
+                setTimeout(() => {
+                    attachEditableHandlers();
+                }, 100);
+            }
+        });
 
-            setTimeout(() => {
-                attachEditableHandlers();
-                console.log('All functionality initialized');
-            }, 200);
-
-            console.log('Manual table initialized successfully');
+        console.log('DataTable initialized successfully');
 
     } catch (error) {
         console.error('Error initializing DataTable:', error);
@@ -1256,729 +1372,136 @@ function updateChangeIndicator() {
 }
 
 function setupColumnSelector() {
-    console.log('Setting up column selector for manual table...');
+    if (!dataTable || typeof dataTable.column !== 'function') {
+        console.error('DataTable not ready for column selector');
+        return;
+    }
 
     try {
-        // Remove existing event handlers to prevent duplicates
-        $('.base-column, .hazard-column').off('change');
-        $('.hazard-group').off('change');
 
-        $('.base-column, .hazard-column').on('change', function () {
-            console.log(`Checkbox changed: ${$(this).data('column')}, checked: ${$(this).is(':checked')}`);
-            if ($(this).hasClass('hazard-column')) {
-                updateParentCheckboxState($(this));
-            }
-            updateColumnVisibility();
-        });
+    $('.base-column, .hazard-column').on('change', function () {
+        if ($(this).hasClass('hazard-column')) {
+            updateParentCheckboxState($(this));
+        }
+        updateColumnVisibility();
+    });
 
-        $('.hazard-group').on('change', function () {
-            const group = $(this).data('hazard');
-            const isChecked = $(this).is(':checked');
-            console.log(`Group checkbox changed: ${group}, checked: ${isChecked}`);
-            $(`.hazard-column.${group}`).prop('checked', isChecked);
-            updateParentCheckboxes();
-            updateColumnVisibility();
-        });
+    $('.hazard-group').on('change', function () {
+        const group = $(this).data('hazard');
+        const isChecked = $(this).is(':checked');
+        $(`.hazard-column.${group}`).prop('checked', isChecked);
+        updateParentCheckboxes();
+        updateColumnVisibility();
+    });
 
-        // Delegated events bound to the document so replacements still work
-        $(document).off('click', '#show-all-columns');
-        $(document).on('click', '#show-all-columns', function (e) {
-            e.preventDefault();
-            console.log('Show all columns clicked');
-            $('.hazard-column').prop('checked', true);
-            $('.base-column:not([disabled])').prop('checked', true);
-            updateParentCheckboxes();
-            updateColumnVisibility();
-        });
+    // Delegated events bound to the document so replacements still work
+    $(document).off('click', '#show-all-columns');
+    $(document).on('click', '#show-all-columns', function (e) {
+        e.preventDefault();
+        $('.hazard-column').prop('checked', true);
+        $('.base-column:not([disabled])').prop('checked', true);
+        updateParentCheckboxes();
+        updateColumnVisibility();
+    });
 
-        $(document).off('click', '#hide-all-columns');
-        $(document).on('click', '#hide-all-columns', function (e) {
-            e.preventDefault();
-            console.log('Hide all columns clicked');
-            $('.hazard-column').prop('checked', false);
-            $('.base-column:not([disabled])').prop('checked', false);
-            updateParentCheckboxes();
-            updateColumnVisibility();
-        });
-
-        console.log('Column selector setup completed');
+    $(document).off('click', '#hide-all-columns');
+    $(document).on('click', '#hide-all-columns', function (e) {
+        e.preventDefault();
+        $('.hazard-column').prop('checked', false);
+        $('.base-column:not([disabled])').prop('checked', false);
+        updateParentCheckboxes();
+        updateColumnVisibility();
+    });
     } catch (error) {
         console.error('Error setting up column selector:', error);
         showError('Error setting up column selector: ' + error.message);
     }
-
-    // Setup search functionality
-    setupColumnSearch();
-}
-
-// Column Search Functionality
-function setupColumnSearch() {
-    try {
-        // Setup search input event listeners
-        $(document).off('input', '#column-search');
-        $(document).on('input', '#column-search', function() {
-            const searchTerm = $(this).val().toLowerCase().trim();
-            filterColumnsBySearch(searchTerm);
-        });
-
-        // Setup clear search button
-        $(document).off('click', '#clear-search');
-        $(document).on('click', '#clear-search', function() {
-            $('#column-search').val('');
-            filterColumnsBySearch('');
-            $('#column-search').focus();
-        });
-
-        console.log('Column search functionality initialized');
-    } catch (error) {
-        console.error('Error setting up column search:', error);
-        showError('Error setting up column search: ' + error.message);
-    }
-}
-
-function filterColumnsBySearch(searchTerm) {
-    try {
-        // If no search term, show all columns
-        if (!searchTerm) {
-            $('.column-selector .mb-3').show();
-            $('.form-check').show();
-            updateSearchMatchCount();
-            return;
-        }
-
-        let totalMatches = 0;
-
-        // Search through all hazard groups
-        $('.column-selector .mb-3').each(function() {
-            const $group = $(this);
-            let groupHasMatches = false;
-
-            // Check the main group label
-            const groupLabel = $group.find('> .form-check > .form-check-label').text().toLowerCase();
-            const groupMatches = groupLabel.includes(searchTerm);
-
-            // Search through all form-check elements in this group
-            $group.find('.form-check').each(function() {
-                const $formCheck = $(this);
-                const labelText = $formCheck.find('.form-check-label').text().toLowerCase();
-                const dataColumn = $formCheck.find('input').data('column') || '';
-                const dataColumnText = dataColumn.toString().toLowerCase();
-
-                // Check if this item matches the search term
-                const matches = labelText.includes(searchTerm) ||
-                               dataColumnText.includes(searchTerm) ||
-                               groupMatches;
-
-                if (matches) {
-                    $formCheck.show();
-                    groupHasMatches = true;
-                    totalMatches++;
-                } else {
-                    $formCheck.hide();
-                }
-            });
-
-            // Show/hide the entire group based on whether any items matched
-            if (groupHasMatches) {
-                $group.show();
-            } else {
-                $group.hide();
-            }
-        });
-
-        updateSearchMatchCount(totalMatches, searchTerm);
-
-    } catch (error) {
-        console.error('Error filtering columns:', error);
-        showError('Error filtering columns: ' + error.message);
-    }
-}
-
-function updateSearchMatchCount(matchCount, searchTerm) {
-    // Remove existing search result indicator
-    $('#search-results-indicator').remove();
-
-    if (matchCount !== undefined && searchTerm) {
-        // Add search results indicator
-        const indicator = $(`
-            <div id="search-results-indicator" class="alert alert-info py-2 mb-2">
-                <small><i class="fas fa-search me-1"></i>${matchCount} column(s) found for "${searchTerm}"</small>
-            </div>
-        `);
-
-        $('#column-search').closest('.mb-3').after(indicator);
-    }
 }
 
 function buildColumnIndexMap() {
-    // This function is replaced by buildColumnHeaderMap() for manual table
-    // Keep for compatibility but redirect to the new function
-    buildColumnHeaderMap();
+    columnIndexMap = {};
+    dataTable.columns().every(function(index) {
+        const $header = $(this.header());
+        const name = $header.data('column-name') || $header.text().trim();
+        if (!(name in columnIndexMap)) {
+            columnIndexMap[name] = index;
+        }
+    });
 }
 
 // FIXED: Improved column visibility update function
 function updateColumnVisibility() {
+    if (!dataTable) {
+        console.error("DataTable not initialized");
+        return;
+    }
+
+    if (Object.keys(columnIndexMap).length === 0) {
+        buildColumnIndexMap();
+    }
+    
     try {
         console.log('Updating column visibility...');
-
+        
         // Always show Facility column
         const visibleColumns = new Set(['Facility']);
-
-        // Handle base columns (Asset Archetype)
+        
+        // Handle base columns (Lat/Long)
         $('.base-column').each(function() {
             const columnName = $(this).data('column');
             const isChecked = $(this).prop('checked');
-
-            if (isChecked) {
+            
+            if (isChecked && columnIndexMap.hasOwnProperty(columnName)) {
                 visibleColumns.add(columnName);
                 console.log(`Will show base column: ${columnName}`);
             }
         });
-
+        
         // Handle hazard columns
         $('.hazard-column').each(function() {
             const columnName = $(this).data('column');
             const isChecked = $(this).prop('checked');
-
+            
             console.log(`Checkbox for "${columnName}": ${isChecked}`);
-
-            if (isChecked) {
+            
+            if (isChecked && columnIndexMap.hasOwnProperty(columnName)) {
                 visibleColumns.add(columnName);
                 console.log(`Will show hazard column: ${columnName}`);
             }
         });
-
-        // Update header visibility
-        Object.keys(tableState.columnHeaderMap).forEach(function(columnName) {
-            const columnIndex = tableState.columnHeaderMap[columnName];
-            const shouldShow = visibleColumns.has(columnName);
-
-            // Hide/show header cells
-            $(`#hazard-data-table thead tr th:nth-child(${columnIndex + 1})`).toggle(shouldShow);
-
-            // Hide/show body cells
-            $(`#hazard-data-table tbody tr td:nth-child(${columnIndex + 1})`).toggle(shouldShow);
+        
+        // Update column visibility
+        let changesCount = 0;
+        dataTable.columns().every(function() {
+            const $header = $(this.header());
+            const name = $header.data('column-name') || $header.text().trim();
+            const shouldBeVisible = visibleColumns.has(name);
+            
+            if (this.visible() !== shouldBeVisible) {
+                this.visible(shouldBeVisible, false); // false = no immediate redraw
+                changesCount++;
+            }
         });
+        
+        console.log(`Changed visibility for ${changesCount} columns`);
+        
+        // Single redraw after all changes
+        if (changesCount > 0) {
+            dataTable.columns.adjust().draw(false);
+        }
         
         // Re-attach editable handlers after column changes
         setTimeout(function() {
             attachEditableHandlers();
             $(window).trigger('resize');
         }, 100);
-
-        // Update group and scenario headers after column visibility changes
-        updateGroupAndScenarioHeaders();
-
+        
         console.log('Column visibility update complete');
-
+        
     } catch (error) {
         console.error("Error updating column visibility:", error);
         showError('Error updating column visibility: ' + error.message);
     }
-}
-
-// === GROUP AND SCENARIO HEADER MANAGEMENT ===
-function updateGroupAndScenarioHeaders() {
-    console.log('Updating group and scenario headers...');
-
-    // Get all visible columns
-    const visibleColumns = new Set(['Facility']);
-
-    // Add Asset Archetype if checked
-    $('.base-column').each(function() {
-        const columnName = $(this).data('column');
-        if ($(this).prop('checked')) {
-            visibleColumns.add(columnName);
-        }
-    });
-
-    $('.hazard-column').each(function() {
-        const columnName = $(this).data('column');
-        if ($(this).prop('checked')) {
-            visibleColumns.add(columnName);
-        }
-    });
-
-    // Define scenario mapping for climate hazards
-    const scenarioMapping = {
-        'Asset Information': {
-            '': ['Facility', 'Asset Archetype'] // No scenario header for asset info
-        },
-        'Flood': {
-            'Current': ['Flood Depth (meters)'],
-            'Future (Moderate Case)': ['Flood Depth (meters) - Moderate Case'],
-            'Future (Worst Case)': ['Flood Depth (meters) - Worst Case']
-        },
-        'Water Stress': {
-            'Current': ['Water Stress Exposure (%)'],
-            'Future (Moderate Case)': [
-                'Water Stress Exposure 2030 (%) - Moderate Case',
-                'Water Stress Exposure 2050 (%) - Moderate Case'
-            ],
-            'Future (Worst Case)': [
-                'Water Stress Exposure 2030 (%) - Worst Case',
-                'Water Stress Exposure 2050 (%) - Worst Case'
-            ]
-        },
-        'Sea Level Rise': {
-            'Future (Moderate Case)': [
-                '2030 Sea Level Rise (meters) - Moderate Case',
-                '2040 Sea Level Rise (meters) - Moderate Case',
-                '2050 Sea Level Rise (meters) - Moderate Case'
-            ],
-            'Future (Worst Case)': [
-                '2030 Sea Level Rise (meters) - Worst Case',
-                '2040 Sea Level Rise (meters) - Worst Case',
-                '2050 Sea Level Rise (meters) - Worst Case'
-            ]
-        },
-        'Tropical Cyclones': {
-            'Current': [
-                'Extreme Windspeed 10 year Return Period (km/h)',
-                'Extreme Windspeed 20 year Return Period (km/h)',
-                'Extreme Windspeed 50 year Return Period (km/h)',
-                'Extreme Windspeed 100 year Return Period (km/h)'
-            ],
-            'Future (Moderate Case)': [
-                'Extreme Windspeed 10 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 20 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 50 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 100 year Return Period (km/h) - Moderate Case'
-            ],
-            'Future (Worst Case)': [
-                'Extreme Windspeed 10 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 100 year Return Period (km/h) - Worst Case'
-            ]
-        },
-        'Heat': {
-            'Current': [
-                'Days over 30° Celsius',
-                'Days over 33° Celsius',
-                'Days over 35° Celsius'
-            ],
-            'Future (Moderate Case)': [
-                'Days over 35° Celsius (2026 - 2030) - Moderate Case',
-                'Days over 35° Celsius (2031 - 2040) - Moderate Case',
-                'Days over 35° Celsius (2041 - 2050) - Moderate Case'
-            ],
-            'Future (Worst Case)': [
-                'Days over 35° Celsius (2026 - 2030) - Worst Case',
-                'Days over 35° Celsius (2031 - 2040) - Worst Case',
-                'Days over 35° Celsius (2041 - 2050) - Worst Case'
-            ]
-        },
-        'Storm Surge': {
-            'Current': [
-                'Storm Surge Flood Depth (meters)'
-            ],
-            'Future (Worst Case)': [
-                'Storm Surge Flood Depth (meters) - Worst Case'
-            ]
-        },
-        'Rainfall-Induced Landslide': {
-            'Current': [
-                'Rainfall-Induced Landslide (factor of safety)'
-            ],
-            'Future (Moderate Case)': [
-                'Rainfall-Induced Landslide (factor of safety) - Moderate Case'
-            ],
-            'Future (Worst Case)': [
-                'Rainfall-Induced Landslide (factor of safety) - Worst Case'
-            ]
-        }
-    };
-
-    // Build scenario headers
-    let scenarioHeaderHtml = '';
-    const groupCounts = {};
-
-    // Handle Asset Information first (no scenario sub-headers)
-    const assetColumns = ['Facility', 'Asset Archetype'];
-    let assetVisibleCount = 0;
-    assetColumns.forEach(function(columnName) {
-        if (visibleColumns.has(columnName)) {
-            assetVisibleCount++;
-        }
-    });
-
-    if (assetVisibleCount > 0) {
-        // Empty scenario header cells for Asset Information (spans directly to columns)
-        scenarioHeaderHtml += `<th colspan="${assetVisibleCount}"></th>`;
-        groupCounts['Asset Information'] = assetVisibleCount;
-    }
-
-    // Handle climate hazards (with scenario sub-headers)
-    Object.keys(scenarioMapping).forEach(function(groupName) {
-        if (groupName === 'Asset Information') return; // Already handled above
-
-        if (!groupCounts[groupName]) groupCounts[groupName] = 0;
-        const scenarios = scenarioMapping[groupName];
-
-        Object.keys(scenarios).forEach(function(scenarioName) {
-            const columns = scenarios[scenarioName];
-            let visibleCount = 0;
-
-            columns.forEach(function(columnName) {
-                if (visibleColumns.has(columnName)) {
-                    visibleCount++;
-                }
-            });
-
-            if (visibleCount > 0) {
-                const scenarioClass = scenarioName.includes('Current') ? 'baseline-header' :
-                                    scenarioName.includes('Moderate') ? 'moderate-header' :
-                                    scenarioName.includes('Worst') ? 'worstcase-header' : '';
-
-                scenarioHeaderHtml += `<th colspan="${visibleCount}" class="text-center ${scenarioClass}">${scenarioName}</th>`;
-                groupCounts[groupName] += visibleCount;
-            }
-        });
-    });
-
-    // Update scenario headers
-    $('#hazard-data-table thead tr.sub-group-header').html(scenarioHeaderHtml);
-
-    // Update group header colspans
-    $('#hazard-data-table thead tr.group-header th').each(function(index) {
-        const groupName = $(this).text().trim();
-        const count = groupCounts[groupName] || 0;
-
-        if (count > 0) {
-            $(this).attr('colspan', count).show();
-        } else {
-            $(this).hide();
-        }
-
-        console.log(`Group "${groupName}": ${count} visible columns`);
-    });
-
-    console.log('Group and scenario headers updated dynamically');
-}
-
-// === MANUAL TABLE STATE MANAGEMENT ===
-let tableState = {
-    columnHeaderMap: {},
-    allRows: [],
-    filteredRows: [],
-    currentPage: 1,
-    rowsPerPage: 25,
-    sortColumn: null,
-    sortDirection: 'asc',
-    searchTerm: ''
-};
-
-// Map column headers to their indices
-function buildColumnHeaderMap() {
-    console.log('Building header map...');
-
-    const $headers = $('#hazard-data-table thead tr.custom-table-header th');
-    console.log('Found headers:', $headers.length);
-
-    tableState.columnHeaderMap = {};
-
-    $headers.each(function(index) {
-        // Use data-column-name attribute first, then fall back to text content
-        const columnName = $(this).attr('data-column-name') || $(this).text().trim();
-        tableState.columnHeaderMap[columnName] = index;
-        console.log(`Mapped column "${columnName}" to index ${index}`);
-    });
-
-    console.log('Header map built:', tableState.columnHeaderMap);
-}
-
-// Store all table rows for sorting/filtering
-function storeTableRows() {
-    const $rows = $('#hazard-data-table tbody tr');
-    tableState.allRows = [];
-
-    $rows.each(function() {
-        const $cells = $(this).find('td');
-        const rowData = [];
-        $cells.each(function() {
-            rowData.push($(this).html()); // Store HTML to preserve styling
-        });
-        tableState.allRows.push({
-            element: $(this)[0].outerHTML,
-            data: rowData,
-            searchText: $(this).text().toLowerCase()
-        });
-    });
-
-    tableState.filteredRows = [...tableState.allRows];
-    console.log('Stored', tableState.allRows.length, 'rows');
-}
-
-// SORTING FUNCTIONALITY
-function setupSorting() {
-    $('#hazard-data-table thead tr.custom-table-header th').each(function(index) {
-        const $header = $(this);
-        const columnName = $header.text().trim();
-
-        // Add sorting indicators
-        $header.css({
-            'cursor': 'pointer',
-            'user-select': 'none',
-            'position': 'relative'
-        });
-
-        // Add click handler for sorting
-        $header.on('click', function() {
-            sortByColumn(index, columnName);
-        });
-
-        // Add hover effect
-        $header.hover(
-            function() { $(this).css('background-color', '#e9ecef'); },
-            function() { $(this).css('background-color', ''); }
-        );
-    });
-}
-
-function sortByColumn(columnIndex, columnName) {
-    // Update sort state
-    if (tableState.sortColumn === columnIndex) {
-        tableState.sortDirection = tableState.sortDirection === 'asc' ? 'desc' : 'asc';
-    } else {
-        tableState.sortColumn = columnIndex;
-        tableState.sortDirection = 'asc';
-    }
-
-    // Update header indicators
-    $('#hazard-data-table thead tr.custom-table-header th').each(function(index) {
-        const $header = $(this);
-        $header.find('.sort-indicator').remove();
-
-        if (index === columnIndex) {
-            const indicator = tableState.sortDirection === 'asc' ? ' ↑' : ' ↓';
-            $header.append(`<span class="sort-indicator">${indicator}</span>`);
-        }
-    });
-
-    // Sort the filtered rows
-    tableState.filteredRows.sort(function(a, b) {
-        const aValue = $(a.data[columnIndex]).text().trim();
-        const bValue = $(b.data[columnIndex]).text().trim();
-
-        // Try to parse as numbers first
-        const aNum = parseFloat(aValue.replace(/[^\d.-]/g, ''));
-        const bNum = parseFloat(bValue.replace(/[^\d.-]/g, ''));
-
-        let comparison = 0;
-        if (!isNaN(aNum) && !isNaN(bNum)) {
-            // Numeric comparison
-            comparison = aNum - bNum;
-        } else {
-            // String comparison
-            comparison = aValue.localeCompare(bValue);
-        }
-
-        return tableState.sortDirection === 'asc' ? comparison : -comparison;
-    });
-
-    // Reset to first page and render
-    tableState.currentPage = 1;
-    renderTable();
-    updatePaginationControls();
-}
-
-// PAGINATION FUNCTIONALITY
-function renderTable() {
-    const startIndex = (tableState.currentPage - 1) * tableState.rowsPerPage;
-    const endIndex = startIndex + tableState.rowsPerPage;
-    const pageRows = tableState.filteredRows.slice(startIndex, endIndex);
-
-    const $tbody = $('#hazard-data-table tbody');
-    $tbody.empty();
-
-    if (pageRows.length === 0) {
-        $tbody.append('<tr><td colspan="100%" class="text-center text-muted">No data found</td></tr>');
-        return;
-    }
-
-    pageRows.forEach(function(row) {
-        $tbody.append(row.element);
-    });
-
-    // Update column visibility after rendering
-    updateColumnVisibilityOnRows();
-
-    // Update header colspans based on visible columns
-    updateGroupAndScenarioHeaders();
-}
-
-function updateColumnVisibilityOnRows() {
-    const visibleColumns = new Set(['Facility']);
-
-    $('.base-column').each(function() {
-        const columnName = $(this).data('column');
-        if ($(this).prop('checked')) {
-            visibleColumns.add(columnName);
-        }
-    });
-
-    $('.hazard-column').each(function() {
-        const columnName = $(this).data('column');
-        if ($(this).prop('checked')) {
-            visibleColumns.add(columnName);
-        }
-    });
-
-    Object.keys(tableState.columnHeaderMap).forEach(function(columnName) {
-        const columnIndex = tableState.columnHeaderMap[columnName];
-        const shouldShow = visibleColumns.has(columnName);
-        $(`#hazard-data-table tbody tr td:nth-child(${columnIndex + 1})`).toggle(shouldShow);
-    });
-}
-
-function setupPagination() {
-    // Add pagination controls after the table
-    const paginationHtml = `
-        <div id="table-pagination" class="row mt-3">
-            <div class="col-md-6">
-                <div class="d-flex align-items-center">
-                    <label for="rows-per-page" class="me-2">Rows per page:</label>
-                    <select id="rows-per-page" class="form-select" style="width: auto;">
-                        <option value="10">10</option>
-                        <option value="25" selected>25</option>
-                        <option value="50">50</option>
-                        <option value="100">100</option>
-                        <option value="-1">All</option>
-                    </select>
-                    <span id="table-info" class="ms-3 text-muted"></span>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <nav aria-label="Table pagination">
-                    <ul id="pagination-controls" class="pagination justify-content-end mb-0">
-                    </ul>
-                </nav>
-            </div>
-        </div>
-    `;
-
-    $('#hazard-data-table').closest('.table-responsive').after(paginationHtml);
-
-    // Handle rows per page change
-    $('#rows-per-page').on('change', function() {
-        const value = parseInt($(this).val());
-        tableState.rowsPerPage = value === -1 ? tableState.filteredRows.length : value;
-        tableState.currentPage = 1;
-        renderTable();
-        updatePaginationControls();
-    });
-}
-
-function updatePaginationControls() {
-    const totalRows = tableState.filteredRows.length;
-    const totalPages = tableState.rowsPerPage === tableState.filteredRows.length ? 1 :
-                      Math.ceil(totalRows / tableState.rowsPerPage);
-
-    // Update info
-    const startRow = totalRows === 0 ? 0 : (tableState.currentPage - 1) * tableState.rowsPerPage + 1;
-    const endRow = Math.min(tableState.currentPage * tableState.rowsPerPage, totalRows);
-    $('#table-info').text(`Showing ${startRow} to ${endRow} of ${totalRows} entries`);
-
-    // Update pagination controls
-    const $controls = $('#pagination-controls');
-    $controls.empty();
-
-    if (totalPages <= 1) return;
-
-    // Previous button
-    $controls.append(`
-        <li class="page-item ${tableState.currentPage === 1 ? 'disabled' : ''}">
-            <a class="page-link" href="#" data-page="${tableState.currentPage - 1}">Previous</a>
-        </li>
-    `);
-
-    // Page numbers
-    const startPage = Math.max(1, tableState.currentPage - 2);
-    const endPage = Math.min(totalPages, tableState.currentPage + 2);
-
-    for (let i = startPage; i <= endPage; i++) {
-        $controls.append(`
-            <li class="page-item ${i === tableState.currentPage ? 'active' : ''}">
-                <a class="page-link" href="#" data-page="${i}">${i}</a>
-            </li>
-        `);
-    }
-
-    // Next button
-    $controls.append(`
-        <li class="page-item ${tableState.currentPage === totalPages ? 'disabled' : ''}">
-            <a class="page-link" href="#" data-page="${tableState.currentPage + 1}">Next</a>
-        </li>
-    `);
-
-    // Add click handlers
-    $controls.find('a.page-link').on('click', function(e) {
-        e.preventDefault();
-        const page = parseInt($(this).data('page'));
-        if (page > 0 && page <= totalPages && page !== tableState.currentPage) {
-            tableState.currentPage = page;
-            renderTable();
-            updatePaginationControls();
-        }
-    });
-}
-
-// SEARCH FUNCTIONALITY
-function setupSearch() {
-    // Add search box above the table
-    const searchHtml = `
-        <div id="table-search" class="row mb-3">
-            <div class="col-md-6">
-                <div class="input-group">
-                    <span class="input-group-text">
-                        <i class="fas fa-search"></i>
-                    </span>
-                    <input type="text" id="search-input" class="form-control"
-                           placeholder="Search in table...">
-                    <button class="btn btn-outline-secondary" type="button" id="clear-search">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="d-flex justify-content-end">
-                    <button type="button" id="export-excel-btn" class="btn btn-success btn-sm">
-                        <i class="fas fa-file-excel me-1"></i> Export to Excel
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-
-    $('#hazard-data-table').closest('.table-responsive').before(searchHtml);
-
-    // Handle search
-    $('#search-input').on('input', function() {
-        const searchTerm = $(this).val().toLowerCase().trim();
-        performSearch(searchTerm);
-    });
-
-    $('#clear-search').on('click', function() {
-        $('#search-input').val('');
-        performSearch('');
-    });
-}
-
-function performSearch(searchTerm) {
-    tableState.searchTerm = searchTerm;
-
-    if (searchTerm === '') {
-        tableState.filteredRows = [...tableState.allRows];
-    } else {
-        tableState.filteredRows = tableState.allRows.filter(function(row) {
-            return row.searchText.includes(searchTerm);
-        });
-    }
-
-    tableState.currentPage = 1;
-    renderTable();
-    updatePaginationControls();
 }
 
 // Helper function to update a specific parent checkbox state
@@ -2103,27 +1626,17 @@ function highlightHeaders(currentStep) {
     }
 }
 
-function highlightSteps(currentStep, completedSteps = []) {
+function highlightSteps(currentStep) {
     const steps = document.querySelectorAll('.step-item');
     steps.forEach((step, index) => {
         const circle = step.querySelector('.step-circle');
         const label = step.querySelector('.step-label');
         if (!circle || !label) return;
-
-        const stepNumber = index + 1;
-
-        if (stepNumber === currentStep) {
-            // Current step - yellow highlight
+        if (index + 1 === currentStep) {
             circle.style.backgroundColor = '#F1D500';
             circle.style.color = '#000';
             label.style.color = '#000';
-        } else if (completedSteps.includes(stepNumber)) {
-            // Completed step - green highlight
-            circle.style.backgroundColor = '#28a745';
-            circle.style.color = '#fff';
-            label.style.color = '#28a745';
         } else {
-            // Default/unvisited step
             circle.style.backgroundColor = '#e9ecef';
             circle.style.color = '#6c757d';
             label.style.color = '#6c757d';
@@ -2147,23 +1660,17 @@ function setupOverrideModal() {
 document.addEventListener('DOMContentLoaded', function() {
     const path = window.location.pathname;
     let currentStep = 1;
-    let completedSteps = [];
-
     if (path.includes('sensitivity-results')) {
         currentStep = 5;
-        completedSteps = [1, 2, 3, 4];
     } else if (path.includes('sensitivity-parameters')) {
         currentStep = 4;
-        completedSteps = [1, 2, 3];
     } else if (path.includes('results')) {
         currentStep = 3;
-        completedSteps = [1, 2];
     } else if (path.includes('select-hazards')) {
         currentStep = 2;
-        completedSteps = [1];
     }
     highlightHeaders(currentStep);
-    highlightSteps(currentStep, completedSteps);
+    highlightSteps(currentStep);
     setupOverrideModal();
 });
 

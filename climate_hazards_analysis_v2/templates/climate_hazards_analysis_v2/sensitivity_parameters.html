@@ -5,6 +5,27 @@ Adjust Sensitivity Thresholds
 {% endblock %}
 {% block content %}
 <style>
+    /* === Step Header Styles === */
+    .step-header {
+        background-color: #f8f9fa;
+        color: #495057;
+        font-weight: bold;
+        padding: 10px;
+        border: 2px solid transparent;
+        transition: all 0.3s ease;
+    }
+
+    .step-header.active-step-header {
+        border: 2px solid #F1D500;
+        background-color: #fff8e1;
+        color: #495057;
+    }
+
+    .step-header.arrow::after {
+        content: "→";
+        margin-left: 10px;
+    }
+
     /* Parameter card styles */
     .parameter-card {
         background-color: #F8F9FA;
@@ -1055,6 +1076,13 @@ Adjust Sensitivity Thresholds
     // Initialize on page load - consolidated handler
     document.addEventListener('DOMContentLoaded', function() {
         try {
+            // Load archetype parameters from Django context
+            const djangoArchetypeParams = {{ archetype_params_json|safe }};
+            if (djangoArchetypeParams && typeof djangoArchetypeParams === 'object') {
+                archetypeParameters = djangoArchetypeParams;
+                console.log('Loaded archetype parameters from session:', archetypeParameters);
+            }
+
             // Capture default parameters
             defaultParameters = getCurrentParameters();
             updateAllDisplayValues();
@@ -1074,17 +1102,23 @@ Adjust Sensitivity Thresholds
             // Path-based step highlighting
             const path = window.location.pathname;
             let currentStep = 1;
+            let completedSteps = [];
+
             if (path.includes('sensitivity-results')) {
                 currentStep = 5;
+                completedSteps = [1, 2, 3, 4];
             } else if (path.includes('sensitivity-parameters')) {
                 currentStep = 4;
+                completedSteps = [1, 2, 3];
             } else if (path.includes('results')) {
                 currentStep = 3;
+                completedSteps = [1, 2];
             } else if (path.includes('select-hazards')) {
                 currentStep = 2;
+                completedSteps = [1];
             }
             highlightHeaders(currentStep);
-            highlightSteps(currentStep);
+            highlightSteps(currentStep, completedSteps);
         } catch (error) {
             console.error('Error during initialization:', error);
         }
@@ -1198,17 +1232,27 @@ Adjust Sensitivity Thresholds
         }
     }
 
-    function highlightSteps(currentStep) {
+    function highlightSteps(currentStep, completedSteps = []) {
         const steps = document.querySelectorAll('.step-item');
         steps.forEach((step, index) => {
             const circle = step.querySelector('.step-circle');
             const label = step.querySelector('.step-label');
             if (!circle || !label) return;
-            if (index + 1 === currentStep) {
+
+            const stepNumber = index + 1;
+
+            if (stepNumber === currentStep) {
+                // Current step - yellow highlight
                 circle.style.backgroundColor = '#F1D500';
                 circle.style.color = '#000';
                 label.style.color = '#000';
+            } else if (completedSteps.includes(stepNumber)) {
+                // Completed step - green highlight
+                circle.style.backgroundColor = '#28a745';
+                circle.style.color = '#fff';
+                label.style.color = '#28a745';
             } else {
+                // Default/unvisited step
                 circle.style.backgroundColor = '#e9ecef';
                 circle.style.color = '#6c757d';
                 label.style.color = '#6c757d';

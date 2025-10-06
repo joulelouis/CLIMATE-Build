@@ -7,6 +7,27 @@
 
 {% block content %}
 <style>
+    /* === Step Header Styles === */
+    .step-header {
+        background-color: #f8f9fa;
+        color: #495057;
+        font-weight: bold;
+        padding: 10px;
+        border: 2px solid transparent;
+        transition: all 0.3s ease;
+    }
+
+    .step-header.active-step-header {
+        border: 2px solid #F1D500;
+        background-color: #fff8e1;
+        color: #495057;
+    }
+
+    .step-header.arrow::after {
+        content: "→";
+        margin-left: 10px;
+    }
+
     /* Checkbox styles */
     .hazard-checkbox-container {
         background-color: #F8F9FA;
@@ -141,7 +162,7 @@
                     <strong>Select Climate/Weather Hazards</strong>
                 </div>
                 <div class="card-body">
-                    <p class="mb-4">You have {{ facility_count }} assets loaded. Select the climate/weather hazards you want to analyze:</p>
+                    <p class="mb-4">You have <strong>{{ facility_count }} assets</strong> loaded. Select the climate/weather hazards you want to analyze:</p>
                     
                     <form id="hazard-form" method="POST" action="{% url 'climate_hazards_analysis_v2:select_hazards' %}" onsubmit="showLoading()">
                         {% csrf_token %}
@@ -217,9 +238,9 @@
     function toggleCheckbox(id) {
         const checkbox = document.getElementById(id);
         const container = checkbox.closest('.hazard-checkbox-container');
-        
+
         checkbox.checked = !checkbox.checked;
-        
+
         if (checkbox.checked) {
             container.classList.add('checked');
         } else {
@@ -246,17 +267,27 @@
         }
     }
 
-    function highlightSteps(currentStep) {
+    function highlightSteps(currentStep, completedSteps = []) {
         const steps = document.querySelectorAll('.step-item');
         steps.forEach((step, index) => {
             const circle = step.querySelector('.step-circle');
             const label = step.querySelector('.step-label');
             if (!circle || !label) return;
-            if (index + 1 === currentStep) {
+
+            const stepNumber = index + 1;
+
+            if (stepNumber === currentStep) {
+                // Current step - yellow highlight
                 circle.style.backgroundColor = '#F1D500';
                 circle.style.color = '#000';
                 label.style.color = '#000';
+            } else if (completedSteps.includes(stepNumber)) {
+                // Completed step - green highlight
+                circle.style.backgroundColor = '#28a745';
+                circle.style.color = '#fff';
+                label.style.color = '#28a745';
             } else {
+                // Default/unvisited step
                 circle.style.backgroundColor = '#e9ecef';
                 circle.style.color = '#6c757d';
                 label.style.color = '#6c757d';
@@ -270,18 +301,28 @@
         const path = window.location.pathname;
         let currentStep = 1; // Default to step 1
         
+        let completedSteps = [];
+
         if (path.includes('sensitivity-results')) {
             currentStep = 5;
+            completedSteps = [1, 2, 3, 4];
         } else if (path.includes('sensitivity-parameters')) {
             currentStep = 4;
+            completedSteps = [1, 2, 3];
         } else if (path.includes('results')) {
             currentStep = 3;
+            completedSteps = [1, 2];
         } else if (path.includes('select-hazards')) {
             currentStep = 2;
+            completedSteps = [1];
+        } else {
+            // Main page - step 1
+            currentStep = 1;
+            completedSteps = [];
         }
-        
+
         highlightHeaders(currentStep);
-        highlightSteps(currentStep);
+        highlightSteps(currentStep, completedSteps);
     });
 
     // Function to show loading overlay with simulated progress

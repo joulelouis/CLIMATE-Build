@@ -85,23 +85,43 @@ def standardize_facility_dataframe(df):
     return df
 
 
-def process_flood_exposure_analysis(facility_csv_path, selected_fields):
+def process_flood_exposure_analysis(facility_csv_path, selected_fields, scenarios=None):
     """
     Process flood exposure analysis if selected.
-    Simplified version that uses the basic flood analysis function.
+    Enhanced version that supports multiple flood scenarios.
+
+    Args:
+        facility_csv_path (str): Path to facility CSV file
+        selected_fields (list): List of selected fields for analysis
+        scenarios (list): List of flood scenarios ['current', 'moderate', 'worst']
+                         Default: ['current'] for backward compatibility
     """
     if 'Flood' not in selected_fields:
         logger.info("Flood analysis not selected, skipping")
         return None, []
-        
-    logger.info("Starting Flood Exposure Analysis")
+
+    # Default to current scenario for backward compatibility
+    if scenarios is None:
+        scenarios = ['current']
+
+    logger.info(f"Starting Flood Exposure Analysis with scenarios: {scenarios}")
+    logger.info(f"{'='*60}")
+    logger.info(f"CLIMATE HAZARDS ANALYSIS - FLOOD PROCESSING")
+    logger.info(f"{'='*60}")
+    logger.info(f"Facility CSV: {facility_csv_path}")
+    logger.info(f"Selected scenarios: {scenarios}")
+    logger.info(f"Number of scenarios: {len(scenarios)}")
+
     plot_paths = []
 
     try:
-        # Import the simplified flood analysis function
+        # Import the enhanced flood analysis function
         from flood_exposure_analysis.utils.flood_exposure_analysis import generate_flood_exposure_analysis
-        
-        flood_res = generate_flood_exposure_analysis(facility_csv_path)
+
+        logger.info("Calling multi-scenario flood exposure analysis function...")
+        # Call with scenarios parameter
+        flood_res = generate_flood_exposure_analysis(facility_csv_path, scenarios=scenarios)
+        logger.info("Multi-scenario flood exposure analysis completed")
         
         if 'error' in flood_res:
             logger.warning(f"Warning in Flood Exposure Analysis: {flood_res['error']}")
@@ -142,60 +162,79 @@ def process_flood_exposure_analysis(facility_csv_path, selected_fields):
             if old in df_flood.columns and new not in df_flood.columns:
                 df_flood.rename(columns={old: new}, inplace=True)
         
-        # Handle flood depth column variations
-        flood_column_found = False
-        if 'Flood Depth (meters)' in df_flood.columns:
-            logger.info("Found 'Flood Depth (meters)' column")
-            df_flood_values = df_flood[['Facility', 'Lat', 'Long', 'Flood Depth (meters)']]
-            flood_column_found = True
-        elif 'Exposure' in df_flood.columns:
-            logger.info("Found 'Exposure' column, renaming to 'Flood Depth (meters)'")
-            df_flood.rename(columns={'Exposure': 'Flood Depth (meters)'}, inplace=True)
-            df_flood_values = df_flood[['Facility', 'Lat', 'Long', 'Flood Depth (meters)']]
-            flood_column_found = True
-        elif 'flood_depth' in df_flood.columns:
-            logger.info("Found 'flood_depth' column, renaming to 'Flood Depth (meters)'")
-            df_flood.rename(columns={'flood_depth': 'Flood Depth (meters)'}, inplace=True)
-            df_flood_values = df_flood[['Facility', 'Lat', 'Long', 'Flood Depth (meters)']]
-            flood_column_found = True
-        elif 'Flood_Depth' in df_flood.columns:
-            logger.info("Found 'Flood_Depth' column, renaming to 'Flood Depth (meters)'")
-            df_flood.rename(columns={'Flood_Depth': 'Flood Depth (meters)'}, inplace=True)
-            df_flood_values = df_flood[['Facility', 'Lat', 'Long', 'Flood Depth (meters)']]
-            flood_column_found = True
-        
-        if not flood_column_found:
-            logger.warning(f"Flood depth column not found in flood analysis output. Available columns: {df_flood.columns.tolist()}")
-            # Create placeholder data with the expected column
+        # Get the expected flood columns based on scenarios processed
+        result_columns = flood_res.get('result_columns', ['Facility', 'Lat', 'Long', 'Flood Depth (meters)'])
+        flood_columns = [col for col in result_columns if 'Flood Depth' in col]
+        scenarios_processed = flood_res.get('scenarios_processed', [])
+
+        logger.info(f"FLOOD ANALYSIS RESULTS:")
+        logger.info(f"  Scenarios processed: {scenarios_processed}")
+        logger.info(f"  Expected flood columns: {flood_columns}")
+        logger.info(f"  Available columns in CSV: {df_flood.columns.tolist()}")
+        logger.info(f"  Total columns expected: {len(flood_columns)}")
+        logger.info(f"  CSV file path: {flood_csv_path}")
+
+        # Check if we have all expected flood columns
+        missing_columns = [col for col in flood_columns if col not in df_flood.columns]
+        if missing_columns:
+            logger.warning(f"Missing flood columns: {missing_columns}")
+        else:
+            logger.info(f"SUCCESS: All expected flood columns found in CSV!")
+
+        # Log flood column mapping
+        for i, scenario in enumerate(scenarios_processed):
+            expected_col = flood_columns[i] if i < len(flood_columns) else f"Unknown column {i}"
+            exists = expected_col in df_flood.columns
+            logger.info(f"  Scenario '{scenario}' -> Column '{expected_col}' -> Present: {exists}")
+
+        # Find available flood columns (including legacy column names)
+        available_flood_columns = []
+        for col in df_flood.columns:
+            if any(flood_col in col for flood_col in ['Flood Depth', 'Exposure', 'flood_depth', 'Flood_Depth']):
+                available_flood_columns.append(col)
+
+        if not available_flood_columns:
+            logger.warning(f"No flood depth columns found in output. Available columns: {df_flood.columns.tolist()}")
+            # Create placeholder data with the expected columns
             df_fac = pd.read_csv(facility_csv_path)
             df_fac = standardize_facility_dataframe(df_fac)
-            df_fac['Flood Depth (meters)'] = '0.1 to 0.5'
-            return df_fac[['Facility', 'Lat', 'Long', 'Flood Depth (meters)']], plot_paths
+            for col in flood_columns:
+                df_fac[col] = '0.1 to 0.5'  # Default to lowest risk category
+            return df_fac[['Facility', 'Lat', 'Long'] + flood_columns], []
+
+        # Select the columns we want to return
+        output_columns = ['Facility', 'Lat', 'Long'] + available_flood_columns
+        df_flood_values = df_flood[output_columns]
+
+        logger.info(f"Successfully found flood columns: {available_flood_columns}")
             
-        # Clean any NaN values in the flood column specifically
-        flood_nan_count = df_flood_values['Flood Depth (meters)'].isna().sum()
-        if flood_nan_count > 0:
-            logger.warning(f"Found {flood_nan_count} NaN values in flood column, replacing with '0.1 to 0.5'")
-            df_flood_values['Flood Depth (meters)'].fillna('0.1 to 0.5', inplace=True)
-        
-        # Ensure all values are valid categories (for simplified flood analysis)
+        # Clean any NaN values in all flood columns
         valid_categories = {'0.1 to 0.5', '0.5 to 1.5', 'Greater than 1.5', 'Unknown'}
-        invalid_mask = ~df_flood_values['Flood Depth (meters)'].isin(valid_categories)
-        invalid_count = invalid_mask.sum()
-        if invalid_count > 0:
-            logger.warning(f"Found {invalid_count} invalid flood category values, replacing with '0.1 to 0.5'")
-            invalid_values = df_flood_values.loc[invalid_mask, 'Flood Depth (meters)'].unique()
-            logger.warning(f"Invalid values were: {invalid_values}")
-            df_flood_values.loc[invalid_mask, 'Flood Depth (meters)'] = '0.1 to 0.5'
-        
-        # Final verification
-        final_nan_count = df_flood_values['Flood Depth (meters)'].isna().sum()
-        if final_nan_count > 0:
-            logger.error(f"ERROR: Still have {final_nan_count} NaN values in flood column after cleaning!")
-            df_flood_values['Flood Depth (meters)'].fillna('0.1 to 0.5', inplace=True)
-        
-        logger.info(f"Flood column value counts:")
-        logger.info(df_flood_values['Flood Depth (meters)'].value_counts())
+
+        for flood_col in available_flood_columns:
+            # Handle NaN values
+            flood_nan_count = df_flood_values[flood_col].isna().sum()
+            if flood_nan_count > 0:
+                logger.warning(f"Found {flood_nan_count} NaN values in {flood_col}, replacing with '0.1 to 0.5'")
+                df_flood_values[flood_col].fillna('0.1 to 0.5', inplace=True)
+
+            # Ensure all values are valid categories
+            invalid_mask = ~df_flood_values[flood_col].isin(valid_categories)
+            invalid_count = invalid_mask.sum()
+            if invalid_count > 0:
+                logger.warning(f"Found {invalid_count} invalid flood category values in {flood_col}, replacing with '0.1 to 0.5'")
+                invalid_values = df_flood_values.loc[invalid_mask, flood_col].unique()
+                logger.warning(f"Invalid values were: {invalid_values}")
+                df_flood_values.loc[invalid_mask, flood_col] = '0.1 to 0.5'
+
+            # Final verification for this column
+            final_nan_count = df_flood_values[flood_col].isna().sum()
+            if final_nan_count > 0:
+                logger.error(f"ERROR: Still have {final_nan_count} NaN values in {flood_col} after cleaning!")
+                df_flood_values[flood_col].fillna('0.1 to 0.5', inplace=True)
+
+            logger.info(f"{flood_col} value counts:")
+            logger.info(df_flood_values[flood_col].value_counts())
         
         # Collect plot paths
         if flood_res.get('png_paths'):
@@ -706,16 +745,17 @@ def process_nan_values(df):
     return df
 
 
-def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=None, buffer_size=0.0009, sensitivity_params=None):
+def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=None, buffer_size=0.0009, sensitivity_params=None, flood_scenarios=None):
     """
     Integrates multiple climate hazard analyses into a single output.
-    Simplified version without flood threshold parameters.
+    Enhanced version with multi-scenario flood analysis support.
 
     Args:
     facility_csv_path: Path to facility locations CSV (required)
     selected_fields: List of selected hazard types to include
     buffer_size: Buffer size for spatial analysis (default 0.0009)
     sensitivity_params: Dictionary of sensitivity parameters (flood thresholds removed)
+    flood_scenarios: List of flood scenarios ['current', 'moderate', 'worst'] (default: ['current'])
     
     Returns:
         dict: Results dictionary with paths to combined output and plots
@@ -760,10 +800,10 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         
         # Process each hazard type (simplified without flood thresholds)
         
-        # 1. Flood Exposure Analysis - Simplified version
+        # 1. Flood Exposure Analysis - Enhanced version with multi-scenario support
         logger.info("=== PROCESSING FLOOD EXPOSURE ANALYSIS ===")
         flood_values, flood_plots = process_flood_exposure_analysis(
-            facility_csv_path, selected_fields
+            facility_csv_path, selected_fields, scenarios=flood_scenarios
         )
         all_plot_paths.extend(flood_plots)
         
@@ -969,6 +1009,8 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             'Lat',
             'Long',
             'Flood Depth (meters)',
+            'Flood Depth (meters) - Moderate Case',
+            'Flood Depth (meters) - Worst Case',
             'Water Stress Exposure (%)',
             'Water Stress Exposure 2030 (%) - Moderate Case',
             'Water Stress Exposure 2050 (%) - Moderate Case',

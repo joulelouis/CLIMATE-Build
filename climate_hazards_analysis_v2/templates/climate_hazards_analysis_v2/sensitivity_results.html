@@ -7,7 +7,7 @@ View Sensitivity Results
 {% endblock %}
 {% block content %}
 <style>
-    /* Custom Tabs Navigation */
+    /* === Layout & Container Styles === */
     .custom-tabs-nav {
         flex-wrap: nowrap !important;
         overflow-x: auto;
@@ -35,7 +35,7 @@ View Sensitivity Results
         color: #888;
     }
     
-    /* Custom Table Styles */
+    /* === Table Core Styles === */
     .custom-table {
         background-color: white;
         border-radius: 10px;
@@ -51,17 +51,23 @@ View Sensitivity Results
     .custom-table td {
         border-right: 1px solid #ccc;
         padding: 8px;
+        text-align: center;
+        vertical-align: middle;
+    }
+
+    .custom-table thead th {
+        white-space: normal;
+        word-wrap: break-word;
+        vertical-align: top;
+        padding: 8px 4px;
     }
 
     .custom-table-header {
         background-color: #F8F8F8;
         color: #495057;
         font-weight: 600;
-        text-align: center;
-        border: none;
-        padding: 15px 10px;
-        vertical-align: middle;
         font-size: 14px;
+        cursor: pointer;
     }
 
     .custom-table-row:nth-child(even) {
@@ -76,12 +82,99 @@ View Sensitivity Results
     .custom-table td {
         border: none;
         padding: 12px 10px;
-        text-align: center;
-        vertical-align: middle;
         font-size: 13px;
     }
 
-    /* Custom Card Styling */
+    /* === Multi-Row Header Styles === */
+    .group-header th {
+        font-weight: bold;
+        text-align: center;
+        border: 1px solid #ddd;
+        padding: 8px;
+        color: #333;
+        cursor: default;
+        user-select: none;
+    }
+
+    .sub-group-header th {
+        background-color: #fafafa;
+        font-weight: bold;
+        text-align: center;
+        border: 1px solid #ddd;
+        padding: 6px;
+        cursor: default;
+        user-select: none;
+    }
+
+    .sub-group-header th.baseline-header {
+        background-color: #d4edda;
+    }
+
+    .sub-group-header th.moderate-header {
+        background-color: #ffe5b4;
+    }
+
+    .sub-group-header th.worstcase-header {
+        background-color: #f8d7da;
+    }
+
+    /* === Step Header Styles === */
+    .step-header {
+        background-color: #f8f9fa;
+        color: #495057;
+        font-weight: bold;
+        padding: 10px;
+        border: 2px solid transparent;
+        transition: all 0.3s ease;
+    }
+
+    .step-header.active-step-header {
+        border: 2px solid #F1D500;
+        background-color: #fff8e1;
+        color: #495057;
+    }
+
+    .step-header.arrow::after {
+        content: "→";
+        margin-left: 10px;
+    }
+
+    /* === DataTables Integration === */
+    .dataTables_wrapper {
+        overflow-x: auto;
+        width: 100%;
+    }
+
+    .dataTables_scrollHead {
+        overflow: visible !important;
+    }
+
+    .dataTables_scrollBody {
+        overflow: auto !important;
+    }
+
+    #sensitivity-data-table_wrapper .dataTables_scrollHead table,
+    #sensitivity-data-table_wrapper .dataTables_scrollBody table {
+        table-layout: fixed !important;
+        width: 100% !important;
+    }
+
+    #sensitivity-data-table thead tr {
+        display: table-row !important;
+    }
+
+    #sensitivity-data-table thead tr.group-header,
+    #sensitivity-data-table thead tr.sub-group-header {
+        position: relative;
+        z-index: 10;
+    }
+
+    #sensitivity-data-table thead tr.custom-table-header {
+        position: relative;
+        z-index: 11;
+    }
+
+    /* === Component Styles === */
     .custom-card {
         border: none;
         border-radius: 15px;
@@ -97,11 +190,6 @@ View Sensitivity Results
         color: #495057;
     }
 
-    .no-border {
-        border: none !important;
-    }
-    
-    /* Column Selector Styles */
     .column-selector {
         max-height: 500px;
         overflow-y: auto;
@@ -109,14 +197,6 @@ View Sensitivity Results
     
     .column-selector .form-check {
         margin-bottom: 0.5rem;
-    }
-    
-    .column-selector .fw-bold {
-        font-weight: bold !important;
-    }
-
-    .form-check {
-        margin-bottom: 8px;
     }
 
     .form-check-input:checked {
@@ -129,44 +209,6 @@ View Sensitivity Results
         color: #495057;
     }
 
-    /* Group Header Styles */
-    .group-header th {
-        font-weight: bold;
-        text-align: center;
-        border: 1px solid #ddd;
-        padding: 8px;
-        color: #333;
-    }
-
-    /* Improved table layout for proportionate columns */
-    .dataTables_wrapper {
-        overflow-x: auto;
-        width: 100%;
-    }
-
-    /* Allow table to take full width */
-    .dataTables_scrollHeadInner,
-    .dataTables_scrollHeadInner table,
-    .dataTables_scrollBody,
-    .dataTables_scrollBody table {
-        width: 100% !important;
-    }
-
-    /* Better header wrapping */
-    .custom-table thead th {
-        white-space: normal;
-        word-wrap: break-word;
-        vertical-align: top;
-        padding: 8px 4px;
-    }
-
-    /* Keep header text centered as well */
-    .custom-table th {
-        text-align: center;
-        vertical-align: middle;
-    }
-
-    /* Sensitivity Results specific styles */
     .sensitivity-info {
         background-color: #fff8c7;
         border: 2px solid #F1D500;
@@ -185,30 +227,35 @@ View Sensitivity Results
         color: #666;
     }
 
+    /* === Risk Color Classes === */
+    .risk-low { color: green; font-weight: bold; }
+    .risk-medium { color: orange; font-weight: bold; }
+    .risk-high { color: red; font-weight: bold; }
+    .risk-unknown { color: gray; }
+    .risk-none { color: black; }
 </style>
 
 <div class="container-fluid mt-4">
+    <!-- Header Section -->
     <div class="row">
         <div class="col-6 d-flex flex-column">
-            <!-- Rounded Icon Container with Margin -->
             <div class="icon-container">
                 <img src="{% static 'images/sgv-logo.png' %}" alt="SGV Logo">
             </div>
-            <!-- Heading below the icon with Margin -->
             <h1 class="page-heading">Sensitivity Analysis</h1>
         </div>
     </div>
 
-    <!-- Step by Step Procedure UI -->
-<div class="row mt-4 mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body p-4">
-                {% include "climate_hazards_analysis_v2/steps_table.html" %}
+    <!-- Step Progress -->
+    <div class="row mt-4 mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body p-4">
+                    {% include "climate_hazards_analysis_v2/steps_table.html" %}
+                </div>
             </div>
         </div>
     </div>
-</div>
 
     <!-- Alert Messages -->
     {% if error %}
@@ -248,290 +295,223 @@ View Sensitivity Results
     </div>
     {% endif %}
 
-    <!-- Results Content -->
+    <!-- Main Content -->
     <div class="container-fluid mt-4">
         <div class="row">
-            <!-- Left Column: Column Selector -->
+            <!-- Column Selector -->
             <div class="col-md-3">
                 {% include "climate_hazards_analysis_v2/sensitivity_column_selector.html" %}
             </div>
             
-            <!-- Right Column: Sensitivity Results Table -->
+            <!-- Results Table -->
             <div class="col-md-9">
                 <div class="card custom-card">
-                    <div class="card-header no-border">
+                    <div class="card-header">
                         <strong>Sensitivity Analysis Results</strong>
                     </div>
                     <div class="card-body">
-                        <!-- Tabs Navigation -->
                         <ul class="nav nav-tabs mt-2 custom-tabs-nav" id="sensitivityTabs" role="tablist">
                             <li class="nav-item">
-                                <a class="nav-link custom-tab-link active" id="table-tab" data-bs-toggle="tab" href="#table-content" role="tab" aria-controls="table-content" aria-selected="true">
+                                <a class="nav-link custom-tab-link active" id="table-tab" data-bs-toggle="tab" href="#table-content" role="tab">
                                     Sensitivity Analysis Table
                                 </a>
                             </li>
                         </ul>
 
                         <div class="tab-content mt-3">
-                            <div class="tab-pane fade show active" id="table-content" role="tabpanel" aria-labelledby="table-tab">
-                                <!-- Styled Table -->
+                            <div class="tab-pane fade show active" id="table-content" role="tabpanel">
                                 <div class="table-responsive">
                                     <table id="sensitivity-data-table" class="table custom-table">
-                                <thead>
-                                    <!-- Grouping header row -->
-                                    <tr class="group-header">
-                                        {% for group, count in groups.items %}
-                                            {% if count > 0 %}
-                                                <th colspan="{{ count }}" class="text-center">{{ group }}</th>
-                                            {% endif %}
-                                        {% endfor %}
-                                    </tr>
-                                    
-                                    <tr class="custom-table-header">
-                                        {% for column in columns %}
-                                            <th>{{ column }}</th>
-                                        {% endfor %}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for row in data %}
-                                        <tr class="custom-table-row">
-                                            {% for key in columns %}
-                                                {% with value=row|get_item:key %}
-                                                <td>
-                                                    {# Display plain text when hazard marked as not material #}
-                                                    {% if value == "Not material" %}
-                                                        <span class="text-muted">Not material</span>
-                                                    {# Water Stress Exposure with CUSTOM coloring based on archetype thresholds #}
-                                                    {% elif key == "Water Stress Exposure (%)" and value != "N/A" %}
-                                                        {% with val=value|to_float low_threshold=row.WS_Low_Threshold|default:10 high_threshold=row.WS_High_Threshold|default:31 %}
-                                                            {% comment %}
-                                                            Debug info: Value={{ val }}, Low={{ low_threshold }}, High={{ high_threshold }}
-                                                            Logic: val < low_threshold = {{ val }} < {{ low_threshold }} = {{ val|floatformat:0 }} < {{ low_threshold }}
-                                                                   val > high_threshold = {{ val }} > {{ high_threshold }} = {{ val|floatformat:0 }} > {{ high_threshold }}
-                                                            {% endcomment %}
-                                                            {% if val < low_threshold %}
-                                                                <span style="color: green; font-weight: bold;" title="Low Risk: {{ val }}% < {{ low_threshold }}%">{{ value }}</span>
-                                                            {% elif val > high_threshold %}
-                                                                <span style="color: red; font-weight: bold;" title="High Risk: {{ val }}% > {{ high_threshold }}%">{{ value }}</span>
-                                                            {% else %}
-                                                                <span style="color: orange; font-weight: bold;" title="Medium Risk: {{ low_threshold }}% ≤ {{ val }}% ≤ {{ high_threshold }}%">{{ value }}</span>
-                                                            {% endif %}
-                                                        {% endwith %}
-                                                    
-                                                    {# Remove the separate Water Stress Risk Level column styling #}
-                                                    
-                                                    {# Asset Archetype - Show which archetype was used #}
-                                                    {% elif key == "Asset Archetype" %}
-                                                        <span class="badge bg-info">{{ value }}</span>
-                                                    
-                                                    {# Flood Depth styling (unchanged from original) #}
-                                                    {% elif key == "Flood Depth (meters)" %}
-                                                        {% if value == "0.1 to 0.5" %}
-                                                            <span style="color: green;">{{ value }}</span>
-                                                        {% elif value == "0.5 to 1.5" %}
-                                                            <span style="color: orange;">{{ value }}</span>
-                                                        {% elif value == "Greater than 1.5" %}
-                                                            <span style="color: red;">{{ value }}</span>
-                                                        {% elif value == "Unknown" %}
-                                                            <span style="color: gray;">{{ value }}</span>
-                                                        {% else %}
-                                                            {{ value }}
-                                                        {% endif %}
-                                                    
-                                                    {# Heat exposure styling (unchanged from original) #}
-                                                    {% elif key == "Days over 30° Celsius" and value != "N/A" %}
-                                                        {% with num=value|to_float %}
-                                                            {% if num < 10 %}
-                                                                <span style="color: green;">{{ value }}</span>
-                                                            {% elif num >= 10 and num < 45 %}
-                                                                <span style="color: orange;">{{ value }}</span>
-                                                            {% elif num >= 45 %}
-                                                                <span style="color: red;">{{ value }}</span>
-                                                            {% else %}
-                                                                {{ value }}
-                                                            {% endif %}
-                                                        {% endwith %}
-                                                    {% elif key == "Days over 33° Celsius" and value != "N/A" %}
-                                                        {% with num=value|to_float %}
-                                                            {% if num < 10 %}
-                                                                <span style="color: green;">{{ value }}</span>
-                                                            {% elif num >= 10 and num < 45 %}
-                                                                <span style="color: orange;">{{ value }}</span>
-                                                            {% elif num >= 45 %}
-                                                                <span style="color: red;">{{ value }}</span>
-                                                            {% else %}
-                                                                {{ value }}
-                                                            {% endif %}
-                                                        {% endwith %}
-                                                    {% elif key == "Days over 35° Celsius" and value != "N/A" %}
-                                                        {% with num=value|to_float %}
-                                                            {% if num < 10 %}
-                                                                <span style="color: green;">{{ value }}</span>
-                                                            {% elif num >= 10 and num < 45 %}
-                                                                <span style="color: orange;">{{ value }}</span>
-                                                            {% elif num >= 45 %}
-                                                                <span style="color: red;">{{ value }}</span>
-                                                            {% else %}
-                                                                {{ value }}
-                                                            {% endif %}
-                                                        {% endwith %}
-
-                                                    {# Wind speed styling (unchanged from original) #}
-                                                    {% elif key == "Extreme Windspeed 10 year Return Period (km/h)" %}
-                                                        {% if value == "Data not available" %}
-                                                            <span style="color: black;">{{ value }}</span>
-                                                        {% elif value != "N/A" %}
-                                                            {% with ws=value|to_float %}
-                                                                {% if ws < 119 %}
-                                                                    <span style="color: green;">{{ value }}</span>
-                                                                {% elif ws >= 119 and ws < 178 %}
-                                                                    <span style="color: orange;">{{ value }}</span>
-                                                                {% elif ws >= 178 %}
-                                                                    <span style="color: red;">{{ value }}</span>
-                                                                {% else %}
-                                                                    {{ value }}
-                                                                {% endif %}
-                                                            {% endwith %}
-                                                        {% else %}
-                                                            {{ value }}
-                                                        {% endif %}
-
-                                                    {# Other wind speeds and hazards (unchanged from original) #}
-                                                    {% elif key == "Extreme Windspeed 20 year Return Period (km/h)" %}
-                                                        {% if value == "Data not available" %}
-                                                            <span style="color: black;">{{ value }}</span>
-                                                        {% elif value != "N/A" %}
-                                                            {% with ws=value|to_float %}
-                                                                {% if ws < 119 %}
-                                                                    <span style="color: green;">{{ value }}</span>
-                                                                {% elif ws >= 119 and ws < 178 %}
-                                                                    <span style="color: orange;">{{ value }}</span>
-                                                                {% elif ws >= 178 %}
-                                                                    <span style="color: red;">{{ value }}</span>
-                                                                {% else %}
-                                                                    {{ value }}
-                                                                {% endif %}
-                                                            {% endwith %}
-                                                        {% else %}
-                                                            {{ value }}
-                                                        {% endif %}
-
-                                                    {% elif key == "Extreme Windspeed 50 year Return Period (km/h)" %}
-                                                        {% if value == "Data not available" %}
-                                                            <span style="color: black;">{{ value }}</span>
-                                                        {% elif value != "N/A" %}
-                                                            {% with ws=value|to_float %}
-                                                                {% if ws < 119 %}
-                                                                    <span style="color: green;">{{ value }}</span>
-                                                                {% elif ws >= 119 and ws < 178 %}
-                                                                    <span style="color: orange;">{{ value }}</span>
-                                                                {% elif ws >= 178 %}
-                                                                    <span style="color: red;">{{ value }}</span>
-                                                                {% else %}
-                                                                    {{ value }}
-                                                                {% endif %}
-                                                            {% endwith %}
-                                                        {% else %}
-                                                            {{ value }}
-                                                        {% endif %}
-
-                                                    {% elif key == "Extreme Windspeed 100 year Return Period (km/h)" %}
-                                                        {% if value == "Data not available" %}
-                                                            <span style="color: black;">{{ value }}</span>
-                                                        {% elif value != "N/A" %}
-                                                            {% with ws=value|to_float %}
-                                                                {% if ws < 119 %}
-                                                                    <span style="color: green;">{{ value }}</span>
-                                                                {% elif ws >= 119 and ws < 178 %}
-                                                                    <span style="color: orange;">{{ value }}</span>
-                                                                {% elif ws >= 178 %}
-                                                                    <span style="color: red;">{{ value }}</span>
-                                                                {% else %}
-                                                                    {{ value }}
-                                                                {% endif %}
-                                                            {% endwith %}
-                                                        {% else %}
-                                                            {{ value }}
-                                                        {% endif %}
-
-                                                    {# Other hazards styling (unchanged) #}
-                                                    {% elif key == "Storm Surge Flood Depth (meters)" %}
-                                                        {% if value == "Data not available" %}
-                                                            <span style="color:black">{{ value }}</span>
-                                                        {% elif value == "N/A" %}
-                                                            {{ value }}
-                                                        {% else %}
-                                                            {% with ss=value|to_float low=row.SS_Low_Threshold|default:0.5 high=row.SS_High_Threshold|default:1.5 %}
-                                                                {% if ss < 0.1 %}
-                                                                    <span style="color:black">Little to none</span>
-                                                                {% elif ss < low %}
-                                                                    <span style="color:green">0.1 to {{ low }}</span>
-                                                                {% elif ss < high %}
-                                                                    <span style="color:orange">{{ low }} to {{ high }}</span>
-                                                                {% else %}
-                                                                    <span style="color:red">≥ {{ high }}</span>
-                                                                {% endif %}
-                                                            {% endwith %}
-                                                        {% endif %}
-
-                                                    {% elif key == "Rainfall-Induced Landslide (factor of safety)" %}
-                                                        {% if value == "Data not available" %}
-                                                            <span style="color:black">{{ value }}</span>
-                                                        {% elif value == "N/A" %}
-                                                            {{ value }}
-                                                        {% else %}
-                                                            {% with ril=value|to_float high=1.5 low=1 %}
-                                                                {% if ril > 2.5 %}
-                                                                    <span style="color:black">FoS significantly greater than {{ high }}</span>
-                                                                {% elif ril > high %}
-                                                                    <span style="color:green">FoS > {{ high }}</span>
-                                                                {% elif ril >= low %}
-                                                                    <span style="color:orange">FoS {{ low }} &lt; FoS &lt; {{ high }}</span>
-                                                                {% else %}
-                                                                    <span style="color:red">FoS < {{ low }}</span>
-                                                                {% endif %}
-                                                            {% endwith %}
-                                                        {% endif %}
-                                                    
-                                                    {# Fallback: output the value normally #}
+                                        <thead>
+                                            <!-- Level 1: Main Group Headers -->
+                                            <tr class="group-header">
+                                                {% for group, count in groups.items %}
+                                                    {% if count > 0 %}
+                                                        <th colspan="{{ count }}" class="text-center">
+                                                    {% if group == "Facility Information" %}
+                                                        Asset Information
                                                     {% else %}
-                                                        {{ value }}
+                                                        {{ group }}
                                                     {% endif %}
-                                                    {% endwith %}
-                                                </td>
+                                                </th>
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </tr>
+
+                                            <!-- Level 2: Scenario Sub-headers -->
+                                            <tr class="sub-group-header">
+                                                <!-- This will be populated dynamically by JavaScript -->
+                                            </tr>
+
+                                            <!-- Level 3: Column Headers -->
+                                            <tr class="custom-table-header">
+                                                {% for column in columns %}
+                                                    <th>
+                                                        {% if column == "Facility" %}
+                                                            Asset
+                                                        {% else %}
+                                                            {{ column }}
+                                                        {% endif %}
+                                                    </th>
+                                                {% endfor %}
+                                            </tr>
+                                        </thead>
+
+                                        <tbody>
+                                            {% for row in data %}
+                                                <tr class="custom-table-row">
+                                                    {% for key in columns %}
+                                                        {% with value=row|get_item:key %}
+                                                            <td>
+                                                                {# Display plain text when hazard marked as not material #}
+                                                                {% if value == "Not material" %}
+                                                                    <span class="text-muted">Not material</span>
+
+                                                                {# Asset Archetype - Show which archetype was used #}
+                                                                {% elif key == "Asset Archetype" %}
+                                                                    <span class="badge bg-info">{{ value }}</span>
+
+                                                                {# Water Stress Exposure with CUSTOM coloring based on archetype thresholds #}
+                                                                {% elif key == "Water Stress Exposure (%)" and value != "N/A" %}
+                                                                    {% with val=value|to_float low_threshold=row|get_item:"WS_Low_Threshold"|default:10 high_threshold=row|get_item:"WS_High_Threshold"|default:31 %}
+                                                                        {% if val < low_threshold %}
+                                                                            <span class="risk-low" title="Low Risk: {{ val }}% < {{ low_threshold }}%">{{ value }}</span>
+                                                                        {% elif val > high_threshold %}
+                                                                            <span class="risk-high" title="High Risk: {{ val }}% > {{ high_threshold }}%">{{ value }}</span>
+                                                                        {% else %}
+                                                                            <span class="risk-medium" title="Medium Risk: {{ low_threshold }}% ≤ {{ val }}% ≤ {{ high_threshold }}%">{{ value }}</span>
+                                                                        {% endif %}
+                                                                    {% endwith %}
+
+                                                                {# Flood Depth styling #}
+                                                                {% elif key == "Flood Depth (meters)" %}
+                                                                    {% if value == "0.1 to 0.5" %}
+                                                                        <span class="risk-low">{{ value }}</span>
+                                                                    {% elif value == "0.5 to 1.5" %}
+                                                                        <span class="risk-medium">{{ value }}</span>
+                                                                    {% elif value == "Greater than 1.5" %}
+                                                                        <span class="risk-high">{{ value }}</span>
+                                                                    {% elif value == "Unknown" %}
+                                                                        <span class="risk-unknown">{{ value }}</span>
+                                                                    {% else %}
+                                                                        {{ value }}
+                                                                    {% endif %}
+
+                                                                {# Heat exposure styling with archetype-specific thresholds #}
+                                                                {% elif "Days over" in key and "Celsius" in key and value != "N/A" %}
+                                                                    {% with num=value|to_float low_threshold=row|get_item:"Heat_Low_Threshold"|default:10 high_threshold=row|get_item:"Heat_High_Threshold"|default:45 %}
+                                                                        {% if num < low_threshold %}
+                                                                            <span class="risk-low" title="Low Risk: {{ num }} days < {{ low_threshold }} days">{{ value }}</span>
+                                                                        {% elif num > high_threshold %}
+                                                                            <span class="risk-high" title="High Risk: {{ num }} days > {{ high_threshold }} days">{{ value }}</span>
+                                                                        {% else %}
+                                                                            <span class="risk-medium" title="Medium Risk: {{ low_threshold }} days ≤ {{ num }} days ≤ {{ high_threshold }} days">{{ value }}</span>
+                                                                        {% endif %}
+                                                                    {% endwith %}
+
+                                                                {# Wind speed styling with archetype-specific thresholds #}
+                                                                {% elif "Extreme Windspeed" in key and "Return Period" in key %}
+                                                                    {% if value == "Data not available" %}
+                                                                        <span class="risk-none">{{ value }}</span>
+                                                                    {% elif value != "N/A" %}
+                                                                        {% with ws=value|to_float low_threshold=row|get_item:"TC_Low_Threshold"|default:119 high_threshold=row|get_item:"TC_High_Threshold"|default:178 %}
+                                                                            {% if ws < low_threshold %}
+                                                                                <span class="risk-low" title="Low Risk: {{ ws }} km/h < {{ low_threshold }} km/h">{{ value }}</span>
+                                                                            {% elif ws > high_threshold %}
+                                                                                <span class="risk-high" title="High Risk: {{ ws }} km/h > {{ high_threshold }} km/h">{{ value }}</span>
+                                                                            {% else %}
+                                                                                <span class="risk-medium" title="Medium Risk: {{ low_threshold }} km/h ≤ {{ ws }} km/h ≤ {{ high_threshold }} km/h">{{ value }}</span>
+                                                                            {% endif %}
+                                                                        {% endwith %}
+                                                                    {% else %}
+                                                                        {{ value }}
+                                                                    {% endif %}
+
+                                                                {# Storm Surge styling #}
+                                                                {% elif key == "Storm Surge Flood Depth (meters)" %}
+                                                                    {% if value == "Data not available" %}
+                                                                        <span class="risk-none">{{ value }}</span>
+                                                                    {% elif value != "N/A" %}
+                                                                        {% with ss=value|to_float low=row|get_item:"SS_Low_Threshold"|default:0.5 high=row|get_item:"SS_High_Threshold"|default:1.5 %}
+                                                                            {% if ss < 0.1 %}
+                                                                                <span class="risk-none">Little to none</span>
+                                                                            {% elif ss < low %}
+                                                                                <span class="risk-low">0.1 to {{ low }}</span>
+                                                                            {% elif ss < high %}
+                                                                                <span class="risk-medium">{{ low }} to {{ high }}</span>
+                                                                            {% else %}
+                                                                                <span class="risk-high">≥ {{ high }}</span>
+                                                                            {% endif %}
+                                                                        {% endwith %}
+                                                                    {% else %}
+                                                                        {{ value }}
+                                                                    {% endif %}
+
+                                                                {# Rainfall-Induced Landslide styling #}
+                                                                {% elif key == "Rainfall-Induced Landslide (factor of safety)" %}
+                                                                    {% if value == "Data not available" %}
+                                                                        <span class="risk-none">{{ value }}</span>
+                                                                    {% elif value != "N/A" %}
+                                                                        {% with ril=value|to_float high=1.5 low=1 %}
+                                                                            {% if ril > 2.5 %}
+                                                                                <span class="risk-none">FoS significantly greater than {{ high }}</span>
+                                                                            {% elif ril > high %}
+                                                                                <span class="risk-low">FoS > {{ high }}</span>
+                                                                            {% elif ril >= low %}
+                                                                                <span class="risk-medium">FoS {{ low }} &lt; FoS &lt; {{ high }}</span>
+                                                                            {% else %}
+                                                                                <span class="risk-high">FoS < {{ low }}</span>
+                                                                            {% endif %}
+                                                                        {% endwith %}
+                                                                    {% else %}
+                                                                        {{ value }}
+                                                                    {% endif %}
+
+                                                                {# Fallback: output the value normally #}
+                                                                {% else %}
+                                                                    {{ value }}
+                                                                {% endif %}
+                                                            </td>
+                                                        {% endwith %}
+                                                    {% endfor %}
+                                                </tr>
+                                            {% empty %}
+                                                <tr>
+                                                    <td colspan="{{ columns|length }}" class="text-center text-muted">
+                                                        No data available for the selected parameters.
+                                                    </td>
+                                                </tr>
                                             {% endfor %}
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                      
-                        <!-- After table controls -->
-                        <div class="d-flex justify-content-between align-items-center mt-3">
-                            <!-- Legend on the left -->
-                            <ul class="legend d-flex" style="list-style: none; padding: 0; margin: 0;">
-                                <li class="low" style="display: flex; align-items: center; margin-right: 15px;">
-                                    <span style="display: inline-block; width: 15px; height: 15px; background-color: green; margin-right: 8px;"></span>
-                                    Low Risk
-                                </li>
-                                <li class="medium" style="display: flex; align-items: center; margin-right: 15px;">
-                                    <span style="display: inline-block; width: 15px; height: 15px; background-color: orange; margin-right: 8px;"></span>
-                                    Medium Risk
-                                </li>
-                                <li class="high" style="display: flex; align-items: center;">
-                                    <span style="display: inline-block; width: 15px; height: 15px; background-color: red; margin-right: 8px;"></span>
-                                    High Risk
-                                </li>
-                            </ul>
-                            <!-- Generate Report Button on the right -->
-                            <div class="text-end">
-                                <a href="{% url 'climate_hazards_analysis_v2:generate_report' %}" class="btn btn-warning">
-                                    <strong>Generate Sensitivity Report</strong>
-                                </a>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                
+                                <!-- Table Controls -->
+                                <div class="d-flex justify-content-between align-items-center mt-3">
+                                    <!-- Legend -->
+                                    <ul class="legend d-flex" style="list-style: none; padding: 0; margin: 0; align-items: center;">
+                                        <li class="low" style="display: flex; align-items: center; margin-right: 20px;">
+                                            <span style="display: inline-block; width: 16px; height: 16px; background-color: #28a745; border-radius: 50%; margin-right: 10px; box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);"></span>
+                                            <span style="font-size: 14px; font-weight: 500; color: #495057;">Low Risk</span>
+                                        </li>
+                                        <li class="medium" style="display: flex; align-items: center; margin-right: 20px;">
+                                            <span style="display: inline-block; width: 16px; height: 16px; background-color: #fd7e14; border-radius: 50%; margin-right: 10px; box-shadow: 0 2px 4px rgba(253, 126, 20, 0.3);"></span>
+                                            <span style="font-size: 14px; font-weight: 500; color: #495057;">Medium Risk</span>
+                                        </li>
+                                        <li class="high" style="display: flex; align-items: center;">
+                                            <span style="display: inline-block; width: 16px; height: 16px; background-color: #dc3545; border-radius: 50%; margin-right: 10px; box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3);"></span>
+                                            <span style="font-size: 14px; font-weight: 500; color: #495057;">High Risk</span>
+                                        </li>
+                                    </ul>
+                                    <!-- Report Button -->
+                                    <div class="text-end">
+                                        <a href="{% url 'climate_hazards_analysis_v2:generate_report' %}" class="btn btn-warning">
+                                            <strong>Generate Sensitivity Report</strong>
+                                        </a>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-
                     </div>
                 </div>
             </div>
@@ -546,11 +526,11 @@ View Sensitivity Results
                     <i class="fas fa-arrow-left me-2"></i> Back to Adjust Sensitivity Thresholds
                 </a>
                 <a href="{% url 'climate_hazards_analysis_v2:show_results' %}" class="btn btn-primary">
-                    <i class="fas fa-eye me-2"></i> View Original Results (Default Parameters)
+                    <i class="fas fa-eye me-2"></i> View Original Results
                 </a>
             </div>
             <div>
-                <button class="btn btn-warning btn-lg" onclick="completeSensitivityAnalysis()">
+                <button class="btn btn-warning btn-lg" onclick="SensitivityTable.complete()">
                     <strong>Go to Dashboard</strong>
                     <i class="fas fa-check ms-2"></i>
                 </button>
@@ -559,221 +539,922 @@ View Sensitivity Results
     </div>
 </div>
 
-<!-- Include DataTables CSS & JS -->
-<link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
-<link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.3.6/css/buttons.dataTables.min.css">
+<!-- Enhanced Basic Table Dependencies -->
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script>window.jQuery || document.write('<script src="{% static "js/jquery-3.6.0.min.js" %}"><\\/script>')</script>
-<script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
-<script>if (!window.jQuery || !$.fn.DataTable) document.write('<script src="{% static "js/jquery.dataTables.min.js" %}"><\\/script>')</script>
-<script src="https://cdn.datatables.net/buttons/2.3.6/js/dataTables.buttons.min.js"></script>
-<script>if (!($.fn && $.fn.dataTable && $.fn.dataTable.Buttons)) document.write('<script src="{% static "js/dataTables.buttons.min.js" %}"><\\/script>')</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
-<script>window.JSZip || document.write('<script src="{% static "js/jszip.min.js" %}"><\\/script>')</script>
-<script src="https://cdn.datatables.net/buttons/2.3.6/js/buttons.html5.min.js"></script>
-<script>if (!($.fn && $.fn.dataTable && $.fn.dataTable.Buttons)) document.write('<script src="{% static "js/buttons.html5.min.js" %}"><\\/script>')</script>
-<script src="https://cdn.datatables.net/buttons/2.3.6/js/buttons.print.min.js"></script>
-<script>if (!($.fn && $.fn.dataTable && $.fn.dataTable.Buttons)) document.write('<script src="{% static "js/buttons.print.min.js" %}"><\\/script>')</script>
+<!-- Excel Export Library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
+<!-- Enhanced Manual Table with Full Features -->
 <script>
-    // Column visibility management (similar to results.html but for sensitivity data)
+console.log('Initializing enhanced sensitivity table...');
 
-    let sensitivityDataTable;
+// Table state management
+let tableState = {
+    columnHeaderMap: {},
+    allRows: [],
+    filteredRows: [],
+    currentPage: 1,
+    rowsPerPage: 25,
+    sortColumn: null,
+    sortDirection: 'asc',
+    searchTerm: ''
+};
 
-    // colspan structure so we can update the header rows when columns are
-    // toggled on/off.
-    function mapHeaderGroups() {
-        const columnHeaders = $('#sensitivity-data-table thead tr.custom-table-header th');
-        const groupHeaders = $('#sensitivity-data-table thead tr.group-header th');
+console.log('tableState initialized:', tableState);
 
-        let idx = 0;
-        groupHeaders.each(function(i) {
-            const span = parseInt($(this).attr('colspan')) || 1;
-            $(this).attr({'data-original-colspan': span, 'data-group-index': i});
-            for (let j = 0; j < span && idx < columnHeaders.length; j++, idx++) {
-                columnHeaders.eq(idx).attr('data-group-index', i);
+// Map column headers to their indices
+function buildHeaderMap() {
+    console.log('Building header map...');
+
+    // Safety check: ensure tableState exists
+    if (!tableState) {
+        console.error('tableState not initialized before buildHeaderMap');
+        return;
+    }
+
+    const $headers = $('#sensitivity-data-table thead tr.custom-table-header th');
+    console.log('Found headers:', $headers.length);
+
+    tableState.columnHeaderMap = {};
+
+    $headers.each(function(index) {
+        const columnName = $(this).text().trim();
+        tableState.columnHeaderMap[columnName] = index;
+        console.log(`Mapped column "${columnName}" to index ${index}`);
+    });
+
+    console.log('Header map built:', tableState.columnHeaderMap);
+}
+
+// Store all table rows for sorting/filtering
+function storeTableRows() {
+    const $rows = $('#sensitivity-data-table tbody tr');
+    tableState.allRows = [];
+
+    $rows.each(function() {
+        const $cells = $(this).find('td');
+        const rowData = [];
+        $cells.each(function() {
+            rowData.push($(this).html()); // Store HTML to preserve styling
+        });
+        tableState.allRows.push({
+            element: $(this)[0].outerHTML,
+            data: rowData,
+            searchText: $(this).text().toLowerCase()
+        });
+    });
+
+    tableState.filteredRows = [...tableState.allRows];
+    console.log('Stored', tableState.allRows.length, 'rows');
+}
+
+// Update column visibility using basic CSS show/hide
+function updateColumnVisibility() {
+    console.log('Updating column visibility...');
+
+    // Safety check: ensure tableState exists and is initialized
+    if (!tableState || !tableState.columnHeaderMap) {
+        console.warn('tableState not properly initialized, skipping column visibility update');
+        return;
+    }
+
+    // Always show essential columns
+    const visibleColumns = new Set(['Asset', 'Asset Archetype']);
+
+    // Get checked hazard columns
+    $('.hazard-column').each(function() {
+        const columnName = $(this).data('column');
+        const isChecked = $(this).prop('checked');
+
+        if (isChecked) {
+            visibleColumns.add(columnName);
+            console.log(`Will show column: ${columnName}`);
+        }
+    });
+
+    // Hide/show columns in all rows
+    Object.keys(tableState.columnHeaderMap).forEach(function(columnName) {
+        const columnIndex = tableState.columnHeaderMap[columnName];
+        const shouldShow = visibleColumns.has(columnName);
+
+        // Hide/show column headers and body cells
+        $(`#sensitivity-data-table thead tr.custom-table-header th:nth-child(${columnIndex + 1})`).toggle(shouldShow);
+
+        // Hide/show body cells
+        $(`#sensitivity-data-table tbody tr td:nth-child(${columnIndex + 1})`).toggle(shouldShow);
+    });
+
+    // Update group and scenario headers after column visibility changes
+    updateGroupAndScenarioHeaders();
+
+    console.log('Column visibility updated');
+}
+
+// SORTING FUNCTIONALITY
+function setupSorting() {
+    $('#sensitivity-data-table thead tr.custom-table-header th').each(function(index) {
+        const $header = $(this);
+        const columnName = $header.text().trim();
+
+        // Add sorting indicators
+        $header.css({
+            'cursor': 'pointer',
+            'user-select': 'none',
+            'position': 'relative'
+        });
+
+        // Add click handler for sorting
+        $header.on('click', function() {
+            sortByColumn(index, columnName);
+        });
+
+        // Add hover effect
+        $header.hover(
+            function() { $(this).css('background-color', '#e9ecef'); },
+            function() { $(this).css('background-color', ''); }
+        );
+    });
+}
+
+function sortByColumn(columnIndex, columnName) {
+    // Update sort state
+    if (tableState.sortColumn === columnIndex) {
+        tableState.sortDirection = tableState.sortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        tableState.sortColumn = columnIndex;
+        tableState.sortDirection = 'asc';
+    }
+
+    // Update header indicators
+    $('#sensitivity-data-table thead tr.custom-table-header th').each(function(index) {
+        const $header = $(this);
+        $header.find('.sort-indicator').remove();
+
+        if (index === columnIndex) {
+            const indicator = tableState.sortDirection === 'asc' ? ' ↑' : ' ↓';
+            $header.append(`<span class="sort-indicator">${indicator}</span>`);
+        }
+    });
+
+    // Sort the filtered rows
+    tableState.filteredRows.sort(function(a, b) {
+        const aValue = $(a.data[columnIndex]).text().trim();
+        const bValue = $(b.data[columnIndex]).text().trim();
+
+        // Try to parse as numbers first
+        const aNum = parseFloat(aValue.replace(/[^\d.-]/g, ''));
+        const bNum = parseFloat(bValue.replace(/[^\d.-]/g, ''));
+
+        let comparison = 0;
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+            // Numeric comparison
+            comparison = aNum - bNum;
+        } else {
+            // String comparison
+            comparison = aValue.localeCompare(bValue);
+        }
+
+        return tableState.sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+    // Reset to first page and render
+    tableState.currentPage = 1;
+    renderTable();
+    updatePaginationControls();
+}
+
+// Enhanced header colspan management for 3-row headers
+function mapHeaderGroups() {
+    const columnHeaders = $('#sensitivity-data-table thead tr.custom-table-header th');
+    const groupHeaders = $('#sensitivity-data-table thead tr.group-header th');
+    const subGroupHeaders = $('#sensitivity-data-table thead tr.sub-group-header th');
+
+    let idx = 0;
+    groupHeaders.each(function(i) {
+        const span = parseInt($(this).attr('colspan')) || 1;
+        $(this).attr({'data-original-colspan': span, 'data-group-index': i});
+        for (let j = 0; j < span && idx < columnHeaders.length; j++, idx++) {
+            columnHeaders.eq(idx).attr('data-group-index', i);
+        }
+    });
+
+    // Map sub-group headers
+    idx = 0;
+    let subIdx = 0;
+    groupHeaders.each(function(i) {
+        const groupSpan = parseInt($(this).attr('data-original-colspan')) || 1;
+        let remainingSpan = groupSpan;
+
+        while (remainingSpan > 0 && subIdx < subGroupHeaders.length) {
+            const subGroupHeader = subGroupHeaders.eq(subIdx);
+            const subSpan = parseInt(subGroupHeader.attr('colspan')) || 1;
+            subGroupHeader.attr({'data-original-colspan': subSpan, 'data-sub-group-index': subIdx, 'data-group-index': i});
+            remainingSpan -= subSpan;
+            subIdx++;
+        }
+    });
+}
+
+function updateGroupAndScenarioHeaders() {
+    console.log('Updating group and scenario headers...');
+
+    // Get all visible columns
+    const visibleColumns = new Set(['Facility', 'Asset Archetype']);
+    $('.hazard-column').each(function() {
+        const columnName = $(this).data('column');
+        if ($(this).prop('checked')) {
+            visibleColumns.add(columnName);
+        }
+    });
+
+    // Define scenario mapping for Flood, Water Stress, and Sea Level Rise
+    const scenarioMapping = {
+        'Asset Information': {
+            '': ['Asset', 'Asset Archetype'] // No scenario header for asset info
+        },
+        'Flood': {
+            'Current': ['Flood Depth (meters)'],
+            'Future (Moderate Case)': ['Flood Depth (meters) - Moderate Case'],
+            'Future (Worst Case)': ['Flood Depth (meters) - Worst Case']
+        },
+        'Water Stress': {
+            'Current': ['Water Stress Exposure (%)'],
+            'Future (Moderate Case)': [
+                'Water Stress Exposure 2030 (%) - Moderate Case',
+                'Water Stress Exposure 2050 (%) - Moderate Case'
+            ],
+            'Future (Worst Case)': [
+                'Water Stress Exposure 2030 (%) - Worst Case',
+                'Water Stress Exposure 2050 (%) - Worst Case'
+            ]
+        },
+        'Sea Level Rise': {
+            'Future (Moderate Case)': [
+                '2030 Sea Level Rise (meters) - Moderate Case',
+                '2040 Sea Level Rise (meters) - Moderate Case',
+                '2050 Sea Level Rise (meters) - Moderate Case'
+            ],
+            'Future (Worst Case)': [
+                '2030 Sea Level Rise (meters) - Worst Case',
+                '2040 Sea Level Rise (meters) - Worst Case',
+                '2050 Sea Level Rise (meters) - Worst Case'
+            ]
+        },
+        'Tropical Cyclones': {
+            'Current': [
+                'Extreme Windspeed 10 year Return Period (km/h)',
+                'Extreme Windspeed 20 year Return Period (km/h)',
+                'Extreme Windspeed 50 year Return Period (km/h)',
+                'Extreme Windspeed 100 year Return Period (km/h)'
+            ],
+            'Future (Moderate Case)': [
+                'Extreme Windspeed 10 year Return Period (km/h) - Moderate Case',
+                'Extreme Windspeed 20 year Return Period (km/h) - Moderate Case',
+                'Extreme Windspeed 50 year Return Period (km/h) - Moderate Case',
+                'Extreme Windspeed 100 year Return Period (km/h) - Moderate Case'
+            ],
+            'Future (Worst Case)': [
+                'Extreme Windspeed 10 year Return Period (km/h) - Worst Case',
+                'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
+                'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
+                'Extreme Windspeed 100 year Return Period (km/h) - Worst Case'
+            ]
+        },
+        'Heat': {
+            'Current': [
+                'Days over 30° Celsius',
+                'Days over 33° Celsius',
+                'Days over 35° Celsius'
+            ],
+            'Future (Moderate Case)': [
+                'Days over 35° Celsius (2026 - 2030) - Moderate Case',
+                'Days over 35° Celsius (2031 - 2040) - Moderate Case',
+                'Days over 35° Celsius (2041 - 2050) - Moderate Case'
+            ],
+            'Future (Worst Case)': [
+                'Days over 35° Celsius (2026 - 2030) - Worst Case',
+                'Days over 35° Celsius (2031 - 2040) - Worst Case',
+                'Days over 35° Celsius (2041 - 2050) - Worst Case'
+            ]
+        },
+        'Storm Surge': {
+            'Current': [
+                'Storm Surge Flood Depth (meters)'
+            ],
+            'Future (Worst Case)': [
+                'Storm Surge Flood Depth (meters) - Worst Case'
+            ]
+        },
+        'Rainfall-Induced Landslide': {
+            'Current': [
+                'Rainfall-Induced Landslide (factor of safety)'
+            ],
+            'Future (Moderate Case)': [
+                'Rainfall-Induced Landslide (factor of safety) - Moderate Case'
+            ],
+            'Future (Worst Case)': [
+                'Rainfall-Induced Landslide (factor of safety) - Worst Case'
+            ]
+        }
+    };
+
+    // All climate hazard groups are now explicitly defined above
+
+    // Build scenario headers
+    let scenarioHeaderHtml = '';
+    const groupCounts = {};
+
+    // Handle Asset Information first (no scenario sub-headers)
+    const assetColumns = ['Asset', 'Asset Archetype'];
+    let assetVisibleCount = 0;
+    assetColumns.forEach(function(columnName) {
+        if (visibleColumns.has(columnName)) {
+            assetVisibleCount++;
+        }
+    });
+
+    if (assetVisibleCount > 0) {
+        // Empty scenario header cells for Asset Information (spans directly to columns)
+        scenarioHeaderHtml += `<th colspan="${assetVisibleCount}"></th>`;
+        groupCounts['Asset Information'] = assetVisibleCount;
+    }
+
+    // Handle climate hazards (with scenario sub-headers)
+    Object.keys(scenarioMapping).forEach(function(groupName) {
+        if (!groupCounts[groupName]) groupCounts[groupName] = 0;
+        const scenarios = scenarioMapping[groupName];
+
+        Object.keys(scenarios).forEach(function(scenarioName) {
+            const columns = scenarios[scenarioName];
+            let visibleCount = 0;
+
+            columns.forEach(function(columnName) {
+                if (visibleColumns.has(columnName)) {
+                    visibleCount++;
+                }
+            });
+
+            if (visibleCount > 0) {
+                const scenarioClass = scenarioName.includes('Current') ? 'baseline-header' :
+                                    scenarioName.includes('Moderate') ? 'moderate-header' :
+                                    scenarioName.includes('Worst') ? 'worstcase-header' : '';
+
+                scenarioHeaderHtml += `<th colspan="${visibleCount}" class="text-center ${scenarioClass}">${scenarioName}</th>`;
+                groupCounts[groupName] += visibleCount;
+            }
+        });
+    });
+
+    // Update scenario headers
+    $('#sensitivity-data-table thead tr.sub-group-header').html(scenarioHeaderHtml);
+
+    // Update group header colspans
+    $('#sensitivity-data-table thead tr.group-header th').each(function(index) {
+        const groupName = $(this).text().trim();
+        const count = groupCounts[groupName] || 0;
+
+        if (count > 0) {
+            $(this).attr('colspan', count).show();
+        } else {
+            $(this).hide();
+        }
+
+        console.log(`Group "${groupName}": ${count} visible columns`);
+    });
+
+    console.log('Group and scenario headers updated dynamically');
+}
+
+// PAGINATION FUNCTIONALITY
+function renderTable() {
+    const startIndex = (tableState.currentPage - 1) * tableState.rowsPerPage;
+    const endIndex = startIndex + tableState.rowsPerPage;
+    const pageRows = tableState.filteredRows.slice(startIndex, endIndex);
+
+    const $tbody = $('#sensitivity-data-table tbody');
+    $tbody.empty();
+
+    if (pageRows.length === 0) {
+        $tbody.append('<tr><td colspan="100%" class="text-center text-muted">No data found</td></tr>');
+        return;
+    }
+
+    pageRows.forEach(function(row) {
+        $tbody.append(row.element);
+    });
+
+    // Update column visibility after rendering (this handles all 3 header levels)
+    updateColumnVisibilityOnRows();
+
+    // Update header colspans based on visible columns
+    updateGroupAndScenarioHeaders();
+}
+
+function updateColumnVisibilityOnRows() {
+    const visibleColumns = new Set(['Facility', 'Asset Archetype']);
+
+    $('.hazard-column').each(function() {
+        const columnName = $(this).data('column');
+        if ($(this).prop('checked')) {
+            visibleColumns.add(columnName);
+        }
+    });
+
+    Object.keys(tableState.columnHeaderMap).forEach(function(columnName) {
+        const columnIndex = tableState.columnHeaderMap[columnName];
+        const shouldShow = visibleColumns.has(columnName);
+        $(`#sensitivity-data-table tbody tr td:nth-child(${columnIndex + 1})`).toggle(shouldShow);
+    });
+}
+
+function setupPagination() {
+    // Add pagination controls after the table
+    const paginationHtml = `
+        <div id="table-pagination" class="row mt-3">
+            <div class="col-md-6">
+                <div class="d-flex align-items-center">
+                    <label for="rows-per-page" class="me-2">Rows per page:</label>
+                    <select id="rows-per-page" class="form-select" style="width: auto;">
+                        <option value="10">10</option>
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="-1">All</option>
+                    </select>
+                    <span id="table-info" class="ms-3 text-muted"></span>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <nav aria-label="Table pagination">
+                    <ul id="pagination-controls" class="pagination justify-content-end mb-0">
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    `;
+
+    $('#sensitivity-data-table').closest('.table-responsive').after(paginationHtml);
+
+    // Handle rows per page change
+    $('#rows-per-page').on('change', function() {
+        const value = parseInt($(this).val());
+        tableState.rowsPerPage = value === -1 ? tableState.filteredRows.length : value;
+        tableState.currentPage = 1;
+        renderTable();
+        updatePaginationControls();
+    });
+}
+
+function updatePaginationControls() {
+    const totalRows = tableState.filteredRows.length;
+    const totalPages = tableState.rowsPerPage === tableState.filteredRows.length ? 1 :
+                      Math.ceil(totalRows / tableState.rowsPerPage);
+
+    // Update info
+    const startRow = totalRows === 0 ? 0 : (tableState.currentPage - 1) * tableState.rowsPerPage + 1;
+    const endRow = Math.min(tableState.currentPage * tableState.rowsPerPage, totalRows);
+    $('#table-info').text(`Showing ${startRow} to ${endRow} of ${totalRows} entries`);
+
+    // Update pagination controls
+    const $controls = $('#pagination-controls');
+    $controls.empty();
+
+    if (totalPages <= 1) return;
+
+    // Previous button
+    $controls.append(`
+        <li class="page-item ${tableState.currentPage === 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" data-page="${tableState.currentPage - 1}">Previous</a>
+        </li>
+    `);
+
+    // Page numbers
+    const startPage = Math.max(1, tableState.currentPage - 2);
+    const endPage = Math.min(totalPages, tableState.currentPage + 2);
+
+    for (let i = startPage; i <= endPage; i++) {
+        $controls.append(`
+            <li class="page-item ${i === tableState.currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" data-page="${i}">${i}</a>
+            </li>
+        `);
+    }
+
+    // Next button
+    $controls.append(`
+        <li class="page-item ${tableState.currentPage === totalPages ? 'disabled' : ''}">
+            <a class="page-link" href="#" data-page="${tableState.currentPage + 1}">Next</a>
+        </li>
+    `);
+
+    // Add click handlers
+    $controls.find('a.page-link').on('click', function(e) {
+        e.preventDefault();
+        const page = parseInt($(this).data('page'));
+        if (page > 0 && page <= totalPages && page !== tableState.currentPage) {
+            tableState.currentPage = page;
+            renderTable();
+            updatePaginationControls();
+        }
+    });
+}
+
+// SEARCH FUNCTIONALITY
+function setupSearch() {
+    // Add search box above the table
+    const searchHtml = `
+        <div id="table-search" class="row mb-3">
+            <div class="col-md-6">
+                <div class="input-group">
+                    <span class="input-group-text">
+                        <i class="fas fa-search"></i>
+                    </span>
+                    <input type="text" id="search-input" class="form-control"
+                           placeholder="Search in table...">
+                    <button class="btn btn-outline-secondary" type="button" id="clear-search">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="d-flex justify-content-end">
+                    <button type="button" id="export-excel-btn" class="btn btn-success btn-sm">
+                        <i class="fas fa-file-excel me-1"></i> Export to Excel
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    $('#sensitivity-data-table').closest('.table-responsive').before(searchHtml);
+
+    // Handle search
+    $('#search-input').on('input', function() {
+        const searchTerm = $(this).val().toLowerCase().trim();
+        performSearch(searchTerm);
+    });
+
+    $('#clear-search').on('click', function() {
+        $('#search-input').val('');
+        performSearch('');
+    });
+}
+
+function performSearch(searchTerm) {
+    tableState.searchTerm = searchTerm;
+
+    if (searchTerm === '') {
+        tableState.filteredRows = [...tableState.allRows];
+    } else {
+        tableState.filteredRows = tableState.allRows.filter(function(row) {
+            return row.searchText.includes(searchTerm);
+        });
+    }
+
+    tableState.currentPage = 1;
+    renderTable();
+    updatePaginationControls();
+}
+
+// EXCEL EXPORT FUNCTIONALITY
+function exportToExcel() {
+    try {
+        // Get visible columns
+        const visibleColumns = [];
+        const visibleColumnNames = [];
+
+        Object.keys(tableState.columnHeaderMap).forEach(function(columnName) {
+            const columnIndex = tableState.columnHeaderMap[columnName];
+            const $header = $(`#sensitivity-data-table thead tr.custom-table-header th:nth-child(${columnIndex + 1})`);
+
+            if ($header.is(':visible')) {
+                visibleColumns.push(columnIndex);
+                visibleColumnNames.push(columnName);
             }
         });
 
+        // Prepare data for export
+        const exportData = [];
+
+        // Add headers
+        exportData.push(visibleColumnNames);
+
+        // Add data rows (use all filtered data, not just current page)
+        tableState.filteredRows.forEach(function(row) {
+            const rowData = [];
+            visibleColumns.forEach(function(colIndex) {
+                // Extract text content without HTML tags
+                const cellValue = $(row.data[colIndex]).text().trim();
+                rowData.push(cellValue);
+            });
+            exportData.push(rowData);
+        });
+
+        // Create workbook and worksheet
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(exportData);
+
+        // Add worksheet to workbook
+        XLSX.utils.book_append_sheet(wb, ws, "Sensitivity Results");
+
+        // Generate filename with timestamp
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+        const filename = `sensitivity_analysis_${timestamp}.xlsx`;
+
+        // Save file
+        XLSX.writeFile(wb, filename);
+
+        console.log('Excel file exported successfully');
+    } catch (error) {
+        console.error('Error exporting to Excel:', error);
+        alert('Error exporting to Excel. Please try again.');
+    }
+}
+
+// Initialize table
+$(document).ready(function() {
+    console.log('Setting up enhanced sensitivity table...');
+
+    // Add basic table styling
+    $('#sensitivity-data-table').addClass('table-striped table-hover');
+    $('#sensitivity-data-table').wrap('<div style="overflow-x: auto; max-width: 100%;"></div>');
+
+    // Build header mapping
+    buildHeaderMap();
+    mapHeaderGroups();
+
+    // Store all rows for searching and filtering
+    tableState.allRows = [];
+    $('#sensitivity-data-table tbody tr').each(function() {
+        const $row = $(this);
+        const searchText = $row.text().toLowerCase();
+        const cellData = [];
+
+        $row.find('td').each(function() {
+            cellData.push($(this).html());
+        });
+
+        tableState.allRows.push({
+            element: $row.clone(),
+            searchText: searchText,
+            data: cellData
+        });
+    });
+
+    tableState.filteredRows = [...tableState.allRows];
+
+    // Set up enhanced features
+    setupSorting();
+    setupPagination();
+    setupSearch();
+
+    // Handle export button click (button is created in setupSearch)
+    $(document).on('click', '#export-excel-btn', function() {
+        exportToExcel();
+    });
+
+    // Set up column visibility handlers
+    $('.hazard-column').on('change', function() {
+        updateColumnVisibility();
+        renderTable(); // Re-render to apply visibility changes
+    });
+
+    // Initial setup
+    updateColumnVisibility();
+    renderTable();
+    updatePaginationControls();
+
+    // Ensure all header rows are visible and properly aligned
+    $('#sensitivity-data-table thead tr.group-header').show();
+    $('#sensitivity-data-table thead tr.sub-group-header').show();
+    $('#sensitivity-data-table thead tr.custom-table-header').show();
+
+    // Initial group and scenario header alignment
+    updateGroupAndScenarioHeaders();
+
+    console.log('Enhanced table setup complete with sorting, pagination, search, and export');
+
+    // Set up sensitivity column search functionality
+    setupSensitivityColumnSearch();
+});
+
+// === SENSITIVITY COLUMN SEARCH FUNCTIONALITY ===
+function setupSensitivityColumnSearch() {
+    console.log('Setting up sensitivity column search functionality...');
+
+    const $searchInput = $('#sensitivity-column-search');
+    const $clearButton = $('#clear-sensitivity-search');
+
+    if (!$searchInput.length) {
+        console.warn('Sensitivity column search input not found');
+        return;
     }
 
-    function updateGroupHeaderColspans() {
-        const columnHeaders = $('#sensitivity-data-table thead tr.custom-table-header th');
-        const groupCounts = {};
-        columnHeaders.each(function() {
-            const index = $(this).data('group-index');
-            if ($(this).is(':visible')) {
-                groupCounts[index] = (groupCounts[index] || 0) + 1;
-            }
-        });
-        $('#sensitivity-data-table thead tr.group-header th').each(function() {
-            const index = $(this).data('group-index');
-            const count = groupCounts[index] || 0;
-            $(this).attr('colspan', count).css('display', count ? '' : 'none');
-        });
+    // Handle search input
+    $searchInput.on('input', function() {
+        const searchTerm = $(this).val().toLowerCase().trim();
+        filterSensitivityColumnsBySearch(searchTerm);
+        updateSensitivitySearchMatchCount(searchTerm);
+    });
 
-    }
+    // Handle clear button
+    $clearButton.on('click', function() {
+        $searchInput.val('');
+        filterSensitivityColumnsBySearch('');
+        updateSensitivitySearchMatchCount('');
+        $searchInput.focus();
+    });
 
-    function updateColumnVisibility() {
-        if (!sensitivityDataTable) {
-            console.error("Sensitivity DataTable not initialized");
+    // Handle Enter key
+    $searchInput.on('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+        }
+    });
+
+    console.log('Sensitivity column search setup complete');
+}
+
+function filterSensitivityColumnsBySearch(searchTerm) {
+    const $columnSelector = $('.column-selector');
+    let visibleCount = 0;
+    let totalCount = 0;
+
+    try {
+        if (searchTerm === '') {
+            // Show all items
+            $columnSelector.find('.mb-3, .form-check').show();
+            $columnSelector.find('label').show();
             return;
         }
 
-        try {
-            const columnMap = {};
-            sensitivityDataTable.columns().every(function(index) {
-                columnMap[$(this.header()).text().trim()] = index;
-            });
+        // Hide all sections initially
+        $columnSelector.find('.mb-3').hide();
 
-            const visibleColumns = new Set(['Facility']);
+        // Process each hazard section
+        $columnSelector.find('.mb-3').each(function() {
+            const $section = $(this);
+            let sectionHasMatches = false;
 
-            $('.hazard-column').each(function() {
-                const columnName = $(this).data('column');
-                if ($(this).prop('checked') && columnMap.hasOwnProperty(columnName)) {
-                    visibleColumns.add(columnName);
-                }
-            });
+            // Check main section label
+            const sectionText = $section.find('> .form-check > .form-check-label, > label').first().text().toLowerCase();
+            const sectionMatches = sectionText.includes(searchTerm);
 
-            sensitivityDataTable.columns().every(function() {
-                const headerText = $(this.header()).text().trim();
-                const shouldBeVisible = visibleColumns.has(headerText);
+            if (sectionMatches) {
+                sectionHasMatches = true;
+                $section.find('.form-check').show();
+                $section.find('label').show();
+            } else {
+                // Hide all initially, then show matches
+                $section.find('.form-check').hide();
+                $section.find('label').hide();
 
-                if (this.visible() !== shouldBeVisible) {
-                    this.visible(shouldBeVisible, false);
-                }
-            });
+                // Check individual checkbox items
+                $section.find('.form-check').each(function() {
+                    const $checkbox = $(this);
+                    const labelText = $checkbox.find('.form-check-label').text().toLowerCase();
 
-            sensitivityDataTable.columns.adjust().draw(false);
+                    totalCount++;
 
-            setTimeout(function() {
-                updateGroupHeaderColspans();
-                $(window).trigger('resize');
-                sensitivityDataTable.columns.adjust();
-            }, 50);
+                    if (labelText.includes(searchTerm)) {
+                        $checkbox.show();
+                        $checkbox.find('label').show();
+                        sectionHasMatches = true;
+                        visibleCount++;
 
-        } catch (error) {
-            console.error("Error updating column visibility:", error);
-        }
-    }
-
-    $(document).ready(function() {
-        
-        // Initialize DataTable with column visibility support
-        function initializeSensitivityDataTable() {
-            mapHeaderGroups();
-            sensitivityDataTable = $('#sensitivity-data-table').DataTable({
-                scrollX: true,
-                scrollCollapse: true,
-                fixedHeader: true,
-                autoWidth: true,
-                dom: 'Bfrtip',
-                buttons: [
-                    {
-                        extend: 'excelHtml5',
-                        text: '<i class="fas fa-file-excel"></i> Save Sensitivity Results to Excel',
-                        className: 'btn btn-outline-secondary',
-                        exportOptions: {
-                            columns: ':visible'
+                        // Show parent scenario groups if needed
+                        let $parent = $checkbox.parent();
+                        while ($parent.length && !$parent.hasClass('mb-3')) {
+                            if ($parent.hasClass('ms-4')) {
+                                $parent.prev('.form-check').show();
+                                $parent.prev('.form-check').find('label').show();
+                            }
+                            $parent = $parent.parent();
                         }
                     }
-                ],
-                columnDefs: [
-                    // No need to hide Lat/Long since they're removed entirely
-                    // Column proportions
-                    { width: '20%', targets: 0 }, // Facility name (wider since no lat/long)
-                    { width: '15%', targets: 1 }, // Asset Archetype
-                    { width: '10%', targets: '_all' }, // Other columns
-                    // Improve wrapping behavior 
-                    { className: "dt-head-center dt-body-center", targets: "_all" }
-                ],
-                drawCallback: function() {
-                    $(window).trigger('resize');
-                },
-                initComplete: function() {
-                    setTimeout(function() {
-                        updateColumnVisibility();
-                        updateGroupHeaderColspans();
-                        sensitivityDataTable.columns.adjust().draw(false);
-                    }, 100);
-                }
-            });
+                });
 
-            $(window).on('resize', function() {
-                if (sensitivityDataTable) {
-                    clearTimeout(window.resizeTimeout);
-                    window.resizeTimeout = setTimeout(function() {
-                        sensitivityDataTable.columns.adjust();
-                    }, 100);
+                // Show main section label if needed
+                if (sectionHasMatches) {
+                    $section.find('> .form-check > .form-check-label, > label').first().show();
+                    const $mainCheckbox = $section.find('> .form-check').first();
+                    if ($mainCheckbox.length) {
+                        $mainCheckbox.show();
+                    }
                 }
-            });
-        }
-        
-        // Initialize the DataTable
-        initializeSensitivityDataTable();
-    });
+            }
 
-    function completeSensitivityAnalysis() {
-    alert("Sensitivity Analysis Complete!\n\nYou have successfully configured and applied Water Stress sensitivity parameters for different asset archetypes.");
-    // Could redirect to a summary page or back to main dashboard
+            // Show section if it has matches
+            if (sectionHasMatches) {
+                $section.show();
+            }
+        });
+
+    } catch (error) {
+        console.error('Error filtering sensitivity columns:', error);
+        // Fallback: show all items
+        $columnSelector.find('.mb-3, .form-check').show();
+        $columnSelector.find('label').show();
+    }
 }
 
-function highlightHeaders(currentStep) {
-        const overlay = document.getElementById('overlay-header');
-        const override = document.getElementById('override-header');
-        const sensitivity = document.getElementById('sensitivity-header');
-        const impact = document.getElementById('impact-header');
+function updateSensitivitySearchMatchCount(searchTerm) {
+    const $smallText = $('#sensitivity-column-search').siblings('.text-muted');
 
-        [overlay, override, sensitivity, impact].forEach(el => el.classList.remove('active-step-header'));
-
-        if (currentStep >= 1) {
-            overlay.classList.add('active-step-header');
-        } if (currentStep >= 3) {
-            override.classList.add('active-step-header');
-        } if (currentStep >= 4) {
-            sensitivity.classList.add('active-step-header');
-        } if (currentStep >= 6) {
-            impact.classList.add('active-step-header');
-        }
+    if (searchTerm === '') {
+        $smallText.text('Type to filter columns by name, scenario, or year');
+        return;
     }
 
+    // Count visible checkboxes with hazard-column class
+    const visibleColumns = $('.column-selector .form-check:visible .hazard-column').length;
+    const totalColumns = $('.column-selector .hazard-column').length;
 
-function highlightSteps(currentStep) {
-    const steps = document.querySelectorAll('.step-item');
-    steps.forEach((step, index) => {
-        const circle = step.querySelector('.step-circle');
-        const label = step.querySelector('.step-label');
-        if (!circle || !label) return;
-        if (index + 1 === currentStep) {
-            circle.style.backgroundColor = '#F1D500';
-            circle.style.color = '#000';
-            label.style.color = '#000';
+    if (visibleColumns === 0) {
+        $smallText.text('No matching columns found').css('color', '#dc3545');
+    } else {
+        $smallText.text(`Showing ${visibleColumns} of ${totalColumns} columns`).css('color', '#6c757d');
+    }
+}
+
+// Group header highlighting
+function highlightHeaders(currentStep) {
+    const overlay = document.getElementById('overlay-header');
+    const override = document.getElementById('override-header');
+    const sensitivity = document.getElementById('sensitivity-header');
+    const impact = document.getElementById('impact-header');
+
+    [overlay, override, sensitivity, impact].forEach(el => el.classList.remove('active-step-header'));
+
+    if (currentStep >= 1) {
+        overlay.classList.add('active-step-header');
+    } if (currentStep >= 3) {
+        override.classList.add('active-step-header');
+    } if (currentStep >= 4) {
+        sensitivity.classList.add('active-step-header');
+    } if (currentStep >= 6) {
+        impact.classList.add('active-step-header');
+    }
+}
+
+// Step highlighting (enhanced to support multiple completed steps)
+function highlightSteps(currentStep, completedSteps = []) {
+    $('.step-item').each(function(index) {
+        const $circle = $(this).find('.step-circle');
+        const $label = $(this).find('.step-label');
+        const stepNumber = index + 1;
+
+        if (stepNumber === currentStep) {
+            // Current step - yellow highlight
+            $circle.css({ backgroundColor: '#F1D500', color: '#000' });
+            $label.css('color', '#000');
+        } else if (completedSteps.includes(stepNumber)) {
+            // Completed step - green highlight
+            $circle.css({ backgroundColor: '#28a745', color: '#fff' });
+            $label.css('color', '#28a745');
         } else {
-            circle.style.backgroundColor = '#e9ecef';
-            circle.style.color = '#6c757d';
-            label.style.color = '#6c757d';
+            // Default/unvisited step
+            $circle.css({ backgroundColor: '#e9ecef', color: '#6c757d' });
+            $label.css('color', '#6c757d');
         }
     });
 }
 
+// Initialize step highlighting
 document.addEventListener('DOMContentLoaded', function() {
     const path = window.location.pathname;
-    let currentStep = 1;
-    if (path.includes('sensitivity-results')) {
-        currentStep = 5;
-    } else if (path.includes('sensitivity-parameters')) {
+    let currentStep = 5; // Sensitivity results page (default for this template)
+    let completedSteps = [];
+
+    // More specific path checking to avoid conflicts
+    if (path.includes('sensitivity-parameters')) {
         currentStep = 4;
-    } else if (path.includes('results')) {
-        currentStep = 3;
+        completedSteps = [1, 2, 3]; // Previous steps completed
+    } else if (path.includes('sensitivity-results')) {
+        currentStep = 5; // Explicit check for sensitivity results
+        completedSteps = [1, 2, 3, 4]; // All previous steps completed including Exposure Overlay (3) and Exposure Override (4)
+    } else if (path.includes('results') && !path.includes('sensitivity')) {
+        currentStep = 3; // Regular hazard exposure results
+        completedSteps = [1, 2]; // Previous steps completed
     } else if (path.includes('select-hazards')) {
         currentStep = 2;
+        completedSteps = [1]; // Upload step completed
     }
+
     highlightHeaders(currentStep);
-    highlightSteps(currentStep);
+    highlightSteps(currentStep, completedSteps);
 });
 
+// Export function for button
+window.SensitivityTable = {
+    complete: function() {
+        alert("Sensitivity Analysis Complete!\n\nYou have successfully configured and applied sensitivity parameters.");
+    }
+};
 </script>
 
+<!-- XLSX.js library for Excel export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script src="{% static 'js/sensitivity_column_selector.js' %}"></script>
 {% endblock %}

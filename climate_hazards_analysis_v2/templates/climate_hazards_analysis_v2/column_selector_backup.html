@@ -4,30 +4,22 @@
         <strong>Select Information to Display</strong>
     </div>
     <div class="card-body">
-        <!-- Search Input -->
-        <div class="mb-3">
-            <small class="text-muted">Type to filter columns by name, scenario, or year</small>
-            <div class="input-group">
-                <input type="text" class="form-control" id="column-search" placeholder="Search columns..." autocomplete="off">
-                <button class="btn btn-outline-secondary" type="button" id="clear-search" title="Clear search">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            
-        </div>
-
         <div class="column-selector">
             <!-- Base Columns (always shown) -->
             <div class="mb-3">
                 <label class="form-label fw-bold">Asset Information</label>
                 <div class="ms-2">
                     <div class="form-check">
-                        <input type="checkbox" class="form-check-input base-column" id="col-facility" data-column="Facility" checked disabled>
+                        <input type="checkbox" class="form-check-input base-column" id="col-facility" checked disabled>
                         <label class="form-check-label" for="col-facility">Asset</label>
                     </div>
                     <div class="form-check">
-                        <input type="checkbox" class="form-check-input base-column" id="col-asset-archetype" data-column="Asset Archetype" checked>
-                        <label class="form-check-label" for="col-asset-archetype"><strong>Asset Archetype</strong></label>
+                        <input type="checkbox" class="form-check-input base-column" id="col-lat" data-column="Lat">
+                        <label class="form-check-label" for="col-lat">Asset</label>
+                    </div>
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input base-column" id="col-long" data-column="Long">
+                        <label class="form-check-label" for="col-long">Asset</label>
                     </div>
                 </div>
             </div>

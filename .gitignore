@@ -31,3 +31,7 @@ heat_exposure_analysis/static/input_files/
 .env.development.local
 .env.test.local
 .env.production.local
+
+
+# .zip files
+.zip

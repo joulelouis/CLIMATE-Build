@@ -299,7 +299,8 @@ def show_results(request):
         logger.info("Calling generate_climate_hazards_analysis...")
         result = generate_climate_hazards_analysis(
             facility_csv_path=facility_csv_path,
-            selected_fields=selected_hazards
+            selected_fields=selected_hazards,
+            flood_scenarios=['current', 'moderate', 'worst']
         )
         
         # Check for errors in the result
@@ -571,7 +572,63 @@ def show_results(request):
 
         
 
-        
+        # Add Asset Archetype information from facility CSV
+        try:
+            # Load facility CSV to get Asset Archetype information
+            facility_df = pd.read_csv(facility_csv_path, encoding='utf-8')
+        except UnicodeDecodeError:
+            try:
+                facility_df = pd.read_csv(facility_csv_path, encoding='latin-1')
+            except UnicodeDecodeError:
+                facility_df = pd.read_csv(facility_csv_path, encoding='cp1252')
+
+        # Find Asset Archetype column with various naming conventions
+        archetype_column = None
+        possible_names = [
+            'Asset Archetype', 'asset archetype', 'AssetArchetype', 'assetarchetype',
+            'Archetype', 'archetype', 'Asset Type', 'asset type', 'AssetType', 'assettype',
+            'Type', 'type', 'Category', 'category', 'Asset Category', 'asset category'
+        ]
+
+        for possible_name in possible_names:
+            if possible_name in facility_df.columns:
+                archetype_column = possible_name
+                logger.info(f"Found Asset Archetype column: '{archetype_column}'")
+                break
+
+        if archetype_column:
+            # Create a mapping from Facility name to Asset Archetype
+            archetype_mapping = dict(zip(facility_df['Facility'], facility_df[archetype_column]))
+
+            # Add Asset Archetype column to the combined data
+            df['Asset Archetype'] = df['Facility'].map(archetype_mapping)
+
+            # Fill any missing archetypes with 'Unknown'
+            df['Asset Archetype'] = df['Asset Archetype'].fillna('Unknown')
+
+            # Reorder columns to put Asset Archetype as 2nd column (after Facility)
+            columns_list = df.columns.tolist()
+            if 'Asset Archetype' in columns_list and 'Facility' in columns_list:
+                # Remove Asset Archetype from its current position
+                columns_list.remove('Asset Archetype')
+                # Find Facility index and insert Asset Archetype after it
+                facility_index = columns_list.index('Facility')
+                columns_list.insert(facility_index + 1, 'Asset Archetype')
+                # Reorder the DataFrame
+                df = df[columns_list]
+                logger.info("Added Asset Archetype column as 2nd column")
+
+        else:
+            logger.warning("No Asset Archetype column found in facility CSV, using default 'Unknown'")
+            df['Asset Archetype'] = 'Unknown'
+            # Still reorder to put it as 2nd column
+            columns_list = df.columns.tolist()
+            if 'Facility' in columns_list:
+                columns_list.remove('Asset Archetype')
+                facility_index = columns_list.index('Facility')
+                columns_list.insert(facility_index + 1, 'Asset Archetype')
+                df = df[columns_list]
+
         # Convert to dict for template
         data = df.to_dict(orient="records")
         columns = df.columns.tolist()
@@ -589,7 +646,7 @@ def show_results(request):
         # Create detailed column groups for the table header
         groups = {}
         # Base group - Facility Information
-        facility_cols = ['Facility', 'Lat', 'Long']
+        facility_cols = ['Facility', 'Asset Archetype']
         facility_count = sum(1 for col in facility_cols if col in columns)
         if facility_count > 0:
             groups['Facility Information'] = facility_count
@@ -684,6 +741,14 @@ def show_results(request):
 
         if 'Water Stress' in groups:
             groups['Water Stress'] = ws_baseline_count + ws_moderatecase_count + ws_worstcase_count
+
+        # Flood column counts
+        flood_current_count = sum(1 for c in columns if c == 'Flood Depth (meters)')
+        flood_moderate_count = sum(1 for c in columns if c == 'Flood Depth (meters) - Moderate Case')
+        flood_worst_count = sum(1 for c in columns if c == 'Flood Depth (meters) - Worst Case')
+
+        if 'Flood' in groups:
+            groups['Flood'] = flood_current_count + flood_moderate_count + flood_worst_count
 
         # Tropical Cyclone column counts
         tc_basecase_count = sum(
@@ -817,6 +882,9 @@ def show_results(request):
             'ls_worstcase_count': ls_worstcase_count,
             'slr_moderatecase_count': slr_moderatecase_count,
             'slr_worstcase_count': slr_worstcase_count,
+            'flood_current_count': flood_current_count,
+            'flood_moderate_count': flood_moderate_count,
+            'flood_worst_count': flood_worst_count,
             'success_message': f"Successfully analyzed {len(data)} facilities for {len(selected_hazards)} hazard types."
         }
         
@@ -1137,10 +1205,18 @@ def sensitivity_parameters(request):
     else:
         asset_archetypes = [{'number': 1, 'name': 'Default Archetype'}]
 
+    # Get existing archetype parameters from session to restore checkbox states
+    archetype_params = request.session.get('climate_hazards_v2_archetype_params', {})
+    # Convert to JSON string for JavaScript consumption
+    import json
+    archetype_params_json = json.dumps(archetype_params)
+
     context = {
         'facility_count': len(facility_data),
         'selected_hazards': selected_hazards,
         'asset_archetypes': asset_archetypes,
+        'archetype_params': archetype_params,
+        'archetype_params_json': archetype_params_json,
     }
 
     # Handle form submission
@@ -1479,6 +1555,10 @@ def sensitivity_results(request):
                 row['WS_High_Threshold'] = params['water_stress_high']
                 row['SS_Low_Threshold'] = params.get('storm_surge_low', 0.5)
                 row['SS_High_Threshold'] = params.get('storm_surge_high', 1.5)
+                row['TC_Low_Threshold'] = params.get('tropical_cyclone_low', 119)
+                row['TC_High_Threshold'] = params.get('tropical_cyclone_high', 178)
+                row['Heat_Low_Threshold'] = params.get('heat_low', 10)
+                row['Heat_High_Threshold'] = params.get('heat_high', 45)
                 
                 # Overwrite hazard values with "Not material" when flagged
                 for nm_key, cols in hazard_to_columns.items():
@@ -1530,7 +1610,8 @@ def sensitivity_results(request):
                     ordered_row[column] = 'N/A'  # Default for missing columns
 
             # Preserve threshold values for template logic without displaying them
-            for thresh in ['WS_Low_Threshold', 'WS_High_Threshold', 'SS_Low_Threshold', 'SS_High_Threshold']:
+            for thresh in ['WS_Low_Threshold', 'WS_High_Threshold', 'SS_Low_Threshold', 'SS_High_Threshold',
+                          'TC_Low_Threshold', 'TC_High_Threshold', 'Heat_Low_Threshold', 'Heat_High_Threshold']:
                 if thresh in row:
                     ordered_row[thresh] = row[thresh]
             reordered_data.append(ordered_row)

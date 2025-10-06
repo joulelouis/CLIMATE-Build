@@ -122,8 +122,8 @@
                                 {% endif %}
                               {% endwith %}
                             
-                            {# Flood Depth styling #}
-                            {% elif key == "Flood Depth (meters)" %}
+                            {# Flood Depth styling - All scenarios #}
+                            {% elif "Flood Depth (meters)" in key %}
                               {% if value == "0.1 to 0.5" %}
                                 <span style="color: green;">{{ value }}</span>
                               {% elif value == "0.5 to 1.5" %}

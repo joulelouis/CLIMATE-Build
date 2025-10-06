@@ -104,10 +104,11 @@ def climate_hazards_analysis(request):
     selected_fields = request.session.get('selected_dynamic_fields', [])
     print("Climate Hazards selected:", selected_fields)
 
-    # Call the climate hazards analysis function with only the required parameters
+    # Call the climate hazards analysis function with flood scenarios
     result = generate_climate_hazards_analysis(
         facility_csv_path=facility_csv_path,
-        selected_fields=selected_fields
+        selected_fields=selected_fields,
+        flood_scenarios=['current', 'moderate', 'worst']
     )
 
     # Check for errors in the result.

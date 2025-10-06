@@ -70,7 +70,7 @@ def flood_exposure_analysis(request):
     if not file_path or not os.path.exists(file_path):
         return render(request, 'flood_exposure_analysis/upload.html', {'error': 'No file uploaded or file not found.'})
     
-    raster_path = os.path.join(UPLOAD_DIR, 'Abra_Flood_100year.tif')
+    raster_path = os.path.join(UPLOAD_DIR, 'PH_Flood_100year_UTM_ProjectNOAH_Unmasked_COG.tif')
 
     # Retrieve the list of fields selected by the user
     selected_fields = request.session.get('selected_dynamic_fields', None)

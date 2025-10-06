@@ -4,17 +4,29 @@
         <strong>Select Information to Display</strong>
     </div>
     <div class="card-body">
+        <!-- Search Input -->
+        <div class="mb-3">
+            <small class="text-muted">Type to filter columns by name, scenario, or year</small>
+            <div class="input-group">
+                <input type="text" class="form-control" id="sensitivity-column-search" placeholder="Search columns..." autocomplete="off">
+                <button class="btn btn-outline-secondary" type="button" id="clear-sensitivity-search" title="Clear search">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+        </div>
+
         <div class="column-selector">
             <!-- Base Columns (always shown) -->
             <div class="mb-3">
-                <label class="form-label fw-bold">Facility Information</label>
+                <label class="form-label fw-bold">Asset Information</label>
                 <div class="ms-2">
                     <div class="form-check">
-                        <input type="checkbox" class="form-check-input base-column" id="col-facility" checked disabled>
-                        <label class="form-check-label" for="col-facility">Facility</label>
+                        <input type="checkbox" class="form-check-input base-column" id="col-facility" data-column="Facility" checked disabled>
+                        <label class="form-check-label" for="col-facility">Asset</label>
                     </div>
                     <div class="form-check">
-                        <input type="checkbox" class="form-check-input hazard-column facility-info" id="col-asset-archetype" checked data-column="Asset Archetype">
+                        <input type="checkbox" class="form-check-input base-column" id="col-asset-archetype" data-column="Asset Archetype" checked>
                         <label class="form-check-label" for="col-asset-archetype"><strong>Asset Archetype</strong></label>
                     </div>
                 </div>
@@ -27,10 +39,46 @@
                     <input type="checkbox" class="form-check-input hazard-group" id="col-flood" checked data-hazard="flood">
                     <label class="form-check-label fw-bold" for="col-flood">Flood</label>
                 </div>
+
+                <!-- Current Scenario -->
                 <div class="ms-4">
                     <div class="form-check">
-                        <input type="checkbox" class="form-check-input hazard-column flood" id="col-flood-depth" checked data-column="Flood Depth (meters)">
-                        <label class="form-check-label" for="col-flood-depth">Flood Depth (meters)</label>
+                        <input type="checkbox" class="form-check-input hazard-group" id="flood-current-group" checked data-hazard="flood-current">
+                        <label class="form-check-label fw-bold" for="flood-current-group">Current</label>
+                    </div>
+                    <div class="ms-4 mb-2">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input hazard-column flood-current flood" id="col-flood-current" checked data-column="Flood Depth (meters)">
+                            <label class="form-check-label" for="col-flood-current">Flood Depth (meters)</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Future (Moderate Case) Scenario -->
+                <div class="ms-4">
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input hazard-group" id="flood-moderate-group" data-hazard="flood-moderate">
+                        <label class="form-check-label fw-bold" for="flood-moderate-group">Future (Moderate Case)</label>
+                    </div>
+                    <div class="ms-4 mb-2">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input hazard-column flood-moderate flood" id="col-flood-moderate" data-column="Flood Depth (meters) - Moderate Case">
+                            <label class="form-check-label" for="col-flood-moderate">Flood Depth (meters) - Moderate Case</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Future (Worst Case) Scenario -->
+                <div class="ms-4">
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input hazard-group" id="flood-worst-group" data-hazard="flood-worst">
+                        <label class="form-check-label fw-bold" for="flood-worst-group">Future (Worst Case)</label>
+                    </div>
+                    <div class="ms-4 mb-2">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input hazard-column flood-worst flood" id="col-flood-worst" data-column="Flood Depth (meters) - Worst Case">
+                            <label class="form-check-label" for="col-flood-worst">Flood Depth (meters) - Worst Case</label>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -115,7 +163,7 @@
                             <label class="form-check-label" for="col-slr-2040-mod">2040 Sea Level Rise (meters) - Moderate Case</label>
                         </div>
                         <div class="form-check">
-                            <input type="checkbox" class="form-check-input hazard-column slr-moderate sea-level-rise" id="col-slr-2050-mod" checked data-column="2050 Sea Level Rise (meters) - Moderate Case">
+                            <input type="checkbox" class="form-check-input hazard-column slr-moderate sea-level-rise" id="col-slr-2050-mod" data-column="2050 Sea Level Rise (meters) - Moderate Case">
                             <label class="form-check-label" for="col-slr-2050-mod">2050 Sea Level Rise (meters) - Moderate Case</label>
                         </div>
                     </div>

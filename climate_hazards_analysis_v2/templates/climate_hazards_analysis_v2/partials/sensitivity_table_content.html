@@ -1,0 +1,116 @@
+<!-- climate_hazards_analysis_v2/partials/sensitivity_table_content.html -->
+{% load my_filters %}
+<table id="sensitivity-data-table" class="table custom-table">
+    <thead>
+        <!-- Level 1: Main Group Headers -->
+        <tr class="group-header">
+            {% for group, count in groups.items %}
+                {% if count > 0 %}
+                    <th colspan="{{ count }}" class="text-center">{{ group }}</th>
+                {% endif %}
+            {% endfor %}
+        </tr>
+
+        <!-- Level 2: Scenario Sub-headers -->
+        <tr class="sub-group-header">
+            {% for group, count in groups.items %}
+                {% if group == 'Facility Information' %}
+                    <th colspan="{{ count }}"></th>
+                    
+                {% elif group == 'Flood' %}
+                    <th colspan="{{ count }}" class="text-center baseline-header">Current</th>
+                    
+                {% elif group == 'Water Stress' %}
+                    {% if ws_baseline_count %}
+                        <th colspan="{{ ws_baseline_count }}" class="text-center baseline-header">Current</th>
+                    {% endif %}
+                    {% if ws_moderatecase_count %}
+                        <th colspan="{{ ws_moderatecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                    {% endif %}
+                    {% if ws_worstcase_count %}
+                        <th colspan="{{ ws_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                    {% endif %}
+                    
+                {% elif group == 'Sea Level Rise' %}
+                    {% if slr_moderatecase_count %}
+                        <th colspan="{{ slr_moderatecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                    {% endif %}
+                    {% if slr_worstcase_count %}
+                        <th colspan="{{ slr_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                    {% endif %}
+                    
+                {% elif group == 'Tropical Cyclones' %}
+                    {% if tc_baseline_count %}
+                        <th colspan="{{ tc_baseline_count }}" class="text-center baseline-header">Current</th>
+                    {% endif %}
+                    {% if tc_basecase_count %}
+                        <th colspan="{{ tc_basecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                    {% endif %}
+                    {% if tc_worstcase_count %}
+                        <th colspan="{{ tc_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                    {% endif %}
+                    
+                {% elif group == 'Heat' %}
+                    {% if heat_baseline_count %}
+                        <th colspan="{{ heat_baseline_count }}" class="text-center baseline-header">Current</th>
+                    {% endif %}
+                    {% if heat_basecase_count %}
+                        <th colspan="{{ heat_basecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                    {% endif %}
+                    {% if heat_worstcase_count %}
+                        <th colspan="{{ heat_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                    {% endif %}
+                    
+                {% elif group == 'Storm Surge' %}
+                    {% if ss_baseline_count %}
+                        <th colspan="{{ ss_baseline_count }}" class="text-center baseline-header">Current</th>
+                    {% endif %}
+                    {% if ss_worstcase_count %}
+                        <th colspan="{{ ss_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                    {% endif %}
+                    
+                {% elif group == 'Rainfall-Induced Landslide' %}
+                    {% if ls_baseline_count %}
+                        <th colspan="{{ ls_baseline_count }}" class="text-center baseline-header">Current</th>
+                    {% endif %}
+                    {% if ls_moderatecase_count %}
+                        <th colspan="{{ ls_moderatecase_count }}" class="text-center moderate-header">Future (Moderate Case)</th>
+                    {% endif %}
+                    {% if ls_worstcase_count %}
+                        <th colspan="{{ ls_worstcase_count }}" class="text-center worstcase-header">Future (Worst Case)</th>
+                    {% endif %}
+                    
+                {% else %}
+                    <th colspan="{{ count }}"></th>
+                {% endif %}
+            {% endfor %}
+        </tr>
+
+        <!-- Level 3: Column Headers -->
+        <tr class="custom-table-header">
+            {% for column in columns %}
+                <th>{{ column }}</th>
+            {% endfor %}
+        </tr>
+    </thead>
+    
+    <tbody>
+        {% for row in data %}
+            <tr class="custom-table-row">
+                {% for key in columns %}
+                    {% with value=row|get_item:key %}
+                        <td>
+                            {% include "climate_hazards_analysis_v2/partials/sensitivity_cell_value.html" with key=key value=value row=row %}
+                        </td>
+                    {% endwith %}
+                {% endfor %}
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="{{ columns|length }}" class="text-center text-muted">
+                    No data available for the selected parameters.
+                </td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>

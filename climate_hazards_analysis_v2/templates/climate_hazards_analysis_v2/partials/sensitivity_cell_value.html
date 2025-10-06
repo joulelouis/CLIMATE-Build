@@ -1,0 +1,116 @@
+<!-- climate_hazards_analysis_v2/partials/sensitivity_cell_value.html -->
+{% load float_filters %}
+{% load my_filters %}
+
+{% if value == "Not material" %}
+    <span class="text-muted">Not material</span>
+
+{% elif value == "N/A" %}
+    <span class="text-muted">N/A</span>
+
+{% elif value == "Data not available" %}
+    <span class="risk-none">Data not available</span>
+
+{% elif value == "Unknown" %}
+    <span class="risk-unknown">Unknown</span>
+
+<!-- Asset Archetype -->
+{% elif key == "Asset Archetype" %}
+    <span class="badge bg-info">{{ value }}</span>
+
+<!-- Water Stress -->
+{% elif key == "Water Stress Exposure (%)" and value != "N/A" %}
+    {% with val=value|to_float low=row|get_item:"WS_Low_Threshold"|default:10 high=row|get_item:"WS_High_Threshold"|default:31 %}
+        {% if val < low %}
+            <span class="risk-low" title="Low Risk: {{ val }}% < {{ low }}%">{{ value }}</span>
+        {% elif val > high %}
+            <span class="risk-high" title="High Risk: {{ val }}% > {{ high }}%">{{ value }}</span>
+        {% else %}
+            <span class="risk-medium" title="Medium Risk: {{ low }}% ≤ {{ val }}% ≤ {{ high }}%">{{ value }}</span>
+        {% endif %}
+    {% endwith %}
+
+<!-- Flood Depth - All scenarios -->
+{% elif "Flood Depth (meters)" in key %}
+    {% if value == "0.1 to 0.5" %}
+        <span class="risk-low">{{ value }}</span>
+    {% elif value == "0.5 to 1.5" %}
+        <span class="risk-medium">{{ value }}</span>
+    {% elif value == "Greater than 1.5" %}
+        <span class="risk-high">{{ value }}</span>
+    {% else %}
+        {{ value }}
+    {% endif %}
+
+<!-- Heat Exposure (Days over temperature) -->
+{% elif "Days over" in key and "Celsius" in key and value != "N/A" %}
+    {% with num=value|to_float %}
+        {% if num < 10 %}
+            <span class="risk-low">{{ value }}</span>
+        {% elif num >= 10 and num < 45 %}
+            <span class="risk-medium">{{ value }}</span>
+        {% elif num >= 45 %}
+            <span class="risk-high">{{ value }}</span>
+        {% else %}
+            {{ value }}
+        {% endif %}
+    {% endwith %}
+
+<!-- Wind Speed -->
+{% elif "Extreme Windspeed" in key and "Return Period" in key %}
+    {% if value != "N/A" and value != "Data not available" %}
+        {% with ws=value|to_float %}
+            {% if ws < 119 %}
+                <span class="risk-low">{{ value }}</span>
+            {% elif ws >= 119 and ws < 178 %}
+                <span class="risk-medium">{{ value }}</span>
+            {% elif ws >= 178 %}
+                <span class="risk-high">{{ value }}</span>
+            {% else %}
+                {{ value }}
+            {% endif %}
+        {% endwith %}
+    {% else %}
+        <span class="risk-none">{{ value }}</span>
+    {% endif %}
+
+<!-- Storm Surge -->
+{% elif key == "Storm Surge Flood Depth (meters)" %}
+    {% if value != "N/A" and value != "Data not available" %}
+        {% with ss=value|to_float low=row|get_item:"SS_Low_Threshold"|default:0.5 high=row|get_item:"SS_High_Threshold"|default:1.5 %}
+            {% if ss < 0.1 %}
+                <span class="risk-none">Little to none</span>
+            {% elif ss < low %}
+                <span class="risk-low">0.1 to {{ low }}</span>
+            {% elif ss < high %}
+                <span class="risk-medium">{{ low }} to {{ high }}</span>
+            {% else %}
+                <span class="risk-high">≥ {{ high }}</span>
+            {% endif %}
+        {% endwith %}
+    {% else %}
+        <span class="risk-none">{{ value }}</span>
+    {% endif %}
+
+<!-- Rainfall-Induced Landslide -->
+{% elif key == "Rainfall-Induced Landslide (factor of safety)" %}
+    {% if value != "N/A" and value != "Data not available" %}
+        {% with ril=value|to_float high=1.5 low=1 %}
+            {% if ril > 2.5 %}
+                <span class="risk-none">FoS > 2.5</span>
+            {% elif ril > high %}
+                <span class="risk-low">FoS > {{ high }}</span>
+            {% elif ril >= low %}
+                <span class="risk-medium">{{ low }} ≤ FoS ≤ {{ high }}</span>
+            {% else %}
+                <span class="risk-high">FoS < {{ low }}</span>
+            {% endif %}
+        {% endwith %}
+    {% else %}
+        <span class="risk-none">{{ value }}</span>
+    {% endif %}
+
+<!-- Default -->
+{% else %}
+    {{ value }}
+{% endif %}
