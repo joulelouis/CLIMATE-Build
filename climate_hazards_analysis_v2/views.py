@@ -320,164 +320,213 @@ def select_hazards(request):
     # For GET requests, just display the hazard selection form
     return render(request, 'climate_hazards_analysis_v2/select_hazards.html', context)
 
+def _validate_and_prepare_session_data(request):
+    """
+    Validate and prepare session data for climate hazard analysis.
+
+    Returns:
+        tuple: (facility_data, selected_hazards, facility_csv_path) or redirect response if validation fails
+    """
+    facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+    selected_hazards = request.session.get('climate_hazards_v2_selected_hazards', [])
+    facility_csv_path = request.session.get('climate_hazards_v2_facility_csv_path')
+
+    # Check if we have the necessary data
+    if not facility_data or not selected_hazards:
+        return None, None, None, redirect('climate_hazards_analysis_v2:select_hazards')
+
+    logger.info(f"Starting results processing for {len(facility_data)} facilities")
+    logger.info(f"Selected hazards: {selected_hazards}")
+
+    return facility_data, selected_hazards, facility_csv_path, None
+
+
+def _ensure_facility_csv_exists(request, facility_data, facility_csv_path, selected_hazards):
+    """
+    Ensure facility CSV file exists, create from session data if needed.
+
+    Args:
+        request: Django request object
+        facility_data: Facility data from session
+        facility_csv_path: Current CSV file path
+        selected_hazards: List of selected hazards
+
+    Returns:
+        str: Valid CSV file path or None if failed
+    """
+    if facility_csv_path and os.path.exists(facility_csv_path):
+        return facility_csv_path
+
+    logger.warning(f"Facility CSV file not found: {facility_csv_path}, creating from session data...")
+
+    if not facility_data:
+        logger.error("No facility data in session")
+        return None
+
+    new_csv_path = _save_facility_data_to_csv(request, facility_data)
+    if not new_csv_path or not os.path.exists(new_csv_path):
+        logger.error("Failed to create CSV file from facility data")
+        return None
+
+    return new_csv_path
+
+
+def _get_hazard_types():
+    """
+    Get the list of available hazard types.
+
+    Returns:
+        list: List of available hazard types
+    """
+    return [
+        'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
+        'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
+    ]
+
+
+def _render_error_page(request, error_message, facility_data, selected_hazards):
+    """
+    Render error page with consistent context.
+
+    Args:
+        request: Django request object
+        error_message: Error message to display
+        facility_data: Facility data (for count)
+        selected_hazards: Selected hazards list
+
+    Returns:
+        HttpResponse: Rendered error page
+    """
+    return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+        'error': error_message,
+        'facility_count': len(facility_data) if facility_data else 0,
+        'hazard_types': _get_hazard_types(),
+        'selected_hazards': selected_hazards or []
+    })
+
+
 def show_results(request):
     """
     View to display climate hazard analysis results.
     Updated to work with simplified flood categories and tropical cyclone integration.
     """
+    logger.info("SHOW_RESULTS function called - starting climate hazard analysis")
 
-    logger.info("🔥 SHOW_RESULTS FUNCTION CALLED! 🔥")  # ADD THIS LINE
-    # Get facility data and selected hazards from session
-    facility_data = request.session.get('climate_hazards_v2_facility_data', [])
-    selected_hazards = request.session.get('climate_hazards_v2_selected_hazards', [])
-    facility_csv_path = request.session.get('climate_hazards_v2_facility_csv_path')
-    
-    # Check if we have the necessary data
-    if not facility_data or not selected_hazards:
-        return redirect('climate_hazards_analysis_v2:select_hazards')
-    
+    # Validate and prepare session data
+    facility_data, selected_hazards, facility_csv_path, redirect_response = _validate_and_prepare_session_data(request)
+    if redirect_response:
+        return redirect_response
+
     try:
-        logger.info(f"Starting results processing for {len(facility_data)} facilities")
-        logger.info(f"Selected hazards: {selected_hazards}")
         logger.info(f"Facility CSV path: {facility_csv_path}")
-        
-        # Verify facility CSV file exists, create if needed (for polygon/point-drawn assets)
-        if not facility_csv_path or not os.path.exists(facility_csv_path):
-            logger.warning(f"Facility CSV file not found: {facility_csv_path}, creating from session data...")
-            if facility_data:
-                facility_csv_path = _save_facility_data_to_csv(request, facility_data)
-                if not facility_csv_path or not os.path.exists(facility_csv_path):
-                    logger.error(f"Failed to create CSV file from facility data")
-                    return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
-                        'error': 'Failed to create facility data file. Please try uploading your data again.',
-                        'facility_count': len(facility_data),
-                        'hazard_types': [
-                            'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
-                            'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
-                        ],
-                        'selected_hazards': selected_hazards
-                    })
-            else:
-                logger.error(f"No facility data in session")
-                return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
-                    'error': 'Facility data not found. Please upload your facility data again.',
-                    'facility_count': 0,
-                    'hazard_types': [
-                        'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
-                        'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
-                    ],
-                    'selected_hazards': selected_hazards
-                })
-        
-        # Re-use the generate_climate_hazards_analysis function from the original module
-        logger.info("Calling generate_climate_hazards_analysis...")
-        result = generate_climate_hazards_analysis(
-            facility_csv_path=facility_csv_path,
-            selected_fields=selected_hazards,
-            flood_scenarios=['current', 'moderate', 'worst']
-        )
-        
-        # Check for errors in the result
-        if result is None or 'error' in result:
-            error_message = result.get('error', 'Unknown error') if result else 'Analysis failed.'
-            logger.error(f"Climate hazards analysis error: {error_message}")
-            
-            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
-                'error': error_message,
-                'facility_count': len(facility_data),
-                'hazard_types': [
-                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise', 
-                    'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
-                ],
-                'selected_hazards': selected_hazards
-            })
-        
-        # Get the combined CSV path and load the data
-        combined_csv_path = result.get('combined_csv_path')
-        
-        if not combined_csv_path or not os.path.exists(combined_csv_path):
-            logger.error(f"Combined CSV not found: {combined_csv_path}")
-            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
-                'error': 'Combined analysis output not found.',
-                'facility_count': len(facility_data),
-                'hazard_types': [
-                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise', 
-                    'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
-                ],
-                'selected_hazards': selected_hazards
-            })
-        
-        # Load the combined CSV file with explicit UTF-8 encoding
-        logger.info(f"Loading combined CSV from: {combined_csv_path}")
-        try:
-            df = pd.read_csv(combined_csv_path, encoding='utf-8')
-        except UnicodeDecodeError:
-            # Try with different encodings if UTF-8 fails
-            try:
-                df = pd.read_csv(combined_csv_path, encoding='latin-1')
-                logger.warning(f"CSV file {combined_csv_path} read with latin-1 encoding")
-            except UnicodeDecodeError:
-                try:
-                    df = pd.read_csv(combined_csv_path, encoding='cp1252')
-                    logger.warning(f"CSV file {combined_csv_path} read with cp1252 encoding")
-                except UnicodeDecodeError:
-                    logger.error(f"Could not read CSV file {combined_csv_path} with any encoding")
-                    raise
 
-        # Normalize column names
-        df.columns = df.columns.str.strip()
-        
+        # Ensure facility CSV file exists
+        validated_csv_path = _ensure_facility_csv_exists(request, facility_data, facility_csv_path, selected_hazards)
+        if not validated_csv_path:
+            return _render_error_page(
+                request,
+                'Failed to create facility data file. Please try uploading your data again.',
+                facility_data,
+                selected_hazards
+            )
+  
+        # Execute climate analysis
+        result = _execute_climate_analysis(validated_csv_path, selected_hazards)
+        if not result:
+            return _render_error_page(
+                request,
+                'Climate hazards analysis failed. Please try again.',
+                facility_data,
+                selected_hazards
+            )
+
+        # Load and process the combined CSV data
+        df, error = _load_and_process_combined_csv(result.get('combined_csv_path'))
+        if error:
+            return _render_error_page(request, error, facility_data, selected_hazards)
+
         logger.info(f"Loaded CSV with shape: {df.shape}")
         logger.info(f"CSV columns: {df.columns.tolist()}")
-        
-        # 🚨 EMERGENCY TC DEBUG - Check columns immediately after CSV load
-        logger.info("🚨 EMERGENCY TC DEBUG - POST CSV LOAD 🚨")
-        logger.info(f"Selected hazards: {selected_hazards}")
-        logger.info(f"DataFrame shape: {df.shape}")
-        logger.info(f"Column count: {len(df.columns)}")
-        logger.info(f"All columns: {df.columns.tolist()}")
 
-        # Check specifically for TC columns
-        tc_expected = [
-            'Extreme Windspeed 10 year Return Period (km/h)',
-            'Extreme Windspeed 20 year Return Period (km/h)', 
-            'Extreme Windspeed 50 year Return Period (km/h)',
-            'Extreme Windspeed 100 year Return Period (km/h)'
-        ]
 
-        logger.info("🔍 TC COLUMN CHECK:")
-        for i, tc_col in enumerate(tc_expected):
-            exists = tc_col in df.columns
-            logger.info(f"  {i+1}. '{tc_col}' -> {'✅ EXISTS' if exists else '❌ MISSING'}")
+def _execute_climate_analysis(facility_csv_path, selected_hazards):
+    """
+    Execute the climate hazards analysis.
 
-        # Check for any TC-related columns
-        tc_related = [col for col in df.columns if 'windspeed' in col.lower() or 'extreme' in col.lower() or 'cyclone' in col.lower()]
-        logger.info(f"🌀 TC-related columns found: {tc_related}")
+    Args:
+        facility_csv_path: Path to facility CSV file
+        selected_hazards: List of selected hazard types
 
-        # Check for MSW columns (original TC columns)
-        msw_cols = [col for col in df.columns if 'MSW' in col]
-        logger.info(f"💨 MSW columns found: {msw_cols}")
+    Returns:
+        dict: Analysis result or None if failed
+    """
+    logger.info("Calling generate_climate_hazards_analysis...")
+    result = generate_climate_hazards_analysis(
+        facility_csv_path=facility_csv_path,
+        selected_fields=selected_hazards,
+        flood_scenarios=['current', 'moderate', 'worst']
+    )
 
-        # Count how many TC columns we have
-        tc_found = [col for col in tc_expected if col in df.columns]
-        logger.info(f"📊 TC SUMMARY: Expected {len(tc_expected)}, Found {len(tc_found)}")
-        logger.info(f"📊 TC found columns: {tc_found}")
-        logger.info("🚨 END EMERGENCY DEBUG - POST CSV LOAD 🚨")
-        
-        # CRITICAL: Verify flood column exists and add if missing
-        if 'Flood' in selected_hazards and 'Flood Depth (meters)' not in df.columns:
-            logger.warning("Flood was selected but Flood Depth (meters) column is missing!")
-            df['Flood Depth (meters)'] = '0.1 to 0.5'  # Add placeholder with simplified category
-            logger.info("Added placeholder Flood Depth (meters) column")
-        
-        # Track column count before TC processing
-        columns_before_tc = len(df.columns)
-        logger.info(f"📊 Columns before TC processing: {columns_before_tc}")
-        
-        # NEW: Handle Tropical Cyclone analysis if selected
+    # Check for errors in the result
+    if result is None or 'error' in result:
+        error_message = result.get('error', 'Unknown error') if result else 'Analysis failed.'
+        logger.error(f"Climate hazards analysis error: {error_message}")
+        return None
+
+    return result
+
+
+def _load_and_process_combined_csv(combined_csv_path):
+    """
+    Load and process the combined CSV file with proper encoding handling.
+
+    Args:
+        combined_csv_path: Path to the combined CSV file
+
+    Returns:
+        tuple: (DataFrame, error_message) or (DataFrame, None) if successful
+    """
+    if not combined_csv_path or not os.path.exists(combined_csv_path):
+        error_msg = f"Combined CSV not found: {combined_csv_path}"
+        logger.error(error_msg)
+        return None, 'Combined analysis output not found.'
+
+    # Load the combined CSV file with encoding handling
+    logger.info(f"Loading combined CSV from: {combined_csv_path}")
+
+    encodings = ['utf-8', 'latin-1', 'cp1252']
+    df = None
+
+    for encoding in encodings:
+        try:
+            df = pd.read_csv(combined_csv_path, encoding=encoding)
+            if encoding != 'utf-8':
+                logger.warning(f"CSV file {combined_csv_path} read with {encoding} encoding")
+            break
+        except UnicodeDecodeError:
+            continue
+
+    if df is None:
+        error_msg = f"Could not read CSV file {combined_csv_path} with any encoding"
+        logger.error(error_msg)
+        return None, error_msg
+
+    # Normalize column names
+    df.columns = df.columns.str.strip()
+
+    return df, None
+
+        # Handle data validation and missing columns
+        df = _validate_and_fix_data_columns(df, selected_hazards)
+
+        # Process tropical cyclone data if selected
         if 'Tropical Cyclones' in selected_hazards:
+            df = _process_tropical_cyclone_data(df, validated_csv_path)
+
+        # Add asset archetype information
+        df = _add_asset_archetype_info(df, validated_csv_path)
             try:
-                logger.info("🌀 Processing Tropical Cyclone analysis...")
+                logger.info("Processing Tropical Cyclone analysis...")
                 from tropical_cyclone_analysis.utils.tropical_cyclone_analysis import generate_tropical_cyclone_analysis
                 
                 tc_result = generate_tropical_cyclone_analysis(facility_csv_path)
@@ -571,12 +620,12 @@ def show_results(request):
                             logger.info(f"Successfully merged tropical cyclone data. New shape: {df.shape}")
                             logger.info(f"New columns after merge: {df.columns.tolist()}")
                             
-                            # 🚨 DEBUG: Check TC columns after merge
-                            logger.info("🚨 POST-MERGE TC CHECK 🚨")
+                            # DEBUG: Check TC columns after merge
+                            logger.debug("POST-MERGE Tropical Cyclone column check")
                             tc_cols_after_merge = [col for col in tc_expected if col in df.columns]
-                            logger.info(f"TC columns after merge: {tc_cols_after_merge}")
-                            logger.info(f"TC column count after merge: {len(tc_cols_after_merge)}")
-                            logger.info("🚨 END POST-MERGE TC CHECK 🚨")
+                            logger.debug(f"TC columns after merge: {tc_cols_after_merge}")
+                            logger.debug(f"TC column count after merge: {len(tc_cols_after_merge)}")
+                            logger.debug("END POST-MERGE Tropical Cyclone column check")
                             
                         else:
                             logger.warning(f"Could not merge TC data. Merge column: {merge_column}, TC wind columns: {tc_wind_columns}")
@@ -634,7 +683,7 @@ def show_results(request):
         
         # Track column count after TC processing
         columns_after_tc = len(df.columns)
-        logger.info(f"📊 Columns after TC processing: {columns_after_tc} (change: {columns_after_tc - columns_before_tc})")
+        logger.debug(f"Columns after Tropical Cyclone processing: {columns_after_tc} (change: {columns_after_tc - columns_before_tc})")
 
         # Clean up potential merge suffixes like _x or _y that may appear
         rename_map = {c: c[:-2] for c in df.columns if c.endswith('_x') or c.endswith('_y')}
@@ -710,12 +759,12 @@ def show_results(request):
         logger.info(f"Final data has {len(data)} rows and {len(columns)} columns")
         logger.info(f"Final columns: {columns}")
         
-        # 🚨 EMERGENCY TC DEBUG - Final check before group creation
-        logger.info("🚨 EMERGENCY TC DEBUG - PRE GROUP CREATION 🚨")
+        # DEBUG: Final check before group creation
+        logger.debug("Final Tropical Cyclone column verification before group creation")
         tc_final_check = [col for col in tc_expected if col in columns]
-        logger.info(f"TC columns in final data: {tc_final_check}")
-        logger.info(f"TC column count in final data: {len(tc_final_check)}")
-        logger.info("🚨 END EMERGENCY DEBUG - PRE GROUP CREATION 🚨")
+        logger.debug(f"TC columns in final data: {tc_final_check}")
+        logger.debug(f"TC column count in final data: {len(tc_final_check)}")
+        logger.debug("END Final Tropical Cyclone column verification")
         
         # Create detailed column groups for the table header
         groups = {}
@@ -770,14 +819,14 @@ def show_results(request):
         # Add column groups for each hazard type that has columns in the data
         for hazard, cols in hazard_columns.items():
             count = sum(1 for col in cols if col in columns)
-            logger.info(f"🔍 Group Creation - Checking {hazard}: found {count} columns out of {len(cols)} expected")
+            logger.debug(f"Group Creation - Checking {hazard}: found {count} columns out of {len(cols)} expected")
             if hazard == 'Tropical Cyclones':
-                logger.info(f"🌀 TC specific check: {[col for col in cols if col in columns]}")
+                logger.debug(f"TC specific check: {[col for col in cols if col in columns]}")
             if count > 0:
                 groups[hazard] = count
-                logger.info(f"✅ Added {hazard} group with {count} columns")
+                logger.debug(f"Added {hazard} group with {count} columns")
             else:
-                logger.warning(f"❌ No columns found for {hazard} group")
+                logger.debug(f"No columns found for {hazard} group")
 
         logger.info("=== DEBUG: Column Detection ===")
         logger.info(f"Final columns list: {columns}")
@@ -897,21 +946,21 @@ def show_results(request):
         # Verify specific hazard groups were added if selected
         if 'Flood' in selected_hazards:
             if 'Flood' in groups:
-                logger.info(f"✓ Flood group successfully added to table headers")
+                logger.info("Flood group successfully added to table headers")
             else:
-                logger.error("✗ Flood group missing from table headers!")
-                        
+                logger.warning("Flood group missing from table headers")
+
         if 'Tropical Cyclones' in selected_hazards:
-            if 'Tropical Cyclones' in groups:  # ← Correct key name!
-                logger.info(f"✅ Tropical Cyclones group successfully added to table headers")
+            if 'Tropical Cyclones' in groups:
+                logger.info("Tropical Cyclones group successfully added to table headers")
             else:
-                logger.error("❌ Tropical Cyclones group missing from table headers!")
+                logger.warning("Tropical Cyclones group missing from table headers")
                 # Additional detailed debug
-                logger.error(f"❌ Groups dict: {groups}")
-                logger.error(f"❌ Selected hazards: {selected_hazards}")
-                logger.error(f"❌ TC columns expected: {hazard_columns['Tropical Cyclones']}")
+                logger.debug(f"Groups dict: {groups}")
+                logger.debug(f"Selected hazards: {selected_hazards}")
+                logger.debug(f"TC columns expected: {hazard_columns['Tropical Cyclones']}")
                 tc_debug_found = [col for col in hazard_columns['Tropical Cyclones'] if col in columns]
-                logger.error(f"❌ TC columns actually found: {tc_debug_found}")
+                logger.debug(f"TC columns actually found: {tc_debug_found}")
         
         # Get the paths to any generated plots
         plot_path = result.get('plot_path')

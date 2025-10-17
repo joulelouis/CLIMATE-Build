@@ -30,6 +30,11 @@ from tropical_cyclone_analysis.utils.tropical_cyclone_future_analysis import gen
 from climate_hazards_analysis.utils.storm_surge_future_analysis import generate_storm_surge_future_analysis
 from climate_hazards_analysis.utils.rainfall_induced_landslide_future_analysis import generate_rainfall_induced_landslide_future_analysis
 from flood_exposure_analysis.utils.flood_exposure_analysis import generate_flood_exposure_analysis
+from climate_hazards_analysis.utils.common_utils import (
+    standardize_facility_dataframe as _standardize_facility_dataframe,
+    process_nan_values_in_dataframe,
+    merge_dataframes_safely
+)
 
 
 # Set up logging
@@ -39,50 +44,16 @@ logger = logging.getLogger(__name__)
 def standardize_facility_dataframe(df):
     """
     Standardize facility dataframe column names for consistency.
-    
+
+    This function now uses the consolidated implementation from common_utils.
+
     Args:
         df (pandas.DataFrame): The input facility dataframe
-        
+
     Returns:
         pandas.DataFrame: Standardized dataframe with consistent column names
     """
-    df = df.copy()
-    
-    # Standardize facility name column
-    facility_name_variations = [
-        'facility', 'site', 'site name', 
-        'facility name', 'facilty name', 'name',
-        'asset name'  # Add this to recognize "Asset Name" column
-    ]
-    
-    # Find and rename facility name column
-    for col in df.columns:
-        if col.strip().lower() in facility_name_variations:
-            df.rename(columns={col: 'Facility'}, inplace=True)
-            break
-            
-    # Standardize lat/long columns - make it case-insensitive
-    coord_mapping = {'latitude': 'Lat', 'longitude': 'Long'}
-    for old, new in coord_mapping.items():
-        for col in df.columns:
-            if col.lower() == old.lower() and new not in df.columns:
-                df.rename(columns={col: new}, inplace=True)
-    
-    # Validate required columns
-    required_cols = ['Facility', 'Lat', 'Long']
-    missing = [col for col in required_cols if col not in df.columns]
-    if missing:
-        raise ValueError(f"Missing required columns in facility CSV: {', '.join(missing)}")
-    
-    # Convert coordinates to numeric and drop invalid
-    df['Lat'] = pd.to_numeric(df['Lat'], errors='coerce')
-    df['Long'] = pd.to_numeric(df['Long'], errors='coerce')
-    df.dropna(subset=['Lat', 'Long'], inplace=True)
-    
-    if df.empty:
-        raise ValueError("No valid facility locations after processing.")
-        
-    return df
+    return _standardize_facility_dataframe(df, strict_mode=True)
 
 
 def process_flood_exposure_analysis(facility_csv_path, selected_fields, scenarios=None):
@@ -689,84 +660,28 @@ def process_storm_surge_landslide_analysis(df_fac, selected_fields):
 def process_nan_values(df):
     """
     Replace NaN values with appropriate text based on column type.
-    Updated for simplified flood categories.
-    
+
+    This function now uses the consolidated implementation from common_utils.
+
     Args:
         df (DataFrame): Combined dataframe with all hazard data
-        
+
     Returns:
         DataFrame: Processed dataframe with NaN values replaced
     """
-    print(f"Processing NaN values for {len(df)} rows and {len(df.columns)} columns")
-    
-    # Iterate using column positions to avoid pandas returning DataFrames when
-    # duplicate column names exist. This ensures we always work with a Series
-    # which avoids ambiguous truth value errors when checking for NaN.
-    for idx, col in enumerate(df.columns):
-        if col in ['Facility', 'Lat', 'Long']:
-            continue
-            
-        print(f"Processing column: {col}")
+    # Define column mappings for NaN replacement
+    column_mappings = {
+        'Sea Level Rise': 'Little to none',
+        'Elevation': 'Little to no effect',
+        'Extreme Windspeed': 'Data not available',
+        'Tropical Cyclone': 'Data not available',
+        'Flood Depth': '0.1 to 0.5',
+        'Water Stress': 'N/A',
+        'Days over': 'N/A',
+        'Heat': 'N/A'
+    }
 
-        col_series = df.iloc[:, idx]
-        
-        # Count initial NaN values. When duplicate column names exist pandas
-        # returns a DataFrame instead of a Series, so sum across all columns
-        # to avoid ambiguous truth-value errors
-        initial_nan_count = col_series.isna().sum()
-        if initial_nan_count > 0:
-            print(f"  Found {int(initial_nan_count)} NaN values in {col}")
-        
-        # Apply column-specific replacements
-        if 'Sea Level Rise' in col:
-            col_series = col_series.apply(
-                lambda v: "Little to none" if pd.isna(v) or v == '' or str(v).lower() == 'nan' else v
-            )
-        elif col == 'Elevation (meter above sea level)':
-            col_series = col_series.apply(
-                lambda v: "Little to no effect" if pd.isna(v) or v == '' or str(v).lower() == 'nan' else v
-            )
-        elif 'Extreme Windspeed' in col or 'Tropical Cyclone' in col:
-            col_series = col_series.apply(
-                lambda v: "Data not available" if pd.isna(v) or v == '' or str(v).lower() == 'nan' else v
-            )
-        elif 'Flood Depth' in col:
-            # Special handling for flood data - use simplified categories
-            col_series = col_series.apply(
-                lambda v: "0.1 to 0.5" if pd.isna(v) or v == '' or str(v).lower() == 'nan' else v
-            )
-        elif 'Water Stress' in col:
-            # Water stress should be numeric or N/A
-            col_series = col_series.apply(
-                lambda v: "N/A" if pd.isna(v) or v == '' or str(v).lower() == 'nan' else v
-            )
-        elif any(temp in col for temp in ['Days over', 'Heat']):
-            # Heat data should be numeric or N/A
-            col_series = col_series.apply(
-                lambda v: "N/A" if pd.isna(v) or v == '' or str(v).lower() == 'nan' else v
-            )
-        else:
-            # Generic handling for other columns
-            df[col] = df[col].apply(
-                lambda v: "N/A" if pd.isna(v) or v == '' or str(v).lower() == 'nan' else v
-            )
-
-        # Assign the processed series back to the DataFrame
-        # Cast to object to avoid dtype incompatibility warnings when assigning
-        # strings such as "N/A" into numeric columns
-        df.iloc[:, idx] = col_series.astype(object)
-        
-        # Verify no NaN values remain
-        final_nan_count = col_series.isna().sum()
-        if final_nan_count > 0:
-            print(f"  WARNING: {int(final_nan_count)} NaN values still remain in {col}")
-            # Force replace any remaining NaN
-            df.iloc[:, idx].fillna("N/A", inplace=True)
-        else:
-            print(f"  ✓ All NaN values processed in {col}")
-    
-    print("NaN processing complete")
-    return df
+    return process_nan_values_in_dataframe(df, column_mappings)
 
 
 def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=None, buffer_size=0.0009, sensitivity_params=None, flood_scenarios=None):
@@ -1011,10 +926,10 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         logger.info(f"Final combined DataFrame columns: {combined_df.columns.tolist()}")
         
         if 'Flood Depth (meters)' in combined_df.columns:
-            logger.info("✓ Flood Depth (meters) column successfully included!")
+            logger.info("Flood Depth (meters) column successfully included!")
             logger.info(f"Flood column sample values: {combined_df['Flood Depth (meters)'].value_counts()}")
         else:
-            logger.error("✗ Flood Depth (meters) column is MISSING!")
+            logger.error("Flood Depth (meters) column is MISSING!")
             # Add placeholder flood column if missing
             if 'Flood' in selected_fields:
                 combined_df['Flood Depth (meters)'] = '0.1 to 0.5'
@@ -1189,5 +1104,5 @@ def validate_and_clean_dataframe(df, analysis_name=""):
                 else:
                     df[col].fillna('N/A', inplace=True)
     
-    logger.info(f"✓ {analysis_name} dataframe validation complete")
+    logger.info(f"{analysis_name} dataframe validation complete")
     return df

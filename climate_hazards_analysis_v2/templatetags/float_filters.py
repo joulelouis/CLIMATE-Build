@@ -1,23 +1,17 @@
-from django import template
-import re
+"""
+DEPRECATED: This module is deprecated and consolidated into climate_hazards_analysis.templatetags.common_filters
 
-register = template.Library()
+Use climate_hazards_analysis.templatetags.common_filters instead.
+"""
 
-@register.filter
-def to_float(value):
-    
-    if value is None:
-        return 0.0
-    
-    if isinstance(value, (int, float)):
-        return float(value)
-    
-    if isinstance(value, str):
-        match = re.search(r"-?\d+(?:\.\d+)?", value)
-        if match:
-            try:
-                return float(match.group(0))
-            except (ValueError, TypeError):
-                pass
-    
-    return 0.0
+# Import the consolidated function for backward compatibility
+from climate_hazards_analysis.templatetags.common_filters import to_float, register
+
+# Add deprecation warning
+import warnings
+warnings.warn(
+    "climate_hazards_analysis_v2.templatetags.float_filters is deprecated. "
+    "Use climate_hazards_analysis.templatetags.common_filters instead.",
+    DeprecationWarning,
+    stacklevel=2
+)

@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import logging
 from io import BytesIO
 from django.http import HttpResponse
 import datetime
@@ -7,6 +8,9 @@ from django.conf import settings
 from django.shortcuts import render, redirect
 from climate_hazards_analysis.utils.climate_hazards_analysis import generate_climate_hazards_analysis
 from climate_hazards_analysis.utils.generate_report import generate_climate_hazards_report_pdf
+from .constants import CLIMATE_HAZARD_TYPES, TC_WIND_COLUMNS, NAN_REPLACEMENTS, FLOOD_SCENARIOS
+
+logger = logging.getLogger(__name__)
 
 # Use a local UPLOAD_DIR variable defined in this views.py file
 UPLOAD_DIR = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis', 'static', 'input_files')
@@ -14,38 +18,27 @@ UPLOAD_DIR = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis', 'static
 def process_data(data):
     """
     Replace NaN values in a list of dictionaries with custom strings.
-    For 'Sea Level Rise', use "Little to none".
-    For 'Tropical Cyclones', use "Data not available".
-    Otherwise, use "N/A".
+    Uses constants for maintainability.
     """
     for row in data:
         for key, value in row.items():
-            # print(f"key: {key}")
             if pd.isna(value):
                 if key == 'Elevation (meter above sea level)':
-                    row[key] = "Little to no effect"
+                    row[key] = NAN_REPLACEMENTS['Elevation (meter above sea level)']
                 elif 'Sea Level Rise' in key:
-                    row[key] = "Little to none"
-                elif key == 'Extreme Windspeed 10 year Return Period (km/h)' or key == 'Extreme Windspeed 20 year Return Period (km/h)' or key == 'Extreme Windspeed 50 year Return Period (km/h)' or key == 'Extreme Windspeed 100 year Return Period (km/h)':
-                    row[key] = "Data not available"
+                    row[key] = NAN_REPLACEMENTS['Sea Level Rise']
+                elif key in TC_WIND_COLUMNS:
+                    row[key] = NAN_REPLACEMENTS['Tropical Cyclones']
                 else:
-                    row[key] = "N/A"
+                    row[key] = NAN_REPLACEMENTS['default']
     return data
 
 def upload_facility_csv(request):
     """
     Handles the upload of facility CSV files and stores selected climate hazards.
     """
-    # Define the list of available climate hazard fields for the checkboxes
-    climate_hazards_fields = [
-        'Flood',
-        'Water Stress',
-        'Sea Level Rise', 
-        'Tropical Cyclones',
-        'Heat',
-        'Storm Surge',
-        'Rainfall Induced Landslide'
-    ]
+    # Use centralized climate hazard types from constants
+    climate_hazards_fields = CLIMATE_HAZARD_TYPES
     
     if request.method == 'POST' and request.FILES.get('facility_csv'):
         os.makedirs(UPLOAD_DIR, exist_ok=True)  # Ensure directory exists
@@ -65,8 +58,8 @@ def upload_facility_csv(request):
         selected_fields = request.POST.getlist('fields')
         request.session['selected_dynamic_fields'] = selected_fields
 
-        print("Uploaded facility CSV file path:", file_path)
-        print("Selected climate hazards:", selected_fields)
+        logger.info(f"Uploaded facility CSV file path: {file_path}")
+        logger.info(f"Selected climate hazards: {selected_fields}")
 
         return redirect('climate_hazards_analysis:climate_hazards_analysis')
     
@@ -81,16 +74,8 @@ def climate_hazards_analysis(request):
     Processes the uploaded facility CSV and selected climate hazards.
     Generates a combined analysis and displays the results.
     """
-    # Define the list of available climate hazard fields for the checkboxes
-    climate_hazards_fields = [
-        'Flood',
-        'Water Stress',
-        'Sea Level Rise',
-        'Tropical Cyclones',
-        'Heat',
-        'Storm Surge',
-        'Rainfall Induced Landslide'
-    ]
+    # Use centralized climate hazard types from constants
+    climate_hazards_fields = CLIMATE_HAZARD_TYPES
     
     # Retrieve the uploaded facility CSV file path from the session.
     facility_csv_path = request.session.get('facility_csv_path')
@@ -102,13 +87,13 @@ def climate_hazards_analysis(request):
 
     # Retrieve the list of selected climate hazards from the session.
     selected_fields = request.session.get('selected_dynamic_fields', [])
-    print("Climate Hazards selected:", selected_fields)
+    logger.info(f"Climate Hazards selected: {selected_fields}")
 
     # Call the climate hazards analysis function with flood scenarios
     result = generate_climate_hazards_analysis(
         facility_csv_path=facility_csv_path,
         selected_fields=selected_fields,
-        flood_scenarios=['current', 'moderate', 'worst']
+        flood_scenarios=FLOOD_SCENARIOS
     )
 
     # Check for errors in the result.
