@@ -71,6 +71,32 @@ Climate Hazard Analysis Results
         transition: background-color 0.3s ease;
     }
 
+    /* Sample Point Row Styling */
+    .sample-point-row {
+        background-color: #f0f8ff !important;
+        font-size: 12px;
+    }
+
+    .sample-point-row:hover {
+        background-color: #e0f0ff !important;
+    }
+
+    .sample-point-cell {
+        padding-left: 30px !important;
+        font-style: italic;
+        color: #666;
+    }
+
+    .expand-collapse-btn {
+        cursor: pointer;
+        transition: transform 0.2s;
+    }
+
+    .expand-collapse-btn.expanded .expand-icon {
+        transform: rotate(90deg);
+        display: inline-block;
+    }
+
     .custom-table td {
         border: none;
         padding: 12px 10px;
@@ -499,17 +525,40 @@ Climate Hazard Analysis Results
                                     
                                     <tbody>
     {% for row in data %}
-        <tr class="custom-table-row">
+        <tr class="custom-table-row {% if row.is_sample_point %}sample-point-row{% endif %} {% if row.is_parent_facility %}parent-facility-row{% endif %}"
+            {% if row.is_sample_point %}data-parent-facility="{{ row.parent_facility }}" style="display: none;"{% endif %}
+            {% if row.is_parent_facility and row.has_granular_analysis %}data-facility-name="{{ row.Facility }}"{% endif %}>
             {% for key in columns %}
                 {% with value=row|get_item:key %}
                 {% if key != "Facility" and key != "Asset Archetype" %}
-                  <td class="editable-cell" data-column="{{ key }}" data-row="{{ forloop.parentloop.counter0 }}" data-original-value="{{ value }}">
+                  <td class="editable-cell {% if row.is_sample_point %}sample-point-cell{% endif %}" data-column="{{ key }}" data-row="{{ forloop.parentloop.counter0 }}" data-original-value="{{ value }}">
                   {% else %}
-                  <td>
+                  <td {% if row.is_sample_point %}class="sample-point-cell"{% endif %}>
                   {% endif %}
 
+                    {# Facility name with granular analysis indicator and expand/collapse #}
+                    {% if key == "Facility" %}
+                        {% if row.has_granular_analysis %}
+                            <button class="btn btn-sm btn-outline-secondary expand-collapse-btn"
+                                    onclick="toggleSamplePoints('{{ row.Facility }}')"
+                                    title="Show/Hide Sample Points"
+                                    style="border: none; padding: 2px 6px;">
+                                <span class="expand-icon">▶</span>
+                            </button>
+                        {% endif %}
+                        {{ value }}
+                        {% if row.has_granular_analysis %}
+                            <span class="badge bg-secondary ms-1" style="font-size: 0.7em;">{{ row.sample_point_count }} points</span>
+                            <button class="btn btn-sm btn-info ms-2"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#granularModal{{ forloop.parentloop.counter }}"
+                                    title="View Granular Analysis Summary">
+                                📊
+                            </button>
+                        {% endif %}
+
                     {# Asset Archetype styling - Yellow badge similar to sensitivity analysis #}
-                    {% if key == "Asset Archetype" and value != "N/A" %}
+                    {% elif key == "Asset Archetype" and value != "N/A" %}
                         <span class="badge" style="background-color: #F1D500; color: #000; font-weight: 600;">{{ value }}</span>
 
                     {# Water Stress Exposure styling #}
@@ -612,10 +661,409 @@ Climate Hazard Analysis Results
                 {% endwith %}
             {% endfor %}
         </tr>
+
     {% endfor %}
 </tbody>
                                 </table>
                             </div>
+
+<!-- Granular Analysis Modals (outside table) -->
+{% for row in data %}
+    {% if row.has_granular_analysis %}
+        <div class="modal fade" id="granularModal{{ forloop.counter }}" tabindex="-1" aria-labelledby="granularModalLabel{{ forloop.counter }}" aria-hidden="true">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header bg-primary text-white">
+                        <h5 class="modal-title" id="granularModalLabel{{ forloop.counter }}">
+                            📊 Granular Analysis: {{ row.Facility }}
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info">
+                            <strong>ℹ️ Point Sampling Grid Analysis</strong><br>
+                            This polygon asset has been analyzed using a fine-resolution sampling grid instead of a single centroid point.
+                            Multiple hazards have been queried for all sample points within the polygon boundary.
+                        </div>
+
+                        <!-- Metadata Section -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <h6><strong>Analysis Details</strong></h6>
+                                <table class="table table-sm table-bordered">
+                                    <tr>
+                                        <td><strong>Polygon Area:</strong></td>
+                                        <td>{{ row.granular_analysis.polygon_area_km2|floatformat:4 }} km²</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>Grid Spacing:</strong></td>
+                                        <td>{{ row.granular_analysis.grid_spacing }}m</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>Sample Points:</strong></td>
+                                        <td>{{ row.granular_analysis.statistics.total_points|default:"N/A" }} points</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>Risk Clusters:</strong></td>
+                                        <td>{{ row.granular_analysis.statistics.cluster_count|default:"N/A" }} zones</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                <h6><strong>Analysis Method</strong></h6>
+                                <p class="small text-muted">
+                                    A regular grid of {{ row.granular_analysis.statistics.total_points|default:"N/A" }} sample points was generated across the polygon area.
+                                    Each point was queried against hazard rasters for all selected hazards, providing detailed spatial distribution statistics.
+                                </p>
+                                <p class="small">
+                                    <span class="badge bg-success">✓ Grid Generated</span>
+                                    <span class="badge bg-success">✓ Hazard Analysis Complete</span>
+                                    <span class="badge bg-success">✓ Risk Clusters Identified</span>
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Granular Statistics -->
+                        {% if row.granular_analysis %}
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h6><strong>📊 Risk Distribution</strong></h6>
+
+                                <!-- Visual Progress Bar -->
+                                <div class="progress mb-3" style="height: 30px;">
+                                    <div class="progress-bar bg-success"
+                                         style="width: {{ row.granular_analysis.risk_distribution.low.percentage }}%"
+                                         title="Low: {{ row.granular_analysis.risk_distribution.low.percentage }}%">
+                                        {% if row.granular_analysis.risk_distribution.low.percentage > 8 %}
+                                            {{ row.granular_analysis.risk_distribution.low.percentage|floatformat:1 }}%
+                                        {% endif %}
+                                    </div>
+                                    <div class="progress-bar bg-info"
+                                         style="width: {{ row.granular_analysis.risk_distribution.medium.percentage }}%"
+                                         title="Medium: {{ row.granular_analysis.risk_distribution.medium.percentage }}%">
+                                        {% if row.granular_analysis.risk_distribution.medium.percentage > 8 %}
+                                            {{ row.granular_analysis.risk_distribution.medium.percentage|floatformat:1 }}%
+                                        {% endif %}
+                                    </div>
+                                    <div class="progress-bar bg-warning"
+                                         style="width: {{ row.granular_analysis.risk_distribution.high.percentage }}%"
+                                         title="High: {{ row.granular_analysis.risk_distribution.high.percentage }}%">
+                                        {% if row.granular_analysis.risk_distribution.high.percentage > 8 %}
+                                            {{ row.granular_analysis.risk_distribution.high.percentage|floatformat:1 }}%
+                                        {% endif %}
+                                    </div>
+                                    <div class="progress-bar bg-danger"
+                                         style="width: {{ row.granular_analysis.risk_distribution.very_high.percentage }}%"
+                                         title="Very High: {{ row.granular_analysis.risk_distribution.very_high.percentage }}%">
+                                        {% if row.granular_analysis.risk_distribution.very_high.percentage > 8 %}
+                                            {{ row.granular_analysis.risk_distribution.very_high.percentage|floatformat:1 }}%
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <!-- Detailed Breakdown -->
+                                <div class="row text-center">
+                                    <div class="col-3">
+                                        <div class="card border-success">
+                                            <div class="card-body p-2">
+                                                <h6 class="card-title text-success mb-1">Low</h6>
+                                                <p class="mb-0"><strong>{{ row.granular_analysis.risk_distribution.low.percentage|floatformat:1 }}%</strong></p>
+                                                <small class="text-muted">{{ row.granular_analysis.risk_distribution.low.count }} points</small>
+                                                {% if row.granular_analysis.risk_distribution.low.area_km2 %}
+                                                <br><small class="text-muted">{{ row.granular_analysis.risk_distribution.low.area_km2 }} km²</small>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="card border-info">
+                                            <div class="card-body p-2">
+                                                <h6 class="card-title text-info mb-1">Medium</h6>
+                                                <p class="mb-0"><strong>{{ row.granular_analysis.risk_distribution.medium.percentage|floatformat:1 }}%</strong></p>
+                                                <small class="text-muted">{{ row.granular_analysis.risk_distribution.medium.count }} points</small>
+                                                {% if row.granular_analysis.risk_distribution.medium.area_km2 %}
+                                                <br><small class="text-muted">{{ row.granular_analysis.risk_distribution.medium.area_km2 }} km²</small>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="card border-warning">
+                                            <div class="card-body p-2">
+                                                <h6 class="card-title text-warning mb-1">High</h6>
+                                                <p class="mb-0"><strong>{{ row.granular_analysis.risk_distribution.high.percentage|floatformat:1 }}%</strong></p>
+                                                <small class="text-muted">{{ row.granular_analysis.risk_distribution.high.count }} points</small>
+                                                {% if row.granular_analysis.risk_distribution.high.area_km2 %}
+                                                <br><small class="text-muted">{{ row.granular_analysis.risk_distribution.high.area_km2 }} km²</small>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="card border-danger">
+                                            <div class="card-body p-2">
+                                                <h6 class="card-title text-danger mb-1">Very High</h6>
+                                                <p class="mb-0"><strong>{{ row.granular_analysis.risk_distribution.very_high.percentage|floatformat:1 }}%</strong></p>
+                                                <small class="text-muted">{{ row.granular_analysis.risk_distribution.very_high.count }} points</small>
+                                                {% if row.granular_analysis.risk_distribution.very_high.area_km2 %}
+                                                <br><small class="text-muted">{{ row.granular_analysis.risk_distribution.very_high.area_km2 }} km²</small>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Statistical Summary -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <h6><strong>📈 Statistical Summary</strong></h6>
+                                <table class="table table-sm table-bordered">
+                                    <tr>
+                                        <td><strong>Sample Points:</strong></td>
+                                        <td>{{ row.granular_analysis.statistics.sample_count }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>Mean Value:</strong></td>
+                                        <td>{{ row.granular_analysis.statistics.mean|floatformat:2 }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>Median Value:</strong></td>
+                                        <td>{{ row.granular_analysis.statistics.median|floatformat:2 }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>Range:</strong></td>
+                                        <td>{{ row.granular_analysis.statistics.min|floatformat:2 }} - {{ row.granular_analysis.statistics.max|floatformat:2 }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>Standard Deviation:</strong></td>
+                                        <td>{{ row.granular_analysis.statistics.std|floatformat:2 }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>Spatial Variability:</strong></td>
+                                        <td>
+                                            <span class="badge {% if row.granular_analysis.spatial_variability == 'High' %}bg-warning{% else %}bg-success{% endif %}">
+                                                {{ row.granular_analysis.spatial_variability }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                <h6><strong>🎯 Risk Assessment</strong></h6>
+                                <div class="card mb-2">
+                                    <div class="card-body">
+                                        <h6 class="card-title">Dominant Risk</h6>
+                                        <h4>
+                                            <span class="badge
+                                                {% if row.granular_analysis.dominant_risk == 'Very High' %}bg-danger
+                                                {% elif row.granular_analysis.dominant_risk == 'High' %}bg-warning
+                                                {% elif row.granular_analysis.dominant_risk == 'Medium' %}bg-info
+                                                {% else %}bg-success{% endif %}">
+                                                {{ row.granular_analysis.dominant_risk }}
+                                            </span>
+                                        </h4>
+                                    </div>
+                                </div>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h6 class="card-title">Priority Level</h6>
+                                        <h4>
+                                            <span class="badge
+                                                {% if row.granular_analysis.priority == 'Critical' %}bg-danger
+                                                {% elif row.granular_analysis.priority == 'High' %}bg-warning
+                                                {% elif row.granular_analysis.priority == 'Medium' %}bg-info
+                                                {% else %}bg-success{% endif %}">
+                                                {{ row.granular_analysis.priority }}
+                                            </span>
+                                        </h4>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recommendation -->
+                        <div class="alert
+                            {% if 'CRITICAL' in row.granular_analysis.recommendation %}alert-danger
+                            {% elif 'WARNING' in row.granular_analysis.recommendation %}alert-warning
+                            {% elif 'MODERATE' in row.granular_analysis.recommendation %}alert-info
+                            {% else %}alert-success{% endif %} mb-3">
+                            <h6><strong>💡 Recommendation</strong></h6>
+                            <p class="mb-0">{{ row.granular_analysis.recommendation }}</p>
+                        </div>
+
+                        <!-- Detailed Points Table (Expandable) -->
+                        <div class="row mt-4">
+                            <div class="col-12">
+                                <div class="accordion" id="pointsAccordion{{ forloop.counter }}">
+                                    <div class="accordion-item">
+                                        <h2 class="accordion-header" id="pointsHeading{{ forloop.counter }}">
+                                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#pointsCollapse{{ forloop.counter }}" aria-expanded="false" aria-controls="pointsCollapse{{ forloop.counter }}">
+                                                <strong>📋 View All {{ row.granular_analysis.statistics.total_points|default:"0" }} Sample Points (Detailed Table)</strong>
+                                            </button>
+                                        </h2>
+                                        <div id="pointsCollapse{{ forloop.counter }}" class="accordion-collapse collapse" aria-labelledby="pointsHeading{{ forloop.counter }}" data-bs-parent="#pointsAccordion{{ forloop.counter }}">
+                                            <div class="accordion-body">
+                                                <div style="max-height: 400px; overflow-y: auto;">
+                                                    <table class="table table-sm table-striped table-hover">
+                                                        <thead class="table-dark" style="position: sticky; top: 0; z-index: 1;">
+                                                            <tr>
+                                                                <th>#</th>
+                                                                <th>Latitude</th>
+                                                                <th>Longitude</th>
+                                                                {% for hazard in selected_hazards %}
+                                                                <th>{{ hazard }} Value</th>
+                                                                <th>{{ hazard }} Risk</th>
+                                                                {% endfor %}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {% for point in row.granular_analysis.analyzed_points %}
+                                                            <tr>
+                                                                <td>{{ forloop.counter }}</td>
+                                                                <td>{{ point.lat|floatformat:6 }}</td>
+                                                                <td>{{ point.lng|floatformat:6 }}</td>
+                                                                {% for hazard in selected_hazards %}
+                                                                <td>
+                                                                    {% with value_key=hazard|add:"_value" %}
+                                                                        {% with value=point|get_item:value_key|default_if_none:"N/A" %}
+                                                                            {% if value == "N/A" %}
+                                                                                N/A
+                                                                            {% else %}
+                                                                                {% with numeric=value|to_float %}
+                                                                                    {# Flood Depth styling #}
+                                                                                    {% if hazard == "Flood" %}
+                                                                                        {% if numeric < 0.1 %}
+                                                                                            <span style="color: black; font-weight: bold;">Little to none</span>
+                                                                                        {% elif numeric < 0.5 %}
+                                                                                            <span style="color: green; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% elif numeric < 1.5 %}
+                                                                                            <span style="color: orange; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% else %}
+                                                                                            <span style="color: red; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% endif %}
+
+                                                                                    {# Water Stress styling #}
+                                                                                    {% elif hazard == "Water Stress" %}
+                                                                                        {% if numeric < 10 %}
+                                                                                            <span style="color: green; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% elif numeric <= 30 %}
+                                                                                            <span style="color: orange; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% else %}
+                                                                                            <span style="color: red; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% endif %}
+
+                                                                                    {# Heat styling #}
+                                                                                    {% elif hazard == "Heat" %}
+                                                                                        {% if numeric >= 45 %}
+                                                                                            <span style="color: red; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% elif numeric >= 10 %}
+                                                                                            <span style="color: orange; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% else %}
+                                                                                            <span style="color: green; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% endif %}
+
+                                                                                    {# Sea Level Rise styling #}
+                                                                                    {% elif hazard == "Sea Level Rise" %}
+                                                                                        {% if numeric > 0 %}
+                                                                                            <span style="color: red; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% else %}
+                                                                                            <span style="color: black; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% endif %}
+
+                                                                                    {# Storm Surge styling #}
+                                                                                    {% elif hazard == "Storm Surge" %}
+                                                                                        {% if numeric >= 1.5 %}
+                                                                                            <span style="color: red; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% elif numeric >= 0.5 %}
+                                                                                            <span style="color: orange; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% elif numeric >= 0.1 %}
+                                                                                            <span style="color: green; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% else %}
+                                                                                            <span style="color: black; font-weight: bold;">Little to none</span>
+                                                                                        {% endif %}
+
+                                                                                    {# Tropical Cyclones (Windspeed) styling #}
+                                                                                    {% elif hazard == "Tropical Cyclones" %}
+                                                                                        {% if numeric >= 178 %}
+                                                                                            <span style="color: red; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% elif numeric >= 119 %}
+                                                                                            <span style="color: orange; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% else %}
+                                                                                            <span style="color: green; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% endif %}
+
+                                                                                    {# Landslide (Factor of Safety) styling #}
+                                                                                    {% elif hazard == "Landslide" %}
+                                                                                        {% if numeric > 2.5 %}
+                                                                                            <span style="color: black; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% elif numeric > 1.5 %}
+                                                                                            <span style="color: green; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% elif numeric >= 1 %}
+                                                                                            <span style="color: orange; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% else %}
+                                                                                            <span style="color: red; font-weight: bold;">{{ value|floatformat:2 }}</span>
+                                                                                        {% endif %}
+
+                                                                                    {# Default styling for other hazards #}
+                                                                                    {% else %}
+                                                                                        {{ value|floatformat:2 }}
+                                                                                    {% endif %}
+                                                                                {% endwith %}
+                                                                            {% endif %}
+                                                                        {% endwith %}
+                                                                    {% endwith %}
+                                                                </td>
+                                                                <td>
+                                                                    {% with risk_key=hazard|add:"_risk" %}
+                                                                        {% with risk_val=point|get_item:risk_key|default:"No Data" %}
+                                                                            <span class="badge
+                                                                                {% if risk_val == 'Very High' %}bg-danger
+                                                                                {% elif risk_val == 'High' %}bg-warning
+                                                                                {% elif risk_val == 'Medium' %}bg-info
+                                                                                {% elif risk_val == 'Low' %}bg-success
+                                                                                {% else %}bg-secondary{% endif %}">
+                                                                                {{ risk_val }}
+                                                                            </span>
+                                                                        {% endwith %}
+                                                                    {% endwith %}
+                                                                </td>
+                                                                {% endfor %}
+                                                            </tr>
+                                                            {% endfor %}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <div class="mt-2 text-muted small">
+                                                    <strong>Note:</strong> Showing {{ row.granular_analysis.statistics.total_points|default:"0" }} sample points analyzed across the polygon.
+                                                    Scroll within the table to view all points.
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-warning mt-3">
+                            <strong>⚠️ No Granular Analysis Data</strong><br>
+                            Granular analysis is available but hazard data has not been queried yet.
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-primary" onclick="downloadGranularData{{ forloop.counter }}()">
+                            <i class="fas fa-download"></i> Download CSV
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+{% endfor %}
+<!-- End Granular Analysis Modals -->
 
                             <!-- After table controls -->
                         <div class="d-flex justify-content-between align-items-center mt-3">
@@ -759,6 +1207,42 @@ let dataTable;
 let cellChanges = {};
 let currentEditCell = null;
 let columnIndexMap = {};
+
+// Toggle sample points visibility for a facility
+function toggleSamplePoints(facilityName) {
+    console.log('Toggling sample points for:', facilityName);
+
+    // Find all sample point rows for this facility
+    const sampleRows = document.querySelectorAll(`tr.sample-point-row[data-parent-facility="${facilityName}"]`);
+
+    // Find the expand button for this facility
+    const facilityRow = document.querySelector(`tr.parent-facility-row[data-facility-name="${facilityName}"]`);
+    const expandBtn = facilityRow ? facilityRow.querySelector('.expand-collapse-btn') : null;
+
+    if (sampleRows.length === 0) {
+        console.log('No sample point rows found for:', facilityName);
+        return;
+    }
+
+    // Check current visibility state (check first sample row)
+    const isCurrentlyHidden = sampleRows[0].style.display === 'none';
+
+    // Toggle visibility
+    sampleRows.forEach(row => {
+        row.style.display = isCurrentlyHidden ? 'table-row' : 'none';
+    });
+
+    // Toggle button state
+    if (expandBtn) {
+        if (isCurrentlyHidden) {
+            expandBtn.classList.add('expanded');
+        } else {
+            expandBtn.classList.remove('expanded');
+        }
+    }
+
+    console.log(`${isCurrentlyHidden ? 'Showing' : 'Hiding'} ${sampleRows.length} sample points for ${facilityName}`);
+}
 
 function showError(message) {
     const container = document.getElementById('js-error');
@@ -1667,8 +2151,11 @@ let tableState = {
     columnHeaderMap: {},
     allRows: [],
     filteredRows: [],
+    allParentRows: [],           // Only parent facility rows (for pagination)
+    filteredParentRows: [],      // Filtered parent rows
+    samplePointsByFacility: {},  // Map facility name -> sample point rows
     currentPage: 1,
-    rowsPerPage: 25,
+    rowsPerPage: 10,             // Changed from 25 to 10
     sortColumn: null,
     sortDirection: 'asc',
     searchTerm: ''
@@ -1697,22 +2184,46 @@ function buildColumnHeaderMap() {
 function storeTableRows() {
     const $rows = $('#hazard-data-table tbody tr');
     tableState.allRows = [];
+    tableState.allParentRows = [];
+    tableState.samplePointsByFacility = {};
 
     $rows.each(function() {
-        const $cells = $(this).find('td');
+        const $row = $(this);
+        const $cells = $row.find('td');
         const rowData = [];
+
         $cells.each(function() {
             rowData.push($(this).html()); // Store HTML to preserve styling
         });
-        tableState.allRows.push({
+
+        const rowObj = {
             element: $(this)[0].outerHTML,
             data: rowData,
-            searchText: $(this).text().toLowerCase()
-        });
+            searchText: $(this).text().toLowerCase(),
+            isSamplePoint: $row.hasClass('sample-point-row'),
+            isParent: $row.hasClass('parent-facility-row'),
+            facilityName: $row.data('facility-name') || $row.data('parent-facility')
+        };
+
+        tableState.allRows.push(rowObj);
+
+        // Separate parent rows from sample points
+        if (rowObj.isSamplePoint) {
+            const parentFacility = $row.data('parent-facility');
+            if (!tableState.samplePointsByFacility[parentFacility]) {
+                tableState.samplePointsByFacility[parentFacility] = [];
+            }
+            tableState.samplePointsByFacility[parentFacility].push(rowObj);
+        } else if (rowObj.isParent || !rowObj.isSamplePoint) {
+            // This is a parent facility row (or regular row without sample points)
+            tableState.allParentRows.push(rowObj);
+        }
     });
 
     tableState.filteredRows = [...tableState.allRows];
-    console.log('Stored', tableState.allRows.length, 'rows');
+    tableState.filteredParentRows = [...tableState.allParentRows];
+    console.log('Stored', tableState.allRows.length, 'total rows (' +
+                tableState.allParentRows.length, 'parent facilities)');
 }
 
 // SORTING FUNCTIONALITY
@@ -1761,8 +2272,8 @@ function sortByColumn(columnIndex, columnName) {
         }
     });
 
-    // Sort the filtered rows
-    tableState.filteredRows.sort(function(a, b) {
+    // Sort function for comparing rows
+    const sortFunction = function(a, b) {
         const aValue = $(a.data[columnIndex]).text().trim();
         const bValue = $(b.data[columnIndex]).text().trim();
 
@@ -1780,7 +2291,11 @@ function sortByColumn(columnIndex, columnName) {
         }
 
         return tableState.sortDirection === 'asc' ? comparison : -comparison;
-    });
+    };
+
+    // Sort both all rows and parent rows
+    tableState.filteredRows.sort(sortFunction);
+    tableState.filteredParentRows.sort(sortFunction);
 
     // Reset to first page and render
     tableState.currentPage = 1;
@@ -1792,18 +2307,31 @@ function sortByColumn(columnIndex, columnName) {
 function renderTable() {
     const startIndex = (tableState.currentPage - 1) * tableState.rowsPerPage;
     const endIndex = startIndex + tableState.rowsPerPage;
-    const pageRows = tableState.filteredRows.slice(startIndex, endIndex);
+
+    // Only paginate parent facility rows
+    const pageParentRows = tableState.filteredParentRows.slice(startIndex, endIndex);
 
     const $tbody = $('#hazard-data-table tbody');
     $tbody.empty();
 
-    if (pageRows.length === 0) {
+    if (pageParentRows.length === 0) {
         $tbody.append('<tr><td colspan="100%" class="text-center text-muted">No data found</td></tr>');
         return;
     }
 
-    pageRows.forEach(function(row) {
-        $tbody.append(row.element);
+    // Render each parent row and its sample points (if any)
+    pageParentRows.forEach(function(parentRow) {
+        // Add parent row
+        $tbody.append(parentRow.element);
+
+        // Add sample point rows for this facility (if any)
+        const facilityName = parentRow.facilityName;
+        if (facilityName && tableState.samplePointsByFacility[facilityName]) {
+            const samplePoints = tableState.samplePointsByFacility[facilityName];
+            samplePoints.forEach(function(sampleRow) {
+                $tbody.append(sampleRow.element);
+            });
+        }
     });
 
     // Update column visibility after rendering
@@ -1868,7 +2396,7 @@ function setupPagination() {
     // Handle rows per page change
     $('#rows-per-page').on('change', function() {
         const value = parseInt($(this).val());
-        tableState.rowsPerPage = value === -1 ? tableState.filteredRows.length : value;
+        tableState.rowsPerPage = value === -1 ? tableState.filteredParentRows.length : value;
         tableState.currentPage = 1;
         renderTable();
         updatePaginationControls();
@@ -1876,14 +2404,15 @@ function setupPagination() {
 }
 
 function updatePaginationControls() {
-    const totalRows = tableState.filteredRows.length;
-    const totalPages = tableState.rowsPerPage === tableState.filteredRows.length ? 1 :
+    // Use parent rows for pagination count
+    const totalRows = tableState.filteredParentRows.length;
+    const totalPages = tableState.rowsPerPage === tableState.filteredParentRows.length ? 1 :
                       Math.ceil(totalRows / tableState.rowsPerPage);
 
     // Update info
     const startRow = totalRows === 0 ? 0 : (tableState.currentPage - 1) * tableState.rowsPerPage + 1;
     const endRow = Math.min(tableState.currentPage * tableState.rowsPerPage, totalRows);
-    $('#table-info').text(`Showing ${startRow} to ${endRow} of ${totalRows} entries`);
+    $('#table-info').text(`Showing ${startRow} to ${endRow} of ${totalRows} facilities`);
 
     // Update pagination controls
     const $controls = $('#pagination-controls');
@@ -1975,8 +2504,14 @@ function performSearch(searchTerm) {
 
     if (searchTerm === '') {
         tableState.filteredRows = [...tableState.allRows];
+        tableState.filteredParentRows = [...tableState.allParentRows];
     } else {
         tableState.filteredRows = tableState.allRows.filter(function(row) {
+            return row.searchText.includes(searchTerm);
+        });
+
+        // Also filter parent rows only
+        tableState.filteredParentRows = tableState.allParentRows.filter(function(row) {
             return row.searchText.includes(searchTerm);
         });
     }

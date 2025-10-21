@@ -3,12 +3,21 @@
 <!-- Mapbox GL Draw CSS -->
 <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.css" type="text/css">
 
+<!-- Mapbox Geocoder CSS -->
+<link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.css" type="text/css">
+
 <!-- Map Container -->
 <div id="climate-hazard-map" style="width: 100%; height: 600px; position: relative;">
   <!-- Drawing Mode Toggle Button -->
   <div id="draw-polygon-controls" style="position: absolute; top: 10px; left: 10px; z-index: 1000;">
     <button id="toggle-draw-mode" class="btn btn-warning btn-sm shadow" onclick="toggleDrawMode()">
       <i class="fas fa-draw-polygon"></i> Draw Polygon Asset
+    </button>
+    <button id="save-boundary-btn" class="btn btn-success btn-sm shadow ms-2" onclick="saveBoundaryAsAsset()" style="display: none;">
+      <i class="fas fa-save"></i> Save City Boundary
+    </button>
+    <button id="export-shapefile-btn" class="btn btn-primary btn-sm shadow ms-2" onclick="exportShapefile()">
+      <i class="fas fa-download"></i> Export Boundaries
     </button>
   </div>
 
@@ -138,8 +147,72 @@
   </div>
 </div>
 
+<!-- Grid Spacing Modal -->
+<div class="modal fade" id="gridSpacingModal" tabindex="-1" aria-labelledby="gridSpacingModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title" id="gridSpacingModalLabel">
+          <i class="fas fa-th"></i> Configure Granular Analysis
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info mb-3">
+          <i class="fas fa-info-circle"></i>
+          <strong>Granular Analysis Available!</strong>
+          <p class="mb-0 mt-2">
+            This area is ≥ 6 km². Select a grid spacing to perform detailed point-by-point hazard analysis across the entire polygon.
+          </p>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label"><strong>Asset Name:</strong></label>
+          <p id="grid-asset-name" class="text-muted mb-0">Loading...</p>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label"><strong>Polygon Area:</strong></label>
+          <p id="grid-polygon-area" class="text-muted mb-0">Calculating...</p>
+        </div>
+
+        <div class="mb-3">
+          <label for="grid-spacing-select" class="form-label"><strong>Select Grid Spacing:</strong></label>
+          <select class="form-select" id="grid-spacing-select" onchange="updateEstimatedPoints()">
+            <option value="10">10 meters (Very Fine)</option>
+            <option value="50">50 meters (Fine)</option>
+            <option value="100" selected>100 meters (Default)</option>
+            <option value="500">500 meters (Coarse)</option>
+            <option value="1000">1000 meters (Very Coarse)</option>
+          </select>
+          <small class="form-text text-muted">Finer spacing = more detailed analysis, but longer processing time.</small>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label"><strong>Estimated Sample Points:</strong></label>
+          <p id="estimated-points" class="text-primary fw-bold mb-0">Calculating...</p>
+          <small class="form-text text-muted">Approximate number of points that will be analyzed.</small>
+        </div>
+
+        <div class="alert alert-warning mb-0">
+          <i class="fas fa-clock"></i> <strong>Processing Time:</strong> <span id="estimated-time">2-5 seconds</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="skipGranularAnalysis()">
+          <i class="fas fa-times"></i> Skip Analysis
+        </button>
+        <button type="button" class="btn btn-primary" onclick="applyGranularAnalysis()">
+          <i class="fas fa-check"></i> Apply Grid Analysis
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+<script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.min.js"></script>
 
 <script>
 
@@ -150,6 +223,9 @@
   let draw;
   let isDrawMode = false;
   let drawnPolygonData = null;
+  let geocoder;
+  let currentCityBoundary = null;
+  let cityBoundaryLayerId = null;
 
 
 
@@ -180,6 +256,20 @@
     .addControl(new mapboxgl.GeolocateControl())
     .addControl(new mapboxgl.ScaleControl())
     .addControl(new mapboxgl.FullscreenControl());
+
+    // Initialize Mapbox Geocoder
+    geocoder = new MapboxGeocoder({
+      accessToken: mapboxgl.accessToken,
+      mapboxgl: mapboxgl,
+      marker: false,
+      placeholder: 'Search for a city (e.g., Manila)',
+      countries: 'ph', // Limit to Philippines, remove this to search globally
+    });
+
+    multiHazardMap.addControl(geocoder, 'top-right');
+
+    // Handle geocoder result
+    geocoder.on('result', handleGeocoderResult);
 
     // Initialize Mapbox Draw
     draw = new MapboxDraw({
@@ -315,10 +405,15 @@
       const centroid = turf.centroid(polygon);
       const [lng, lat] = centroid.geometry.coordinates;
 
+      // Calculate polygon area in km²
+      const areaM2 = turf.area(polygon); // Turf returns area in square meters
+      const areaKm2 = areaM2 / 1000000;  // Convert to km²
+
       // Store polygon data
       drawnPolygonData = {
         geometry: polygon.geometry,
-        centroid: { lat, lng }
+        centroid: { lat, lng },
+        areaKm2: areaKm2
       };
 
       // Exit draw mode
@@ -335,8 +430,17 @@
         instructions.style.display = 'none';
       }
 
-      // Show the polygon asset modal
-      showPolygonAssetModal(lat, lng);
+      // Check if polygon area qualifies for granular analysis (≥ 6 km²)
+      if (areaKm2 >= 6) {
+        console.log(`Polygon area: ${areaKm2.toFixed(2)} km² - Showing grid spacing modal`);
+        // Show grid spacing modal - asset modal will be shown when user clicks "Apply" or "Skip"
+        showGridSpacingModal('New Polygon', polygon.geometry, areaKm2, 'draw');
+      } else {
+        console.log(`Polygon area: ${areaKm2.toFixed(2)} km² - Skipping granular analysis (< 6 km²)`);
+        // Show the polygon asset modal directly
+        currentPolygonSource = 'draw';
+        showPolygonAssetModal(lat, lng);
+      }
     }, 100);
   }
 
@@ -441,9 +545,19 @@
 
   // Cancel polygon asset
   function cancelPolygonAsset() {
-    // Clear drawn polygons
-    draw.deleteAll();
-    drawnPolygonData = null;
+    // Clear data based on source
+    if (currentPolygonSource === 'draw') {
+      // Clear drawn polygons
+      draw.deleteAll();
+      drawnPolygonData = null;
+    } else if (currentPolygonSource === 'city') {
+      // Clear city boundary data
+      window.cityPolygonData = null;
+      // Keep the orange boundary visible so user can try again
+    }
+
+    // Reset source
+    currentPolygonSource = null;
 
     // Hide modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('polygonAssetModal'));
@@ -461,8 +575,16 @@
       return;
     }
 
-    if (!drawnPolygonData) {
-      alert('No polygon data found. Please draw a polygon first.');
+    // Get polygon data from the appropriate source
+    let polygonData = null;
+    if (currentPolygonSource === 'city' && window.cityPolygonData) {
+      polygonData = window.cityPolygonData;
+    } else if (currentPolygonSource === 'draw' && drawnPolygonData) {
+      polygonData = drawnPolygonData;
+    }
+
+    if (!polygonData) {
+      alert('No polygon data found. Please draw a polygon or search for a city first.');
       return;
     }
 
@@ -470,9 +592,11 @@
     const facilityData = {
       name: assetName,
       archetype: assetArchetype,
-      lat: drawnPolygonData.centroid.lat,
-      lng: drawnPolygonData.centroid.lng,
-      geometry: drawnPolygonData.geometry
+      lat: polygonData.centroid.lat,
+      lng: polygonData.centroid.lng,
+      geometry: polygonData.geometry,
+      areaKm2: polygonData.areaKm2,
+      gridSpacing: polygonData.gridSpacing || null
     };
 
     // Send to server
@@ -487,8 +611,16 @@
     .then(response => response.json())
     .then(data => {
       if (data.success) {
-        // Clear the drawing
-        draw.deleteAll();
+        // Clear the drawing only if it's from draw source
+        if (currentPolygonSource === 'draw') {
+          draw.deleteAll();
+          drawnPolygonData = null;
+        } else if (currentPolygonSource === 'city') {
+          // Remove the orange boundary highlight for city boundaries
+          removeCityBoundary();
+          // Clear the temporary city polygon data
+          window.cityPolygonData = null;
+        }
 
         // Add the new facility marker with polygon
         addFacilityMarker({
@@ -503,8 +635,8 @@
         const modal = bootstrap.Modal.getInstance(document.getElementById('polygonAssetModal'));
         if (modal) modal.hide();
 
-        // Reset drawn polygon data
-        drawnPolygonData = null;
+        // Reset source
+        currentPolygonSource = null;
       } else {
         alert('Error adding asset: ' + data.error);
       }
@@ -515,7 +647,203 @@
     });
   }
 
-  
+  // Grid Spacing Modal Functions
+  let currentPolygonForGrid = null;
+  let currentAssetNameForGrid = null;
+  let currentPolygonAreaKm2 = 0;
+  let currentPolygonSource = null; // 'draw' or 'city'
+
+  function showGridSpacingModal(assetName, polygonGeometry, polygonAreaKm2, source = 'draw') {
+    currentAssetNameForGrid = assetName;
+    currentPolygonForGrid = polygonGeometry;
+    currentPolygonAreaKm2 = polygonAreaKm2;
+    currentPolygonSource = source;
+
+    // Update modal content
+    document.getElementById('grid-asset-name').textContent = assetName;
+    document.getElementById('grid-polygon-area').textContent = polygonAreaKm2.toFixed(2) + ' km²';
+
+    // Calculate initial estimated points
+    updateEstimatedPoints();
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('gridSpacingModal'));
+    modal.show();
+  }
+
+  function updateEstimatedPoints() {
+    const gridSpacing = parseInt(document.getElementById('grid-spacing-select').value);
+
+    // Calculate approximate number of points
+    // Formula: area (km²) * 1,000,000 (m² per km²) / (grid_spacing²)
+    const areaM2 = currentPolygonAreaKm2 * 1000000;
+    const estimatedPoints = Math.floor(areaM2 / (gridSpacing * gridSpacing));
+
+    document.getElementById('estimated-points').textContent =
+      estimatedPoints.toLocaleString() + ' points';
+
+    // Update estimated processing time
+    let estimatedTime;
+    if (estimatedPoints < 500) {
+      estimatedTime = '< 1 second';
+    } else if (estimatedPoints < 2000) {
+      estimatedTime = '1-2 seconds';
+    } else if (estimatedPoints < 5000) {
+      estimatedTime = '2-5 seconds';
+    } else if (estimatedPoints < 10000) {
+      estimatedTime = '5-10 seconds';
+    } else {
+      estimatedTime = '10-20 seconds';
+    }
+
+    document.getElementById('estimated-time').textContent = estimatedTime;
+  }
+
+  function applyGranularAnalysis() {
+    const gridSpacing = parseInt(document.getElementById('grid-spacing-select').value);
+
+    console.log('=== APPLY GRANULAR ANALYSIS ===');
+    console.log('Grid spacing:', gridSpacing);
+    console.log('Current polygon source:', currentPolygonSource);
+
+    // Store grid spacing based on the polygon source
+    if (currentPolygonSource === 'city' && currentCityBoundary) {
+      // For city boundaries, we need to create a temporary polygon data structure
+      if (!window.cityPolygonData) {
+        window.cityPolygonData = {};
+      }
+      window.cityPolygonData.gridSpacing = gridSpacing;
+      window.cityPolygonData.enableGranular = true;
+      window.cityPolygonData.geometry = currentCityBoundary.geometry;
+
+      // Calculate centroid
+      const centroid = turf.centroid(currentCityBoundary.geojson);
+      const [lng, lat] = centroid.geometry.coordinates;
+      window.cityPolygonData.centroid = { lat, lng };
+      window.cityPolygonData.areaKm2 = currentPolygonAreaKm2;
+
+      console.log('Grid spacing stored in cityPolygonData');
+    } else if (currentPolygonSource === 'draw' && drawnPolygonData) {
+      drawnPolygonData.gridSpacing = gridSpacing;
+      drawnPolygonData.enableGranular = true;
+      console.log('Grid spacing stored in drawnPolygonData');
+    } else {
+      console.error('No polygon data found!');
+      alert('Error: No polygon data found. Please try again.');
+      return;
+    }
+
+    // Remove focus from the button to avoid aria-hidden warning
+    document.activeElement.blur();
+
+    // Hide grid spacing modal and wait for it to fully hide
+    const gridModal = bootstrap.Modal.getInstance(document.getElementById('gridSpacingModal'));
+    if (gridModal) {
+      // Listen for the modal hidden event
+      const modalElement = document.getElementById('gridSpacingModal');
+      modalElement.addEventListener('hidden.bs.modal', function onHidden() {
+        // Remove the event listener to avoid duplicate calls
+        modalElement.removeEventListener('hidden.bs.modal', onHidden);
+
+        console.log('Grid modal fully hidden, showing asset modal...');
+
+        // Show notification
+        showNotification('Grid spacing configured: ' + gridSpacing + 'm. Complete the asset details.', 'success');
+
+        // Show polygon asset modal to continue with naming the asset
+        let centroid = null;
+        if (currentPolygonSource === 'city' && window.cityPolygonData) {
+          centroid = window.cityPolygonData.centroid;
+        } else if (currentPolygonSource === 'draw' && drawnPolygonData) {
+          centroid = drawnPolygonData.centroid;
+        }
+
+        if (centroid) {
+          console.log('Showing polygon asset modal with centroid:', centroid);
+          showPolygonAssetModal(centroid.lat, centroid.lng);
+        } else {
+          console.error('No centroid found');
+          alert('Error: Could not find polygon centroid. Please try again.');
+        }
+      }, { once: true });
+
+      // Now hide the modal
+      gridModal.hide();
+    } else {
+      console.error('Could not get grid modal instance');
+    }
+  }
+
+  function skipGranularAnalysis() {
+    console.log('=== SKIP GRANULAR ANALYSIS ===');
+    console.log('Current polygon source:', currentPolygonSource);
+
+    // Mark that granular analysis should be skipped based on source
+    if (currentPolygonSource === 'city' && currentCityBoundary) {
+      // For city boundaries, create a temporary polygon data structure
+      if (!window.cityPolygonData) {
+        window.cityPolygonData = {};
+      }
+      window.cityPolygonData.enableGranular = false;
+      window.cityPolygonData.gridSpacing = null;
+      window.cityPolygonData.geometry = currentCityBoundary.geometry;
+
+      // Calculate centroid
+      const centroid = turf.centroid(currentCityBoundary.geojson);
+      const [lng, lat] = centroid.geometry.coordinates;
+      window.cityPolygonData.centroid = { lat, lng };
+      window.cityPolygonData.areaKm2 = currentPolygonAreaKm2;
+
+      console.log('Granular analysis disabled for city boundary');
+    } else if (currentPolygonSource === 'draw' && drawnPolygonData) {
+      drawnPolygonData.enableGranular = false;
+      drawnPolygonData.gridSpacing = null;
+      console.log('Granular analysis disabled for drawn polygon');
+    } else {
+      console.error('No polygon data found!');
+      alert('Error: No polygon data found. Please try again.');
+      return;
+    }
+
+    // Hide grid spacing modal and wait for it to fully hide
+    const gridModal = bootstrap.Modal.getInstance(document.getElementById('gridSpacingModal'));
+    if (gridModal) {
+      // Listen for the modal hidden event
+      const modalElement = document.getElementById('gridSpacingModal');
+      modalElement.addEventListener('hidden.bs.modal', function onHidden() {
+        // Remove the event listener to avoid duplicate calls
+        modalElement.removeEventListener('hidden.bs.modal', onHidden);
+
+        console.log('Grid modal fully hidden (skipped), showing asset modal...');
+
+        // Show message
+        showNotification('Granular analysis skipped. Centroid value will be used.', 'info');
+
+        // Show polygon asset modal to continue with naming the asset
+        let centroid = null;
+        if (currentPolygonSource === 'city' && window.cityPolygonData) {
+          centroid = window.cityPolygonData.centroid;
+        } else if (currentPolygonSource === 'draw' && drawnPolygonData) {
+          centroid = drawnPolygonData.centroid;
+        }
+
+        if (centroid) {
+          console.log('Showing polygon asset modal with centroid:', centroid);
+          showPolygonAssetModal(centroid.lat, centroid.lng);
+        } else {
+          console.error('No centroid found');
+          alert('Error: Could not find polygon centroid. Please try again.');
+        }
+      }, { once: true });
+
+      // Now hide the modal
+      gridModal.hide();
+    } else {
+      console.error('Could not get grid modal instance');
+    }
+  }
+
+
 // Make facilityMarkers accessible at window level
 window.facilityMarkers = [];
 window.facilityPolygons = [];
@@ -787,6 +1115,221 @@ function loadFacilityData() {
   markers.forEach(marker => bounds.extend(marker.getLngLat()));
   multiHazardMap.fitBounds(bounds, { padding: 50, maxZoom: 15 });
 }
+
+  // Handle geocoder result - fetch city boundaries
+  async function handleGeocoderResult(e) {
+    const result = e.result;
+    console.log('Geocoder result:', result);
+
+    // Extract place name and coordinates
+    const placeName = result.place_name || result.text;
+    const [lng, lat] = result.center;
+
+    // Show loading message
+    showNotification('Fetching city boundaries...', 'info');
+
+    try {
+      // Fetch boundary from Nominatim (OpenStreetMap)
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?` +
+        `q=${encodeURIComponent(placeName)}` +
+        `&format=geojson` +
+        `&polygon_geojson=1` +
+        `&limit=1`,
+        {
+          headers: {
+            'User-Agent': 'CLIMATE-Build-App'
+          }
+        }
+      );
+
+      if (!response.ok) throw new Error('Failed to fetch boundary');
+
+      const data = await response.json();
+
+      if (data.features && data.features.length > 0) {
+        const feature = data.features[0];
+
+        // Check if boundary geometry exists
+        if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
+          displayCityBoundary(feature.geometry, placeName);
+          showNotification(`Boundary found for ${placeName}!`, 'success');
+        } else {
+          showNotification(`No boundary polygon found for ${placeName}. Try a more specific search.`, 'warning');
+        }
+      } else {
+        showNotification(`No boundary found for ${placeName}. Try a more specific search.`, 'warning');
+      }
+    } catch (error) {
+      console.error('Error fetching boundary:', error);
+      showNotification('Error fetching city boundary. Please try again.', 'error');
+    }
+  }
+
+  // Display city boundary on map
+  function displayCityBoundary(geometry, name) {
+    // Remove existing boundary if any
+    removeCityBoundary();
+
+    // Generate unique layer ID
+    cityBoundaryLayerId = `city-boundary-${Date.now()}`;
+
+    // Store boundary data
+    currentCityBoundary = {
+      name: name,
+      geometry: geometry,
+      geojson: {
+        type: 'Feature',
+        properties: { name: name },
+        geometry: geometry
+      }
+    };
+
+    // Add source
+    multiHazardMap.addSource(cityBoundaryLayerId, {
+      type: 'geojson',
+      data: currentCityBoundary.geojson
+    });
+
+    // Add fill layer
+    multiHazardMap.addLayer({
+      id: `${cityBoundaryLayerId}-fill`,
+      type: 'fill',
+      source: cityBoundaryLayerId,
+      paint: {
+        'fill-color': '#FFA500',
+        'fill-opacity': 0.3
+      }
+    });
+
+    // Add outline layer
+    multiHazardMap.addLayer({
+      id: `${cityBoundaryLayerId}-outline`,
+      type: 'line',
+      source: cityBoundaryLayerId,
+      paint: {
+        'line-color': '#FF8C00',
+        'line-width': 3
+      }
+    });
+
+    // Fit map to boundary
+    const bbox = turf.bbox(currentCityBoundary.geojson);
+    multiHazardMap.fitBounds(bbox, { padding: 50 });
+
+    // Show save button
+    document.getElementById('save-boundary-btn').style.display = 'inline-block';
+  }
+
+  // Remove city boundary from map
+  function removeCityBoundary() {
+    if (cityBoundaryLayerId) {
+      if (multiHazardMap.getLayer(`${cityBoundaryLayerId}-fill`)) {
+        multiHazardMap.removeLayer(`${cityBoundaryLayerId}-fill`);
+      }
+      if (multiHazardMap.getLayer(`${cityBoundaryLayerId}-outline`)) {
+        multiHazardMap.removeLayer(`${cityBoundaryLayerId}-outline`);
+      }
+      if (multiHazardMap.getSource(cityBoundaryLayerId)) {
+        multiHazardMap.removeSource(cityBoundaryLayerId);
+      }
+      cityBoundaryLayerId = null;
+    }
+    currentCityBoundary = null;
+    document.getElementById('save-boundary-btn').style.display = 'none';
+  }
+
+  // Save city boundary as asset
+  async function saveBoundaryAsAsset() {
+    if (!currentCityBoundary) {
+      alert('No boundary to save. Please search for a city first.');
+      return;
+    }
+
+    // Calculate centroid
+    const centroid = turf.centroid(currentCityBoundary.geojson);
+    const [lng, lat] = centroid.geometry.coordinates;
+
+    // Calculate polygon area in km²
+    const areaM2 = turf.area(currentCityBoundary.geojson); // Turf returns area in square meters
+    const areaKm2 = areaM2 / 1000000;  // Convert to km²
+
+    console.log(`City boundary area: ${areaKm2.toFixed(2)} km²`);
+
+    // Check if polygon area qualifies for granular analysis (≥ 6 km²)
+    if (areaKm2 >= 6) {
+      console.log('City boundary qualifies for granular analysis - showing grid spacing modal first');
+      // Show grid spacing modal FIRST with 'city' source, naming modal will come after
+      showGridSpacingModal(currentCityBoundary.name, currentCityBoundary.geometry, areaKm2, 'city');
+    } else {
+      console.log('City boundary does not qualify for granular analysis - showing naming modal directly');
+      // Show naming modal directly for small polygons
+      showPolygonAssetModal(lat, lng);
+      // Set the source so confirmPolygonAsset knows where to get the data
+      currentPolygonSource = 'city';
+
+      // Create temporary polygon data for small city boundaries
+      if (!window.cityPolygonData) {
+        window.cityPolygonData = {};
+      }
+      window.cityPolygonData.centroid = { lat, lng };
+      window.cityPolygonData.geometry = currentCityBoundary.geometry;
+      window.cityPolygonData.areaKm2 = areaKm2;
+      window.cityPolygonData.enableGranular = false;
+      window.cityPolygonData.gridSpacing = null;
+    }
+  }
+
+  // Export boundaries as shapefile
+  function exportShapefile() {
+    showNotification('Preparing shapefile export...', 'info');
+
+    // Call backend endpoint
+    window.location.href = '/climate-hazards-analysis-v2/api/export-shapefile/';
+  }
+
+  // Show notification helper
+  function showNotification(message, type = 'info') {
+    // Remove existing notification if any
+    const existing = document.getElementById('map-notification');
+    if (existing) existing.remove();
+
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.id = 'map-notification';
+    notification.style.position = 'absolute';
+    notification.style.top = '60px';
+    notification.style.right = '10px';
+    notification.style.zIndex = '1000';
+    notification.style.padding = '12px 20px';
+    notification.style.borderRadius = '5px';
+    notification.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+    notification.style.fontSize = '14px';
+    notification.style.fontWeight = '500';
+    notification.style.maxWidth = '300px';
+    notification.style.animation = 'slideInRight 0.3s ease';
+
+    // Set colors based on type
+    const colors = {
+      success: { bg: '#28a745', text: '#fff' },
+      error: { bg: '#dc3545', text: '#fff' },
+      warning: { bg: '#ffc107', text: '#000' },
+      info: { bg: '#17a2b8', text: '#fff' }
+    };
+
+    const color = colors[type] || colors.info;
+    notification.style.backgroundColor = color.bg;
+    notification.style.color = color.text;
+    notification.textContent = message;
+
+    document.getElementById('climate-hazard-map').appendChild(notification);
+
+    // Auto-remove after 4 seconds
+    setTimeout(() => {
+      notification.style.animation = 'slideOutRight 0.3s ease';
+      setTimeout(() => notification.remove(), 300);
+    }, 4000);
+  }
 
   // Helper function to get CSRF token
   function getCookie(name) {

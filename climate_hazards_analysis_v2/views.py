@@ -11,6 +11,13 @@ from django.views.decorators.http import require_http_methods, require_GET
 from django.utils.decorators import method_decorator
 from .utils import standardize_facility_dataframe, load_cached_hazard_data, combine_facility_with_hazard_data, validate_shapefile
 from .error_utils import handle_sensitivity_param_error
+from .granular_analysis import (
+    generate_sample_grid,
+    query_hazard_for_points,
+    classify_hazard_risk,
+    consolidate_points_to_clusters,
+    calculate_polygon_area_km2
+)
 import logging
 import copy
 import zipfile
@@ -64,8 +71,8 @@ def view_map(request):
             # Process the uploaded file to get facility data
             if ext in ['.xls', '.xlsx']:
                 df = pd.read_excel(file_path)
-                
-            elif ext in ['.shp', '.zip']:
+
+            elif ext in ['.shp', '.zip', '.gpkg']:
                 if ext == '.zip':
                     with tempfile.TemporaryDirectory() as tmpdir:
                         with zipfile.ZipFile(file_path, 'r') as zip_ref:
@@ -75,12 +82,16 @@ def view_map(request):
                             raise ValueError('No shapefile found in the uploaded zip archive')
                         shp_path = os.path.join(tmpdir, shp_files[0])
                         gdf = gpd.read_file(shp_path)
+                elif ext == '.gpkg':
+                    # Read GeoPackage file (reads first layer by default)
+                    gdf = gpd.read_file(file_path)
                 else:
+                    # Direct .shp file
                     gdf = gpd.read_file(file_path)
 
-                # Validate shapefile structure before processing
+                # Validate geospatial file structure before processing
                 attribute_columns = validate_shapefile(gdf)
-                logger.info(f"Shapefile attribute columns: {attribute_columns}")
+                logger.info(f"Geospatial file attribute columns: {attribute_columns}")
 
                 gdf = gdf.to_crs('EPSG:4326')
                 gdf['Lat'] = gdf.geometry.centroid.y
@@ -95,7 +106,7 @@ def view_map(request):
 
 
             # Store facility data in session for map display
-            if ext in ['.shp', '.zip']:
+            if ext in ['.shp', '.zip', '.gpkg']:
                 facility_data = []
                 for i, row in df.iterrows():
                     record = row.to_dict()
@@ -104,6 +115,7 @@ def view_map(request):
                         record['geometry'] = geom.convex_hull.__geo_interface__
                     elif geom.geom_type in ['Polygon', 'MultiPolygon']:
                         record['geometry'] = geom.__geo_interface__
+
                     facility_data.append(record)
             else:
                 facility_data = df.to_dict(orient='records')
@@ -192,6 +204,8 @@ def add_facility(request):
             name = data.get('name', f"New Facility at {lat:.4f}, {lng:.4f}")
             archetype = data.get('archetype', 'default archetype')
             geometry = data.get('geometry')  # Polygon geometry if provided
+            grid_spacing = data.get('gridSpacing')  # Grid spacing from frontend modal
+            area_km2 = data.get('areaKm2')  # Polygon area from frontend
 
             # Get existing facility data or initialize empty list
             facility_data = request.session.get('climate_hazards_v2_facility_data', [])
@@ -207,6 +221,36 @@ def add_facility(request):
             # Add polygon geometry if provided
             if geometry:
                 new_facility['geometry'] = geometry
+
+                # Calculate area if not provided
+                if area_km2 is None:
+                    area_km2 = calculate_polygon_area_km2(geometry)
+
+                new_facility['polygon_area_km2'] = area_km2
+
+                # Check if polygon qualifies for granular analysis (≥ 6 km²)
+                if area_km2 >= 6:
+                    # Use provided grid spacing or default to 100m
+                    if grid_spacing is None:
+                        grid_spacing = 100  # Default
+                        logger.info(f"No grid spacing provided, using default: {grid_spacing}m")
+
+                    logger.info(f"Starting granular analysis for {name}: "
+                              f"Area={area_km2:.4f} km², Grid spacing={grid_spacing}m")
+
+                    # Generate sample grid
+                    sample_points = generate_sample_grid(geometry, grid_spacing_meters=grid_spacing)
+
+                    if sample_points:
+                        new_facility['sample_points'] = sample_points
+                        new_facility['grid_spacing_meters'] = grid_spacing
+                        new_facility['sample_points_count'] = len(sample_points)
+
+                        logger.info(f"Generated {len(sample_points)} sample points for {name}")
+                    else:
+                        logger.warning(f"Failed to generate sample points for {name}")
+                else:
+                    logger.info(f"Polygon area {area_km2:.2f} km² < 6 km², skipping granular analysis for {name}")
 
             facility_data.append(new_facility)
 
@@ -368,11 +412,74 @@ def show_results(request):
                     ],
                     'selected_hazards': selected_hazards
                 })
-        
+
+        # ===== UNIFIED GRANULAR ANALYSIS APPROACH =====
+        # Check if any facilities have sample points - if yes, create expanded CSV
+        has_sample_points = any('sample_points' in fac for fac in facility_data)
+        granular_facility_mapping = {}  # Maps original facility names to their sample point count
+
+        if has_sample_points:
+            logger.info("🔍 Detected facilities with sample points - creating expanded CSV for unified analysis")
+
+            # Create expanded CSV with both centroids and sample points
+            expanded_rows = []
+
+            for facility in facility_data:
+                facility_name = facility.get('Facility')
+                lat = facility.get('Lat')
+                lng = facility.get('Long')
+                archetype = facility.get('Archetype', 'default archetype')
+
+                # Add the main facility row (centroid)
+                expanded_rows.append({
+                    'Facility': facility_name,
+                    'Lat': lat,
+                    'Long': lng,
+                    'Archetype': archetype
+                })
+
+                # If this facility has sample points, add them as separate rows
+                if 'sample_points' in facility:
+                    sample_points = facility['sample_points']
+                    logger.info(f"Adding {len(sample_points)} sample points for {facility_name}")
+
+                    # Track this facility for later result parsing
+                    granular_facility_mapping[facility_name] = {
+                        'sample_point_count': len(sample_points),
+                        'grid_spacing': facility.get('grid_spacing_meters', 100),
+                        'polygon_area_km2': facility.get('polygon_area_km2', 0)
+                    }
+
+                    for idx, point in enumerate(sample_points, start=1):
+                        expanded_rows.append({
+                            'Facility': f"{facility_name}_Point_{idx}",
+                            'Lat': point['lat'],
+                            'Long': point['lng'],
+                            'Archetype': archetype
+                        })
+
+            # Create expanded CSV
+            expanded_df = pd.DataFrame(expanded_rows)
+            upload_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'uploads')
+            os.makedirs(upload_dir, exist_ok=True)
+
+            expanded_csv_filename = f"facility_data_expanded_{request.session.session_key or 'default'}.csv"
+            expanded_csv_path = os.path.join(upload_dir, expanded_csv_filename)
+            expanded_df.to_csv(expanded_csv_path, index=False)
+
+            logger.info(f"Created expanded CSV with {len(expanded_rows)} rows (including sample points)")
+            logger.info(f"Expanded CSV saved to: {expanded_csv_path}")
+
+            # Use expanded CSV for analysis
+            analysis_csv_path = expanded_csv_path
+        else:
+            logger.info("No sample points detected - using standard centroid-only analysis")
+            analysis_csv_path = facility_csv_path
+
         # Re-use the generate_climate_hazards_analysis function from the original module
-        logger.info("Calling generate_climate_hazards_analysis...")
+        logger.info(f"Calling generate_climate_hazards_analysis with: {analysis_csv_path}")
         result = generate_climate_hazards_analysis(
-            facility_csv_path=facility_csv_path,
+            facility_csv_path=analysis_csv_path,
             selected_fields=selected_hazards,
             flood_scenarios=['current', 'moderate', 'worst']
         )
@@ -706,10 +813,163 @@ def show_results(request):
         # Convert to dict for template
         data = df.to_dict(orient="records")
         columns = df.columns.tolist()
-        
+
         logger.info(f"Final data has {len(data)} rows and {len(columns)} columns")
         logger.info(f"Final columns: {columns}")
-        
+
+        # ===== PARSE GRANULAR ANALYSIS RESULTS =====
+        if granular_facility_mapping:
+            logger.info("🔍 Parsing granular analysis results from unified analysis")
+
+            from .granular_analysis import consolidate_points_to_clusters, classify_hazard_risk
+
+            # Mapping from CSV column names to hazard types
+            column_to_hazard_map = {
+                'Flood Depth (meters)': 'Flood',
+                'Water Stress Exposure (%)': 'Water Stress',
+                'Days over 35° Celsius': 'Heat',
+                'Extreme Windspeed 100 year Return Period (km/h)': 'Tropical Cyclones',
+                'Storm Surge Flood Depth (meters)': 'Storm Surge',
+                'Rainfall-Induced Landslide (factor of safety)': 'Landslide'
+            }
+
+            # Separate centroid rows from sample point rows
+            centroid_rows = []
+            sample_point_rows = {}  # Maps facility name to list of sample point results
+
+            for row in data:
+                facility_name = row.get('Facility', '')
+
+                if '_Point_' in facility_name:
+                    # This is a sample point row - extract base facility name
+                    base_facility_name = facility_name.split('_Point_')[0]
+
+                    if base_facility_name not in sample_point_rows:
+                        sample_point_rows[base_facility_name] = []
+
+                    # Convert row to sample point format for consolidation
+                    # Extract lat/lng and transform hazard data
+                    point_data = {
+                        'lat': row.get('Lat'),
+                        'lng': row.get('Long')
+                    }
+
+                    # Transform CSV columns to expected format with _value and _risk suffixes
+                    for csv_col, hazard_type in column_to_hazard_map.items():
+                        if csv_col in row and row[csv_col] is not None:
+                            value = row[csv_col]
+
+                            # Try to convert to float for classification
+                            try:
+                                if isinstance(value, str):
+                                    # Handle categorical values
+                                    if value == 'Little to none':
+                                        numeric_value = 0.0
+                                    elif value == 'N/A' or value == 'Data not available':
+                                        continue
+                                    else:
+                                        # Try to extract numeric value from ranges like "0.1 to 0.5"
+                                        numeric_value = float(value.split()[0])
+                                else:
+                                    numeric_value = float(value)
+
+                                # Store value and classify risk
+                                hazard_key = hazard_type.replace(' ', '_')
+                                point_data[f'{hazard_key}_value'] = numeric_value
+                                point_data[f'{hazard_key}_risk'] = classify_hazard_risk(numeric_value, hazard_type)
+
+                            except (ValueError, AttributeError, IndexError) as e:
+                                logger.warning(f"Could not convert {csv_col} value '{value}' to numeric: {e}")
+                                continue
+
+                    # Also preserve original column names for display
+                    for col, value in row.items():
+                        if col not in ['Facility', 'Lat', 'Long', 'Archetype', 'Asset Archetype']:
+                            point_data[col] = value
+
+                    sample_point_rows[base_facility_name].append(point_data)
+                else:
+                    # This is a centroid row - keep it
+                    centroid_rows.append(row)
+
+            logger.info(f"Separated into {len(centroid_rows)} centroid rows and {len(sample_point_rows)} facilities with sample points")
+
+            # Process granular analysis for each facility with sample points
+            for facility_name, sample_points in sample_point_rows.items():
+                logger.info(f"Processing granular analysis for {facility_name}: {len(sample_points)} sample points")
+
+                # Find the corresponding centroid row
+                centroid_row = None
+                for row in centroid_rows:
+                    if row.get('Facility') == facility_name:
+                        centroid_row = row
+                        break
+
+                if centroid_row and len(sample_points) > 0:
+                    # Get facility metadata
+                    facility_meta = granular_facility_mapping.get(facility_name, {})
+                    grid_spacing = facility_meta.get('grid_spacing', 100)
+                    polygon_area_km2 = facility_meta.get('polygon_area_km2', 0)
+
+                    # Apply consolidation
+                    try:
+                        consolidated = consolidate_points_to_clusters(sample_points, grid_spacing)
+
+                        # Add granular analysis data to the centroid row (for modal/summary)
+                        centroid_row['granular_analysis'] = {
+                            'analyzed_points': sample_points,
+                            'clusters': consolidated.get('clusters', []),
+                            'statistics': consolidated.get('statistics', {}),
+                            'grid_spacing': grid_spacing,
+                            'polygon_area_km2': polygon_area_km2
+                        }
+                        centroid_row['has_granular_analysis'] = True
+                        centroid_row['sample_point_count'] = len(sample_points)
+
+                        logger.info(f"Granular analysis completed for {facility_name}: "
+                                  f"{len(sample_points)} points, {len(consolidated.get('clusters', []))} clusters")
+                    except Exception as e:
+                        logger.error(f"Error consolidating points for {facility_name}: {e}")
+                        centroid_row['has_granular_analysis'] = False
+
+            # Reconstruct data with centroids AND sample points (for table display)
+            # Order: Parent facility row, followed by its sample point rows
+            reconstructed_data = []
+
+            for row in centroid_rows:
+                facility_name = row.get('Facility')
+
+                # Add the parent facility row (centroid)
+                row['is_parent_facility'] = True
+                row['is_sample_point'] = False
+                reconstructed_data.append(row)
+
+                # Add sample point rows if this facility has them
+                if facility_name in sample_point_rows:
+                    for idx, point_data in enumerate(sample_point_rows[facility_name], start=1):
+                        # Create a full row for this sample point with all columns
+                        point_row = {}
+
+                        # Copy all centroid columns as base
+                        for col in columns:
+                            point_row[col] = point_data.get(col, 'N/A')
+
+                        # Set facility name to show it's a sample point
+                        point_row['Facility'] = f"└─ Point {idx}"
+                        point_row['Lat'] = point_data.get('lat')
+                        point_row['Long'] = point_data.get('lng')
+
+                        # Mark as sample point row
+                        point_row['is_sample_point'] = True
+                        point_row['is_parent_facility'] = False
+                        point_row['parent_facility'] = facility_name
+
+                        reconstructed_data.append(point_row)
+
+            # Replace data with reconstructed data (includes both centroids and sample points)
+            data = reconstructed_data
+            logger.info(f"Final data after granular parsing: {len(data)} rows (including sample points)")
+
         # 🚨 EMERGENCY TC DEBUG - Final check before group creation
         logger.info("🚨 EMERGENCY TC DEBUG - PRE GROUP CREATION 🚨")
         tc_final_check = [col for col in tc_expected if col in columns]
@@ -931,7 +1191,10 @@ def show_results(request):
             request.session['climate_hazards_v2_baseline_results'] = copy.deepcopy(
                 request.session['climate_hazards_v2_results']
             )
-        
+
+        # Note: Granular analysis is now handled via unified approach (see lines 820-898)
+        # Sample points are included in the main analysis CSV and results are parsed
+
         # Prepare context for the template
         context = {
             'data': data,
@@ -2055,24 +2318,109 @@ def save_updated_data_to_csv(table_data, request):
     try:
         # Create DataFrame from the updated data
         df = pd.DataFrame(table_data)
-        
+
         # Generate filename with timestamp
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"asset_exposure_updated_{timestamp}.csv"
-        
+
         # Save to a designated directory (adjust path as needed)
         output_dir = os.path.join('media', 'climate_hazards_v2', 'updated_data')
         os.makedirs(output_dir, exist_ok=True)
-        
+
         file_path = os.path.join(output_dir, filename)
         df.to_csv(file_path, index=False)
-        
+
         # Store the updated file path in session for reference
         request.session['climate_hazards_v2_asset_exposure_updated_csv_path'] = file_path
-        
+
         logger.info(f"Updated data saved to: {file_path}")
-        
+
     except Exception as e:
         logger.error(f"Error saving updated data to CSV: {e}")
         raise
+
+
+def export_boundaries_shapefile(request):
+    """
+    Export facility boundaries with polygon geometry as a shapefile.
+    Returns a zipped shapefile containing all boundary assets.
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Only GET requests are allowed'}, status=405)
+
+    try:
+        # Get facility data from session
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+
+        # Filter facilities that have polygon geometry
+        polygon_facilities = [f for f in facility_data if f.get('geometry')]
+
+        if not polygon_facilities:
+            return JsonResponse({
+                'error': 'No boundary polygons found. Please add city boundaries first.'
+            }, status=404)
+
+        # Create GeoDataFrame from polygon facilities
+        from shapely.geometry import shape
+
+        geometries = []
+        properties = []
+
+        for facility in polygon_facilities:
+            try:
+                # Convert GeoJSON geometry to Shapely geometry
+                geom = shape(facility['geometry'])
+                geometries.append(geom)
+
+                properties.append({
+                    'name': facility.get('Facility', 'Unnamed'),
+                    'archetype': facility.get('Archetype', ''),
+                    'latitude': facility.get('Lat', 0),
+                    'longitude': facility.get('Long', 0)
+                })
+            except Exception as e:
+                logger.warning(f"Skipping invalid geometry for {facility.get('Facility')}: {e}")
+                continue
+
+        if not geometries:
+            return JsonResponse({
+                'error': 'No valid geometries found to export.'
+            }, status=400)
+
+        # Create GeoDataFrame
+        gdf = gpd.GeoDataFrame(properties, geometry=geometries, crs='EPSG:4326')
+
+        # Create temporary directory for shapefile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            shapefile_name = 'city_boundaries'
+            shapefile_path = os.path.join(temp_dir, f'{shapefile_name}.shp')
+
+            # Save as shapefile
+            gdf.to_file(shapefile_path, driver='ESRI Shapefile')
+
+            # Create zip file containing all shapefile components
+            zip_path = os.path.join(temp_dir, f'{shapefile_name}.zip')
+
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # Add all shapefile components (.shp, .shx, .dbf, .prj, etc.)
+                for file in os.listdir(temp_dir):
+                    if file.startswith(shapefile_name) and not file.endswith('.zip'):
+                        file_path = os.path.join(temp_dir, file)
+                        zipf.write(file_path, arcname=file)
+
+            # Read zip file and return as response
+            with open(zip_path, 'rb') as f:
+                zip_data = f.read()
+
+            response = HttpResponse(zip_data, content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename="{shapefile_name}.zip"'
+
+            logger.info(f"Exported {len(geometries)} boundary polygons as shapefile")
+            return response
+
+    except Exception as e:
+        logger.error(f"Error exporting boundaries as shapefile: {e}")
+        return JsonResponse({
+            'error': f'Failed to export shapefile: {str(e)}'
+        }, status=500)
