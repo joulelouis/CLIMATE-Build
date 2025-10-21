@@ -1,4 +1,5 @@
 from django.urls import path
+<<<<<<< HEAD
 from .views import (
     view_map, get_facility_data, add_facility, select_hazards, show_results,
     generate_report, sensitivity_parameters, sensitivity_results, save_table_changes,
@@ -6,6 +7,9 @@ from .views import (
     clear_site_data, refresh_csrf_token, get_polygon_assets, create_polygon_asset,
     update_polygon_asset, delete_polygon_asset, get_asset_analysis_results
 )
+=======
+from .views import view_map, get_facility_data, add_facility, select_hazards, show_results, generate_report, sensitivity_parameters, sensitivity_results, save_table_changes, reset_table_data, preview_uploaded_file, export_boundaries_shapefile
+>>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
 
 app_name = "climate_hazards_analysis_v2"
 
@@ -24,6 +28,7 @@ urlpatterns = [
     path('api/polygon-assets/<int:asset_id>/delete/', delete_polygon_asset, name='delete_polygon_asset'),
     path('api/assets/<int:asset_id>/analysis/', get_asset_analysis_results, name='get_asset_analysis_results'),
     path('api/preview-upload/', preview_uploaded_file, name='preview_uploaded_file'),
+    path('api/export-shapefile/', export_boundaries_shapefile, name='export_boundaries_shapefile'),
     path('save-table-changes/', save_table_changes, name='save_table_changes'),
     path('reset-table-data/', reset_table_data, name='reset_table_data'),
     path('export-to-excel/', export_hazard_data_to_excel, name='export_to_excel'),

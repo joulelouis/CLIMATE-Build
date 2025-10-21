@@ -755,6 +755,9 @@ Adjust Sensitivity Thresholds
     function applyParameters(params) {
         if (!params) return;
 
+        console.log('Applying parameters:', params);
+
+        // Set all slider values first without triggering events
         if (document.getElementById('floodLow')) {
             document.getElementById('floodLow').value = params.flood_low !== undefined ? params.flood_low : 0.5;
             document.getElementById('floodHigh').value = params.flood_high !== undefined ? params.flood_high : 1.5;
@@ -766,8 +769,11 @@ Adjust Sensitivity Thresholds
             document.getElementById('waterStressNotMaterial').checked = !!params.water_stress_not_material;
         }
         if (document.getElementById('tropicalCycloneLow')) {
-            document.getElementById('tropicalCycloneLow').value = params.tropical_cyclone_low !== undefined ? params.tropical_cyclone_low : 119;
-            document.getElementById('tropicalCycloneHigh').value = params.tropical_cyclone_high !== undefined ? params.tropical_cyclone_high : 178;
+            const tcLow = params.tropical_cyclone_low !== undefined ? params.tropical_cyclone_low : 119;
+            const tcHigh = params.tropical_cyclone_high !== undefined ? params.tropical_cyclone_high : 178;
+            console.log(`Setting TC sliders to: Low=${tcLow}, High=${tcHigh}`);
+            document.getElementById('tropicalCycloneLow').value = tcLow;
+            document.getElementById('tropicalCycloneHigh').value = tcHigh;
             document.getElementById('tropicalCycloneNotMaterial').checked = !!params.tropical_cyclone_not_material;
         }
         if (document.getElementById('heatLow')) {
@@ -786,13 +792,23 @@ Adjust Sensitivity Thresholds
             document.getElementById('landslideNotMaterial').checked = !!params.landslide_not_material;
         }
 
-        updateAllDisplayValues();
-        toggleHazard('flood');
-        toggleHazard('waterStress');
-        toggleHazard('tropicalCyclone');
-        toggleHazard('heat');
-        toggleHazard('stormSurge');
-        toggleHazard('landslide');
+        console.log('Values set, now updating display values and slider tracks');
+
+        // Use requestAnimationFrame to ensure DOM has updated before visual updates
+        requestAnimationFrame(() => {
+            // Update all display values and slider tracks
+            updateAllDisplayValues();
+
+            console.log('After updateAllDisplayValues() - TC Low slider:', document.getElementById('tropicalCycloneLow').value);
+
+            // Toggle hazards to update visibility
+            toggleHazard('flood');
+            toggleHazard('waterStress');
+            toggleHazard('tropicalCyclone');
+            toggleHazard('heat');
+            toggleHazard('stormSurge');
+            toggleHazard('landslide');
+        });
     }
 
     // Ensure slider handles remain in logical order
@@ -881,6 +897,7 @@ Adjust Sensitivity Thresholds
             showSelectionFeedback(archetypeName);
 
             // Save current parameters if an archetype was previously selected
+<<<<<<< HEAD
             if (currentSelectedArchetype && currentSelectedArchetype !== archetypeName) {
                 console.log('💾 Saving parameters for previous archetype:', currentSelectedArchetype);
                 archetypeParameters[currentSelectedArchetype] = getCurrentParameters();
@@ -890,6 +907,12 @@ Adjust Sensitivity Thresholds
                 // Save default parameters on first selection
                 console.log('💾 Saving default parameters');
                 defaultParameters = getCurrentParameters();
+=======
+            if (currentSelectedArchetype) {
+                const savedParams = getCurrentParameters();
+                archetypeParameters[currentSelectedArchetype] = savedParams;
+                console.log(`Saved parameters for ${currentSelectedArchetype}:`, savedParams);
+>>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
             }
 
             // Update UI - Remove selection from all items first
@@ -934,7 +957,14 @@ Adjust Sensitivity Thresholds
             document.getElementById('selected-archetype-input').value = archetypeName;
 
             // Load parameters for this archetype (or default if not set)
-            const paramsToLoad = archetypeParameters[archetypeName] || defaultParameters;
+            // Create a deep copy to avoid reference issues
+            const paramsToLoad = archetypeParameters[archetypeName]
+                ? JSON.parse(JSON.stringify(archetypeParameters[archetypeName]))
+                : JSON.parse(JSON.stringify(defaultParameters));
+
+            console.log(`Loading parameters for ${archetypeName}:`, paramsToLoad);
+            console.log(`Has saved params: ${!!archetypeParameters[archetypeName]}`);
+
             if (paramsToLoad) {
                 console.log('📊 Loading parameters for archetype:', archetypeName);
                 applyParameters(paramsToLoad);
@@ -1350,10 +1380,17 @@ Adjust Sensitivity Thresholds
                 console.log('📦 No archetype parameters found in Django session, starting with empty object');
             }
 
+<<<<<<< HEAD
             // Try to restore from sessionStorage (client-side persistence)
             try {
                 const sessionSelectedArchetype = sessionStorage.getItem('selectedArchetype');
                 const sessionArchetypeParams = sessionStorage.getItem('archetypeParameters');
+=======
+            // Capture default parameters - create a deep copy
+            defaultParameters = JSON.parse(JSON.stringify(getCurrentParameters()));
+            console.log('Default parameters captured at page load:', defaultParameters);
+            updateAllDisplayValues();
+>>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
 
                 if (sessionSelectedArchetype && sessionArchetypeParams) {
                     const parsedParams = JSON.parse(sessionArchetypeParams);
