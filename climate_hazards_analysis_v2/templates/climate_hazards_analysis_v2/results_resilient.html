@@ -1,0 +1,1092 @@
+{% extends "base.html" %}
+{% load static %}
+{% load float_filters %}
+{% load my_filters %}
+
+{% block title %}
+Climate Hazard Analysis Results
+{% endblock %}
+
+{% block content %}
+<!-- Add CSRF token for AJAX requests -->
+{% csrf_token %}
+
+<style>
+    /* === Step Header Styles === */
+    .step-header {
+        background-color: #f8f9fa;
+        color: #495057;
+        font-weight: bold;
+        padding: 10px;
+        border: 2px solid transparent;
+        transition: all 0.3s ease;
+    }
+
+    .step-header.active-step-header {
+        border: 2px solid #F1D500;
+        background-color: #fff8e1;
+        color: #495057;
+    }
+
+    .step-header.arrow::after {
+        content: "→";
+        margin-left: 10px;
+    }
+
+    /* Custom Table Styling */
+    .custom-table {
+        background-color: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        border: none;
+        width: 100%;
+        border-collapse: collapse;
+        border-spacing: 0 8px;
+    }
+
+    .custom-table th,
+    .custom-table td {
+        border-right: 1px solid #ccc;
+        padding: 8px;
+    }
+
+    .custom-table-header {
+        background-color: #F8F8F8;
+        color: #495057;
+        font-weight: 600;
+        text-align: center;
+        border: none;
+        padding: 15px 10px;
+        vertical-align: middle;
+        font-size: 14px;
+    }
+
+    .custom-table-row:nth-child(even) {
+        background-color: #f8f9fa;
+    }
+
+    .custom-table-row:hover {
+        background-color: #e9ecef;
+        transition: background-color 0.3s ease;
+    }
+
+    .custom-table td {
+        border: none;
+        padding: 12px 10px;
+        text-align: center;
+        vertical-align: middle;
+        font-size: 13px;
+    }
+
+    /* Custom Card Styling */
+    .custom-card {
+        border: none;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .custom-card .card-header {
+        background-color: #f8f9fa;
+        border-bottom: none;
+        border-radius: 15px 15px 0 0;
+        padding: 20px;
+        font-weight: 600;
+        color: #495057;
+    }
+
+    .no-border {
+        border: none !important;
+    }
+
+    /* Tab Styling */
+    .custom-tabs-nav {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+    }
+
+    .custom-tabs-nav .nav-item {
+        flex: 0 0 auto;
+    }
+
+    .custom-tab-link {
+        border: none;
+        color: #495057;
+        font-weight: 500;
+        padding: 12px 20px;
+        margin-right: 5px;
+        border-radius: 10px 10px 0 0;
+        background-color: transparent;
+        transition: all 0.3s ease;
+    }
+
+    .custom-tab-link.active {
+        background-color: #F1D500;
+        color: #000;
+        font-weight: 600;
+    }
+
+    .custom-tab-link:hover {
+        background-color: #ffeaa7;
+        color: #000;
+    }
+
+    /* Alert fade animation */
+    .alert-fade {
+        animation: fadeOut 5s forwards;
+    }
+
+    @keyframes fadeOut {
+        0% { opacity: 1; }
+        80% { opacity: 1; }
+        100% { opacity: 0; }
+    }
+
+    /* Loading states */
+    .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+    }
+
+    .loading-spinner {
+        text-align: center;
+    }
+
+    .loading-spinner .spinner-border {
+        width: 3rem;
+        height: 3rem;
+        border-width: 0.3em;
+    }
+
+    /* Error states */
+    .error-fallback {
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+
+    .error-fallback h3 {
+        color: #721c24;
+        margin-bottom: 15px;
+    }
+
+    .error-fallback .btn-retry {
+        background: #007bff;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        margin-right: 10px;
+    }
+
+    .error-fallback .btn-retry:hover {
+        background: #0056b3;
+    }
+
+    /* Virtual scrolling */
+    .virtual-scroll-wrapper {
+        height: 600px;
+        overflow: auto;
+        position: relative;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+    }
+
+    .virtual-scroll-spacer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 1px;
+        pointer-events: none;
+    }
+
+    .virtual-scroll-content {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+    }
+
+    /* Progressive loading indicator */
+    .progressive-loader {
+        text-align: center;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        margin: 10px 0;
+    }
+
+    /* Network status */
+    .connection-status {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        z-index: 9999;
+        background: rgba(0,0,0,0.8);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.3s ease;
+    }
+
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #28a745;
+    }
+
+    .status-dot.offline {
+        background: #ffc107;
+    }
+
+    .status-dot.syncing {
+        background: #17a2b8;
+        animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .virtual-scroll-wrapper {
+            height: 400px;
+        }
+
+        .custom-tabs-nav {
+            flex-wrap: wrap !important;
+        }
+
+        .step-group-headers th {
+            font-size: 12px;
+            padding: 8px 4px;
+        }
+    }
+
+    /* Enhanced table controls */
+    .table-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .table-info {
+        color: #6c757d;
+        font-size: 14px;
+    }
+
+    /* Fallback table styles */
+    .basic-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .basic-table th,
+    .basic-table td {
+        border: 1px solid #dee2e6;
+        padding: 8px;
+        text-align: left;
+    }
+
+    .basic-table th {
+        background-color: #f8f9fa;
+        font-weight: 600;
+    }
+
+    .basic-table tbody tr:hover {
+        background-color: #f8f9fa;
+    }
+
+    .sortable {
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .sortable:hover {
+        background-color: #e9ecef;
+    }
+
+    .sort-asc::after {
+        content: " ↑";
+        color: #007bff;
+    }
+
+    .sort-desc::after {
+        content: " ↓";
+        color: #007bff;
+    }
+</style>
+
+<!-- Loading overlay -->
+<div id="loading-overlay" class="loading-overlay" style="display: none;">
+    <div class="loading-spinner">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <div class="mt-3">
+            <strong>Loading Climate Hazard Analysis Results...</strong>
+            <div class="text-muted">Please wait while we process your data</div>
+        </div>
+    </div>
+</div>
+
+<!-- Error fallback container -->
+<div id="error-fallback" class="error-fallback" style="display: none;">
+    <h3>Unable to Load Results</h3>
+    <p>We encountered an error while loading your climate hazard analysis results. This could be due to:</p>
+    <ul>
+        <li>Network connectivity issues</li>
+        <li>Server maintenance</li>
+        <li>Corrupted session data</li>
+        <li>Browser compatibility issues</li>
+    </ul>
+    <div class="mt-3">
+        <button class="btn-retry" onclick="retryInitialization()">
+            <i class="fas fa-redo"></i> Retry Loading
+        </button>
+        <button class="btn-retry" onclick="loadBasicVersion()">
+            <i class="fas fa-table"></i> Load Basic Version
+        </button>
+        <button class="btn-retry" onclick="exportErrorDetails()">
+            <i class="fas fa-download"></i> Export Error Details
+        </button>
+    </div>
+    <div id="error-details" class="mt-3">
+        <small class="text-muted">Error details will appear here for technical support</small>
+    </div>
+</div>
+
+<!-- Network status indicator -->
+<div id="network-status" class="connection-status" style="display: none;">
+    <div class="status-indicator">
+        <span class="status-dot"></span>
+        <span class="status-text">Connected</span>
+    </div>
+</div>
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-6 d-flex flex-column">
+            <!-- Rounded Icon Container with Margin -->
+            <div class="icon-container">
+                <img src="{% static 'images/sgv-logo.png' %}" alt="SGV Logo">
+            </div>
+            <!-- Heading below the icon with Margin -->
+            <h1 class="page-heading">Exposure Override</h1>
+        </div>
+    </div>
+
+    <!-- Step by Step Procedure UI -->
+    <div class="row mt-4 mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body p-4">
+                    {% include "climate_hazards_analysis_v2/steps_table.html" %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Messages -->
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+
+    {% if success_message %}
+    <div class="alert alert-success alert-dismissible fade show alert-fade" role="alert">
+        {{ success_message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+
+    <!-- Placeholder for JavaScript errors -->
+    <div id="js-error" class="alert alert-danger alert-dismissible fade show d-none" role="alert">
+        <span id="js-error-text"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+
+    <!-- Results Content -->
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <!-- Left Column: Column Selector -->
+            <div class="col-md-3">
+                {% include "climate_hazards_analysis_v2/column_selector.html" %}
+            </div>
+
+            <!-- Right Column: Results Table -->
+            <div class="col-md-9">
+                <div class="card custom-card">
+                    <div class="card-header no-border">
+                        <strong>Hazard Analysis Results</strong>
+                    </div>
+                    <div class="card-body">
+                        <!-- Tabs Navigation -->
+                        <ul class="nav nav-tabs mt-2 custom-tabs-nav" id="hazardTabs" role="tablist">
+                            <li class="nav-item">
+                                <a class="nav-link custom-tab-link active" id="table-tab" data-bs-toggle="tab" href="#table-content" role="tab" aria-controls="table-content" aria-selected="true">
+                                    Hazard Exposure Table
+                                </a>
+                            </li>
+
+                            {% for hazard in selected_hazards %}
+                                {% if hazard == "Heat" %}
+                                <li class="nav-item">
+                                    <a class="nav-link custom-tab-link" id="heat-exposure-map-tab" data-bs-toggle="tab" href="#heat-map" role="tab" aria-controls="map-content" aria-selected="false">
+                                        Heat Exposure Map
+                                    </a>
+                                </li>
+                                {% elif hazard == "Sea Level Rise" %}
+                                <li class="nav-item">
+                                    <a class="nav-link custom-tab-link" id="sea-level-rise-map-tab" data-bs-toggle="tab" href="#sea-map" role="tab" aria-controls="map-content" aria-selected="false">
+                                        Sea Level Rise Exposure Map
+                                    </a>
+                                </li>
+                                {% elif hazard == "Flood" %}
+                                <li class="nav-item">
+                                    <a class="nav-link custom-tab-link" id="flood-exposure-map-tab" data-bs-toggle="tab" href="#flood-map" role="tab" aria-controls="map-content" aria-selected="false">
+                                        Flood Exposure Map
+                                    </a>
+                                </li>
+                                {% elif hazard == "Water Stress" %}
+                                <li class="nav-item">
+                                    <a class="nav-link custom-tab-link" id="water-stress-map-tab" data-bs-toggle="tab" href="#water-map" role="tab" aria-controls="map-content" aria-selected="false">
+                                        Water Stress Exposure Map
+                                    </a>
+                                </li>
+                                {% elif hazard == "Tropical Cyclones" %}
+                                <li class="nav-item">
+                                    <a class="nav-link custom-tab-link" id="tropical-cyclone-map-tab" data-bs-toggle="tab" href="#cyclone-map" role="tab" aria-controls="map-content" aria-selected="false">
+                                        Tropical Cyclone Exposure Map
+                                    </a>
+                                </li>
+                                {% endif %}
+                            {% endfor %}
+                        </ul>
+
+                        <!-- Tab Content -->
+                        <div class="tab-content mt-3" id="hazardTabsContent">
+                            <!-- Facility Locations Table Tab -->
+                            <div class="tab-pane fade show active" id="table-content" role="tabpanel" aria-labelledby="table-tab">
+                                <!-- Table Controls -->
+                                <div class="table-controls">
+                                    <div class="table-info">
+                                        <span id="table-info-text">Loading data...</span>
+                                    </div>
+                                    <div class="btn-group">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="refresh-data">
+                                            <i class="fas fa-sync-alt"></i> Refresh
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="export-excel-btn">
+                                            <i class="fas fa-file-excel"></i> Export
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="toggle-virtual-scroll">
+                                            <i class="fas fa-list"></i> Virtual Scroll
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Styled Table with fallback support -->
+                                <div class="table-responsive">
+                                    <table id="hazard-data-table" class="table custom-table">
+                                        <thead>
+                                            <!-- Grouping header row -->
+                                            <tr class="group-header">
+                                                {% for group, count in groups.items %}
+                                                    {% if count > 0 %}
+                                                        <th colspan="{{ count }}" class="text-center">
+                                                            {% if group == "Facility Information" %}
+                                                                Asset Information
+                                                            {% else %}
+                                                                {{ group }}
+                                                            {% endif %}
+                                                        </th>
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </tr>
+                                            <tr class="sub-group-header">
+                                                <!-- This will be populated dynamically by JavaScript -->
+                                            </tr>
+                                            <tr class="custom-table-header">
+                                                {% for column in columns %}
+                                                    <th data-column-name="{{ column }}">
+                                                        {% if column == "Facility" %}
+                                                            Asset
+                                                        {% elif column == "Asset Archetype" %}
+                                                            Asset Archetype
+                                                        {% else %}
+                                                            {{ column }}
+                                                        {% endif %}
+                                                    </th>
+                                                {% endfor %}
+                                            </tr>
+                                        </thead>
+
+                                        <tbody>
+                                            {% if data %}
+                                                {% for row in data %}
+                                                    <tr class="custom-table-row">
+                                                        {% for key in columns %}
+                                                            {% with value=row|get_item:key %}
+                                                            <td data-column="{{ key }}" data-row="{{ forloop.parentloop.counter0 }}" data-original-value="{{ value }}">
+                                                                {% if key == "Asset Archetype" and value != "N/A" %}
+                                                                    <span class="badge" style="background-color: #F1D500; color: #000; font-weight: 600;">{{ value }}</span>
+                                                                {% elif "Water Stress Exposure" in key and value != "N/A" %}
+                                                                    {% with val=value|to_float %}
+                                                                        {% if val < 10 %}
+                                                                            <span style="color: green; font-weight: bold;">{{ value }}</span>
+                                                                        {% elif val >= 10 and val <= 30 %}
+                                                                            <span style="color: orange; font-weight: bold;">{{ value }}</span>
+                                                                        {% elif val > 30 %}
+                                                                            <span style="color: red; font-weight: bold;">{{ value }}</span>
+                                                                        {% else %}
+                                                                            {{ value }}
+                                                                        {% endif %}
+                                                                    {% endwith %}
+                                                                {% else %}
+                                                                    {{ value }}
+                                                                {% endif %}
+                                                            </td>
+                                                            {% endwith %}
+                                                        {% endfor %}
+                                                    </tr>
+                                                {% endfor %}
+                                            {% else %}
+                                                <tr>
+                                                    <td colspan="{{ columns|length }}" class="text-center text-muted">
+                                                        No data available
+                                                    </td>
+                                                </tr>
+                                            {% endif %}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <!-- Progressive loading indicator -->
+                                <div id="progressive-loader" class="progressive-loader" style="display: none;">
+                                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                                    Loading more data...
+                                </div>
+
+                                <!-- Legend -->
+                                <div class="d-flex justify-content-between align-items-center mt-3">
+                                    <ul class="legend d-flex" style="list-style: none; padding: 0; margin: 0; align-items: center;">
+                                        <li class="low" style="display: flex; align-items: center; margin-right: 20px;">
+                                            <span style="display: inline-block; width: 16px; height: 16px; background-color: #28a745; border-radius: 50%; margin-right: 10px; box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);"></span>
+                                            <span style="font-size: 14px; font-weight: 500; color: #495057;">Low Exposure</span>
+                                        </li>
+                                        <li class="medium" style="display: flex; align-items: center; margin-right: 20px;">
+                                            <span style="display: inline-block; width: 16px; height: 16px; background-color: #fd7e14; border-radius: 50%; margin-right: 10px; box-shadow: 0 2px 4px rgba(253, 126, 20, 0.3);"></span>
+                                            <span style="font-size: 14px; font-weight: 500; color: #495057;">Medium Exposure</span>
+                                        </li>
+                                        <li class="high" style="display: flex; align-items: center;">
+                                            <span style="display: inline-block; width: 16px; height: 16px; background-color: #dc3545; border-radius: 50%; margin-right: 10px; box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3);"></span>
+                                            <span style="font-size: 14px; font-weight: 500; color: #495057;">High Exposure</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <!-- Override Cell Modal -->
+                            <div class="modal fade" id="overrideModal" tabindex="-1" aria-hidden="true">
+                                <div class="modal-dialog">
+                                    <form id="override-form" class="modal-content" enctype="multipart/form-data">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title">Override Value</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                        </div>
+
+                                        <div class="modal-body">
+                                            <div class="mb-3">
+                                                <label class="form-label"><strong>Specific Asset</strong></label>
+                                                <input type="text" id="override-facility" class="form-control" readonly>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label"><strong>Climate Hazard Field</strong></label>
+                                                <input type="text" id="override-field" class="form-control" readonly>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label"><strong>Override Value</strong></label>
+                                                <input type="text" id="override-value" class="form-control">
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label"><strong>Reason/Explanation</strong></label>
+                                                <textarea id="override-reason" class="form-control"></textarea>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label"><strong>Upload Supporting Documents</strong></label>
+                                                <input type="file" id="override-file" class="form-control" accept="image/png, image/jpeg">
+                                            </div>
+
+                                            <div class="modal-footer">
+                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                                <button type="submit" class="btn btn-primary">Submit</button>
+                                            </div>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <!-- Individual Hazard Map Tabs -->
+                            {% for hazard in selected_hazards %}
+                                {% if hazard == "Heat" %}
+                                <div class="tab-pane fade text-center" id="heat-map" role="tabpanel" aria-labelledby="heat-exposure-map-tab">
+                                    <h2>Heat Exposure Map</h2>
+                                    <div id="heat-map-content">
+                                        <div class="loading-spinner">
+                                            <div class="spinner-border text-primary" role="status">
+                                                <span class="visually-hidden">Loading map...</span>
+                                            </div>
+                                            <div class="mt-2">Loading heat exposure map...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% elif hazard == "Sea Level Rise" %}
+                                <div class="tab-pane fade text-center" id="sea-map" role="tabpanel" aria-labelledby="sea-level-rise-map-tab">
+                                    <h2>Sea Level Rise Exposure Map</h2>
+                                    <div id="sea-map-content">
+                                        <div class="loading-spinner">
+                                            <div class="spinner-border text-primary" role="status">
+                                                <span class="visually-hidden">Loading map...</span>
+                                            </div>
+                                            <div class="mt-2">Loading sea level rise exposure map...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% elif hazard == "Flood" %}
+                                <div class="tab-pane fade text-center" id="flood-map" role="tabpanel" aria-labelledby="flood-exposure-map-tab">
+                                    <h2>Flood Exposure Map</h2>
+                                    <div id="flood-map-content">
+                                        <div class="loading-spinner">
+                                            <div class="spinner-border text-primary" role="status">
+                                                <span class="visually-hidden">Loading map...</span>
+                                            </div>
+                                            <div class="mt-2">Loading flood exposure map...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% elif hazard == "Water Stress" %}
+                                <div class="tab-pane fade text-center" id="water-map" role="tabpanel" aria-labelledby="water-stress-map-tab">
+                                    <h2>Water Stress Exposure Map</h2>
+                                    <div id="water-map-content">
+                                        <div class="loading-spinner">
+                                            <div class="spinner-border text-primary" role="status">
+                                                <span class="visually-hidden">Loading map...</span>
+                                            </div>
+                                            <div class="mt-2">Loading water stress exposure map...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% elif hazard == "Tropical Cyclones" %}
+                                <div class="tab-pane fade text-center" id="cyclone-map" role="tabpanel" aria-labelledby="tropical-cyclone-map-tab">
+                                    <h2>Tropical Cyclone Exposure Map</h2>
+                                    <div id="cyclone-map-content">
+                                        <div class="loading-spinner">
+                                            <div class="spinner-border text-primary" role="status">
+                                                <span class="visually-hidden">Loading map...</span>
+                                            </div>
+                                            <div class="mt-2">Loading tropical cyclone exposure map...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Navigation buttons -->
+<div class="row mt-4 mb-5">
+    <div class="col-12 d-flex justify-content-between">
+        <div class="d-flex gap-2">
+            <a href="{% url 'climate_hazards_analysis_v2:select_hazards' %}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left me-2"></i> Back to Select Hazards and Scenarios
+            </a>
+            <a href="{% url 'climate_hazards_analysis_v2:view_map' %}" class="btn btn-primary">
+                <i class="fas fa-arrow-left me-2"></i> Return to Upload Asset Data
+            </a>
+        </div>
+        <div>
+            <a href="#" class="btn btn-warning btn-lg" onclick="proceedToSensitivityParameters()">
+                <strong>Proceed to Adjust Sensitivity Thresholds</strong>
+                <i class="fas fa-arrow-right ms-2"></i>
+            </a>
+        </div>
+    </div>
+</div>
+</div>
+
+<!-- Resilient JavaScript modules -->
+<script src="{% static 'js/resilient-init.js' %}"></script>
+<script src="{% static 'js/progressive-loader.js' %}"></script>
+<script src="{% static 'js/resilient-ajax.js' %}"></script>
+<script src="{% static 'js/state-manager.js' %}"></script>
+
+<!-- Include DataTables CSS & JS with fallbacks -->
+<link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
+<link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.3.6/css/buttons.dataTables.min.css">
+<link rel="stylesheet" href="https://cdn.datatables.net/fixedcolumns/4.2.2/css/fixedColumns.dataTables.min.css">
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>window.jQuery || document.write('<script src="{% static "js/jquery-3.6.0.min.js" %}"><\\/script>')</script>
+<script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+<script>if (!window.jQuery || !$.fn.DataTable) document.write('<script src="{% static "js/jquery.dataTables.min.js" %}"><\\/script>')</script>
+
+<script>
+// Make data available to JavaScript modules
+window.tableData = {{ data|safe }};
+window.tableColumns = {{ columns|safe }};
+window.tableGroups = {{ groups|safe }};
+window.selectedHazards = {{ selected_hazards|safe }};
+
+// Global error tracking
+window.errorDetails = {
+    initializationErrors: [],
+    runtimeErrors: [],
+    networkErrors: []
+};
+
+// Error tracking function
+function trackError(category, error, context = {}) {
+    const errorEntry = {
+        timestamp: new Date().toISOString(),
+        message: error.message || error,
+        stack: error.stack,
+        context: context,
+        userAgent: navigator.userAgent,
+        url: window.location.href
+    };
+
+    window.errorDetails[category].push(errorEntry);
+    console.error(`[${category}]`, errorEntry);
+
+    // Keep only last 50 errors per category
+    if (window.errorDetails[category].length > 50) {
+        window.errorDetails[category] = window.errorDetails[category].slice(-50);
+    }
+}
+
+// Retry initialization function
+function retryInitialization() {
+    const errorFallback = document.getElementById('error-fallback');
+    const loadingOverlay = document.getElementById('loading-overlay');
+
+    errorFallback.style.display = 'none';
+    loadingOverlay.style.display = 'flex';
+
+    // Clear error details
+    window.errorDetails.initializationErrors = [];
+
+    // Attempt re-initialization
+    setTimeout(() => {
+        if (window.SafeInitializationManager) {
+            const manager = new window.SafeInitializationManager();
+            manager.initialize()
+                .then(() => {
+                    loadingOverlay.style.display = 'none';
+                })
+                .catch(error => {
+                    trackError('initializationErrors', error);
+                    showErrorPage(error);
+                });
+        }
+    }, 1000);
+}
+
+// Load basic version function
+function loadBasicVersion() {
+    const errorFallback = document.getElementById('error-fallback');
+    errorFallback.style.display = 'none';
+
+    // Create basic table functionality
+    createBasicTable();
+
+    // Hide loading overlay if visible
+    const loadingOverlay = document.getElementById('loading-overlay');
+    loadingOverlay.style.display = 'none';
+}
+
+function createBasicTable() {
+    const table = document.getElementById('hazard-data-table');
+    if (!table) return;
+
+    // Remove virtual scrolling wrapper if present
+    const virtualWrapper = table.closest('.virtual-scroll-wrapper');
+    if (virtualWrapper) {
+        const parent = virtualWrapper.parentNode;
+        parent.appendChild(table);
+        parent.removeChild(virtualWrapper);
+    }
+
+    // Show table
+    table.style.display = 'table';
+
+    // Add basic sorting
+    const headers = table.querySelectorAll('thead th');
+    headers.forEach((header, index) => {
+        header.classList.add('sortable');
+        header.addEventListener('click', () => basicSort(table, index));
+    });
+
+    console.log('Basic table functionality enabled');
+}
+
+function basicSort(table, columnIndex) {
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const isAscending = !table.querySelector(`th:nth-child(${columnIndex + 1})`).classList.contains('sort-desc');
+
+    rows.sort((a, b) => {
+        const aText = a.children[columnIndex].textContent.trim();
+        const bText = b.children[columnIndex].textContent.trim();
+
+        const aNum = parseFloat(aText.replace(/[^\d.-]/g, ''));
+        const bNum = parseFloat(bText.replace(/[^\d.-]/g, ''));
+
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+            return isAscending ? aNum - bNum : bNum - aNum;
+        }
+
+        return isAscending ? aText.localeCompare(bText) : bText.localeCompare(aText);
+    });
+
+    // Update header classes
+    const headers = table.querySelectorAll('thead th');
+    headers.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+    headers[columnIndex].classList.add(isAscending ? 'sort-asc' : 'sort-desc');
+
+    // Reorder rows
+    rows.forEach(row => tbody.appendChild(row));
+}
+
+// Export error details function
+function exportErrorDetails() {
+    const errorData = {
+        timestamp: new Date().toISOString(),
+        url: window.location.href,
+        userAgent: navigator.userAgent,
+        errors: window.errorDetails,
+        sessionData: {
+            tableDataLength: window.tableData ? window.tableData.length : 0,
+            columnsLength: window.tableColumns ? window.tableColumns.length : 0,
+            selectedHazards: window.selectedHazards
+        }
+    };
+
+    const blob = new Blob([JSON.stringify(errorData, null, 2)], {
+        type: 'application/json'
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `climaterisk-error-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// Show error page function
+function showErrorPage(error) {
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const errorFallback = document.getElementById('error-fallback');
+    const errorDetails = document.getElementById('error-details');
+
+    loadingOverlay.style.display = 'none';
+    errorFallback.style.display = 'block';
+
+    // Update error details
+    if (errorDetails) {
+        errorDetails.innerHTML = `
+            <div class="mt-2">
+                <strong>Error:</strong> ${error.message || 'Unknown error'}<br>
+                <strong>Time:</strong> ${new Date().toLocaleString()}<br>
+                <strong>Browser:</strong> ${navigator.userAgent}<br>
+                <button class="btn btn-sm btn-outline-secondary mt-2" onclick="navigator.clipboard.writeText('${error.stack || error.message}')">
+                    Copy Error Details
+                </button>
+            </div>
+        `;
+    }
+
+    trackError('initializationErrors', error, { page: 'results' });
+}
+
+// Enhanced page initialization
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM Content Loaded - starting resilient initialization...');
+
+    // Show loading overlay
+    const loadingOverlay = document.getElementById('loading-overlay');
+    loadingOverlay.style.display = 'flex';
+
+    // Initialize resilient components
+    try {
+        // Check for data availability
+        if (!window.tableData || !window.tableColumns) {
+            throw new Error('Required data not available');
+        }
+
+        // Update table info
+        const tableInfo = document.getElementById('table-info-text');
+        if (tableInfo) {
+            tableInfo.textContent = `Showing ${window.tableData.length} assets`;
+        }
+
+        // Auto-hide loading overlay after timeout
+        setTimeout(() => {
+            loadingOverlay.style.display = 'none';
+        }, 5000);
+
+    } catch (error) {
+        trackError('initializationErrors', error);
+        showErrorPage(error);
+    }
+
+    // Setup refresh button
+    const refreshBtn = document.getElementById('refresh-data');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            location.reload();
+        });
+    }
+
+    // Setup export button
+    const exportBtn = document.getElementById('export-excel-btn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', () => {
+            try {
+                // Basic CSV export
+                const csv = convertToCSV(window.tableData, window.tableColumns);
+                downloadCSV(csv, 'climate-hazards-results.csv');
+            } catch (error) {
+                trackError('runtimeErrors', error, { action: 'export' });
+                alert('Export Failed: ' + error.message);
+            }
+        });
+    }
+
+    // Setup toggle virtual scroll button
+    const toggleBtn = document.getElementById('toggle-virtual-scroll');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            // Toggle between virtual scroll and regular table
+            const table = document.getElementById('hazard-data-table');
+            if (table.closest('.virtual-scroll-wrapper')) {
+                loadBasicVersion();
+                toggleBtn.innerHTML = '<i class="fas fa-list"></i> Virtual Scroll';
+            } else {
+                // Enable virtual scroll if ProgressiveTableLoader is available
+                if (window.ProgressiveTableLoader) {
+                    const loader = new window.ProgressiveTableLoader();
+                    loader.initialize(table.parentElement, window.tableData);
+                    toggleBtn.innerHTML = '<i class="fas fa-table"></i> Regular Table';
+                }
+            }
+        });
+    }
+
+    // Proceed to sensitivity parameters function
+    window.proceedToSensitivityParameters = function() {
+        // Save state before navigation
+        if (window.stateManager) {
+            window.stateManager.saveState(true);
+        }
+        window.location.href = "{% url 'climate_hazards_analysis_v2:sensitivity_parameters' %}";
+    };
+});
+
+// Utility functions
+function convertToCSV(data, columns) {
+    if (!data || !columns) return '';
+
+    const headers = columns.join(',');
+    const rows = data.map(row => {
+        return columns.map(col => {
+            const value = row[col] || '';
+            return `"${String(value).replace(/"/g, '""')}"`;
+        }).join(',');
+    });
+
+    return [headers, ...rows].join('\n');
+}
+
+function downloadCSV(csv, filename) {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// Initialize step highlighting
+function highlightSteps(currentStep, completedSteps = []) {
+    const steps = document.querySelectorAll('.step-item');
+    steps.forEach((step, index) => {
+        const circle = step.querySelector('.step-circle');
+        const label = step.querySelector('.step-label');
+        if (!circle || !label) return;
+
+        const stepNumber = index + 1;
+
+        if (stepNumber === currentStep) {
+            // Current step - yellow highlight
+            circle.style.backgroundColor = '#F1D500';
+            circle.style.color = '#000';
+            label.style.color = '#000';
+        } else if (completedSteps.includes(stepNumber)) {
+            // Completed step - green highlight
+            circle.style.backgroundColor = '#28a745';
+            circle.style.color = '#fff';
+            label.style.color = '#28a745';
+        } else {
+            // Default/unvisited step
+            circle.style.backgroundColor = '#e9ecef';
+            circle.style.color = '#6c757d';
+            label.style.color = '#6c757d';
+        }
+    });
+}
+
+// Initialize step highlighting on page load
+document.addEventListener('DOMContentLoaded', function() {
+    const path = window.location.pathname;
+    let currentStep = 3; // Results page is step 3
+    let completedSteps = [1, 2]; // Upload and select hazards are completed
+
+    highlightSteps(currentStep, completedSteps);
+});
+
+</script>
+
+{% endblock %}

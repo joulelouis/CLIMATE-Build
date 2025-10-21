@@ -1,0 +1,510 @@
+/**
+ * Enhanced Polygon Drawing System Styles
+ * Provides modern, responsive styling for the polygon drawing interface
+ */
+
+/* Main Control Panel Styles */
+.enhanced-drawing-controls {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    min-width: 280px;
+    max-width: 320px;
+}
+
+.enhanced-drawing-controls::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+    border-radius: 12px;
+    pointer-events: none;
+}
+
+/* Button Group Styles */
+.enhanced-drawing-controls .btn-group {
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.enhanced-drawing-controls .btn {
+    border: none;
+    background: white;
+    color: #6c757d;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.enhanced-drawing-controls .btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.enhanced-drawing-controls .btn.btn-outline-primary:hover {
+    background: #007bff;
+    color: white;
+}
+
+.enhanced-drawing-controls .btn.btn-outline-warning:hover {
+    background: #ffc107;
+    color: #212529;
+}
+
+.enhanced-drawing-controls .btn.btn-outline-danger:hover {
+    background: #dc3545;
+    color: white;
+}
+
+.enhanced-drawing-controls .btn.btn-primary {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+    color: white;
+    box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+}
+
+.enhanced-drawing-controls .btn.btn-warning {
+    background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
+    color: #212529;
+    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3);
+}
+
+.enhanced-drawing-controls .btn.btn-danger {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+}
+
+/* Form Switch Styles */
+.enhanced-drawing-controls .form-check-input {
+    width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    background-color: #e9ecef;
+    border: 2px solid #dee2e6;
+    transition: all 0.2s ease;
+}
+
+.enhanced-drawing-controls .form-check-input:checked {
+    background-color: #007bff;
+    border-color: #007bff;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='white'/%3e%3c/svg%3e");
+}
+
+.enhanced-drawing-controls .form-check-input:focus {
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    border-color: #007bff;
+}
+
+.enhanced-drawing-controls .form-check-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #495057;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* Coordinate Display Styles */
+.coordinate-display .coordinate-info,
+.area-display .area-info {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.coordinate-display .coordinate-info {
+    background: linear-gradient(135deg, rgba(52, 58, 64, 0.9) 0%, rgba(33, 37, 41, 0.9) 100%);
+}
+
+.area-display .area-info {
+    background: linear-gradient(135deg, rgba(23, 162, 184, 0.9) 0%, rgba(20, 145, 162, 0.9) 100%);
+}
+
+/* Status Display Styles */
+.drawing-status .status-info {
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.drawing-status .status-info {
+    background: linear-gradient(135deg, rgba(40, 167, 69, 0.9) 0%, rgba(34, 139, 34, 0.9) 100%);
+}
+
+.drawing-status .status-info.warning {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.9) 0%, rgba(240, 173, 78, 0.9) 100%);
+}
+
+.drawing-status .status-info.error {
+    background: linear-gradient(135deg, rgba(220, 53, 69, 0.9) 0%, rgba(200, 35, 51, 0.9) 100%);
+}
+
+/* Tooltip Styles */
+.drawing-tooltip .tooltip-content {
+    backdrop-filter: blur(10px);
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(0, 123, 255, 0.3);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    font-weight: 500;
+    color: #495057;
+}
+
+/* Temp Point Marker Styles */
+.temp-point-marker {
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.2);
+        opacity: 0.8;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* Help Panel Styles */
+#drawing-help .card {
+    border: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+#drawing-help ul {
+    list-style: none;
+    padding: 0;
+}
+
+#drawing-help li {
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+#drawing-help li:last-child {
+    border-bottom: none;
+}
+
+#drawing-help kbd {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Loading and Progress Indicators */
+.drawing-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1002;
+}
+
+.drawing-loading .spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top: 4px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Error and Success Messages */
+.drawing-message {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1003;
+    min-width: 300px;
+    max-width: 500px;
+}
+
+.drawing-message.success {
+    background: linear-gradient(135deg, rgba(40, 167, 69, 0.95) 0%, rgba(34, 139, 34, 0.95) 100%);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.drawing-message.error {
+    background: linear-gradient(135deg, rgba(220, 53, 69, 0.95) 0%, rgba(200, 35, 51, 0.95) 100%);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.drawing-message.warning {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.95) 0%, rgba(240, 173, 78, 0.95) 100%);
+    color: #212529;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Mobile Responsive Styles */
+@media (max-width: 768px) {
+    .enhanced-drawing-controls {
+        position: fixed !important;
+        bottom: 20px !important;
+        top: auto !important;
+        left: 50% !important;
+        right: auto !important;
+        transform: translateX(-50%) !important;
+        width: 90% !important;
+        max-width: none !important;
+        z-index: 1000 !important;
+        margin: 0 !important;
+    }
+
+    .enhanced-drawing-controls .btn span.d-none.d-md-inline {
+        display: none !important;
+    }
+
+    .coordinate-display .coordinate-info,
+    .area-display .area-info,
+    .drawing-status .status-info {
+        font-size: 10px !important;
+        padding: 6px 10px !important;
+        border-radius: 6px !important;
+    }
+
+    .coordinate-display .coordinate-info {
+        top: 10px !important;
+        right: 10px !important;
+    }
+
+    .area-display .area-info {
+        top: 50px !important;
+        right: 10px !important;
+    }
+
+    .drawing-status .status-info {
+        bottom: 80px !important;
+        left: 10px !important;
+        right: 10px !important;
+    }
+
+    .enhanced-drawing-controls .form-check-label {
+        font-size: 0.8rem !important;
+    }
+
+    .enhanced-drawing-controls h6 {
+        font-size: 0.9rem !important;
+    }
+
+    #drawing-help ul {
+        font-size: 0.8rem !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .enhanced-drawing-controls {
+        width: 95% !important;
+        transform: translateX(-50%) scale(0.95) !important;
+    }
+
+    .enhanced-drawing-controls .btn {
+        font-size: 0.75rem !important;
+        padding: 8px 6px !important;
+    }
+
+    .enhanced-drawing-controls .btn i {
+        font-size: 0.8rem !important;
+    }
+
+    .coordinate-display .coordinate-info,
+    .area-display .area-info {
+        font-size: 9px !important;
+        padding: 4px 8px !important;
+    }
+
+    .drawing-tooltip .tooltip-content {
+        font-size: 10px !important;
+        padding: 4px 8px !important;
+    }
+}
+
+/* High DPI/Retina Display Support */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    .enhanced-drawing-controls {
+        border-width: 0.5px;
+    }
+
+    .enhanced-drawing-controls .form-check-input {
+        border-width: 1px;
+    }
+
+    .coordinate-display .coordinate-info,
+    .area-display .area-info,
+    .drawing-status .status-info {
+        border-width: 0.5px;
+    }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+    .enhanced-drawing-controls {
+        background: rgba(33, 37, 41, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .enhanced-drawing-controls h6 {
+        color: #f8f9fa;
+    }
+
+    .enhanced-drawing-controls .btn {
+        background: rgba(52, 58, 64, 0.9);
+        color: #f8f9fa;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .enhanced-drawing-controls .btn:hover {
+        background: rgba(73, 80, 87, 0.9);
+    }
+
+    .enhanced-drawing-controls .form-check-label {
+        color: #f8f9fa;
+    }
+
+    #drawing-help .card {
+        background: rgba(52, 58, 64, 0.9);
+        color: #f8f9fa;
+    }
+
+    #drawing-help li {
+        border-bottom-color: rgba(255, 255, 255, 0.1);
+    }
+
+    #drawing-help kbd {
+        background: rgba(73, 80, 87, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: #f8f9fa;
+    }
+}
+
+/* Accessibility Improvements */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Focus styles for keyboard navigation */
+.enhanced-drawing-controls *:focus {
+    outline: 2px solid #007bff;
+    outline-offset: 2px;
+}
+
+.enhanced-drawing-controls .btn:focus {
+    outline: 2px solid rgba(255, 255, 255, 0.8);
+    outline-offset: 1px;
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .enhanced-drawing-controls .btn,
+    .enhanced-drawing-controls .form-check-input,
+    .temp-point-marker,
+    .drawing-loading .spinner {
+        animation: none;
+        transition: none;
+    }
+
+    .enhanced-drawing-controls .btn:hover {
+        transform: none;
+    }
+}
+
+/* Print styles */
+@media print {
+    .enhanced-drawing-controls,
+    .coordinate-display,
+    .area-display,
+    .drawing-status,
+    .drawing-tooltip {
+        display: none !important;
+    }
+}
+
+/* Animation Classes */
+.fade-in {
+    animation: fadeIn 0.3s ease-in;
+}
+
+.fade-out {
+    animation: fadeOut 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-10px); }
+}
+
+.slide-up {
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+}
+
+/* Utility Classes */
+.rounded-lg {
+    border-radius: 12px !important;
+}
+
+.shadow-enhanced {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important;
+}
+
+.backdrop-blur {
+    backdrop-filter: blur(10px) !important;
+}
+
+/* Mobile Touch Targets */
+@media (pointer: coarse) {
+    .enhanced-drawing-controls .btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    .enhanced-drawing-controls .form-check-input {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}

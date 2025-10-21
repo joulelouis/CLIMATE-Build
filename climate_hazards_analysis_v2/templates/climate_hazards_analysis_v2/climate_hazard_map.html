@@ -1,19 +1,24 @@
 {% load static %}
 
+
 <!-- Mapbox GL Draw CSS -->
 <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.css" type="text/css">
 
+<!-- Font Awesome for enhanced icons -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
 <!-- Map Container -->
 <div id="climate-hazard-map" style="width: 100%; height: 600px; position: relative;">
-  <!-- Drawing Mode Toggle Button -->
-  <div id="draw-polygon-controls" style="position: absolute; top: 10px; left: 10px; z-index: 1000;">
-    <button id="toggle-draw-mode" class="btn btn-warning btn-sm shadow" onclick="toggleDrawMode()">
+  <!-- Draw Polygon Button -->
+  <div style="position: absolute; top: 10px; left: 10px; z-index: 1000;">
+    <button id="toggle-draw-mode" class="btn btn-warning" onclick="checkAndToggleDrawMode()" style="box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
       <i class="fas fa-draw-polygon"></i> Draw Polygon Asset
     </button>
   </div>
 
+  
   <!-- Drawing Instructions (shown during draw mode) -->
-  <div id="draw-instructions" style="position: absolute; top: 50px; left: 10px; z-index: 1000; display: none; background: rgba(255, 255, 255, 0.95); padding: 10px 15px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+  <div id="draw-instructions" style="position: absolute; top: 110px; left: 10px; z-index: 1000; display: none; background: rgba(255, 255, 255, 0.95); padding: 10px 15px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
     <h6 class="mb-2" style="font-size: 14px; font-weight: bold;">Drawing Polygon:</h6>
     <ul class="mb-0" style="font-size: 12px; padding-left: 20px; margin: 0;">
       <li>Click on map to add points</li>
@@ -121,8 +126,16 @@
           </div>
           <div class="mb-3">
             <label for="polygon-asset-archetype" class="form-label">Asset Archetype</label>
-            <input type="text" class="form-control" id="polygon-asset-archetype" placeholder="Enter archetype (optional)" value="default archetype">
-            <small class="form-text text-muted">Default: "default archetype"</small>
+            <select class="form-select" id="polygon-asset-archetype">
+              <option value="default archetype" selected>Default Archetype</option>
+              <option value="building">Building</option>
+              <option value="infrastructure">Infrastructure</option>
+              <option value="residential">Residential</option>
+              <option value="commercial">Commercial</option>
+              <option value="industrial">Industrial</option>
+              <option value="agricultural">Agricultural</option>
+            </select>
+            <small class="form-text text-muted">Select the asset archetype from the dropdown</small>
           </div>
           <div class="mb-3">
             <label class="form-label">Centroid Coordinates</label>
@@ -132,7 +145,7 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="cancelPolygonAsset()">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="confirmPolygonAsset()">Add Asset</button>
+        <button type="button" class="btn btn-primary" onclick="confirmPolygonAsset()">Apply</button>
       </div>
     </div>
   </div>
@@ -140,6 +153,10 @@
 
 <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+<!-- Polygon Drawing Component -->
+<script src="{% static 'js/polygon-draw-handler.js' %}"></script>
+
 
 <script>
 
@@ -191,6 +208,9 @@
 
     // When map loads, add base layers
     multiHazardMap.on('load', () => {
+      // Expose map variables to global scope
+      exposeMapVariables();
+
       // Add the Philippines GeoJSON source
       multiHazardMap.addSource('hazards-source', {
         type: 'geojson',
@@ -252,14 +272,66 @@
     });
   }
 
+  // Check dependencies and toggle drawing mode
+  function checkAndToggleDrawMode() {
+    console.log('checkAndToggleDrawMode called');
+
+    // Check if required libraries are loaded
+    if (typeof mapboxgl === 'undefined') {
+      console.error('Mapbox GL not loaded');
+      return;
+    }
+
+    if (typeof MapboxDraw === 'undefined') {
+      console.error('Mapbox Draw not loaded');
+      return;
+    }
+
+    if (typeof turf === 'undefined') {
+      console.error('Turf.js not loaded');
+      return;
+    }
+
+    // Check if map is initialized
+    if (!window.multiHazardMap) {
+      console.error('Map not initialized yet');
+      return;
+    }
+
+    // Check if draw control is initialized
+    if (!window.draw) {
+      console.error('Draw control not initialized');
+      return;
+    }
+
+    // All checks passed, proceed with toggle
+    toggleDrawMode();
+  }
+
   // Toggle drawing mode
   function toggleDrawMode() {
+    console.log('toggleDrawMode called, isDrawMode:', isDrawMode);
+
+    // Check if map and draw are initialized
+    if (!multiHazardMap) {
+      console.error('Map not initialized');
+      return;
+    }
+
+    if (!draw) {
+      console.error('Draw control not initialized');
+      return;
+    }
+
     isDrawMode = !isDrawMode;
+    console.log('New isDrawMode:', isDrawMode);
+
     const button = document.getElementById('toggle-draw-mode');
     const instructions = document.getElementById('draw-instructions');
 
     if (isDrawMode) {
       // Enable draw mode
+      console.log('Enabling draw mode...');
       draw.changeMode('draw_polygon');
       button.classList.remove('btn-warning');
       button.classList.add('btn-danger');
@@ -268,6 +340,7 @@
       // Show drawing instructions
       if (instructions) {
         instructions.style.display = 'block';
+        console.log('Showing drawing instructions');
       }
 
       // Hide add facility panel if visible
@@ -278,6 +351,7 @@
       }
     } else {
       // Disable draw mode
+      console.log('Disabling draw mode...');
       draw.changeMode('simple_select');
       button.classList.remove('btn-danger');
       button.classList.add('btn-warning');
@@ -368,7 +442,7 @@
   // Confirm adding a facility
   function confirmAddFacility() {
     if (!clickedLngLat) {
-      alert('No location selected. Please click on the map.');
+      alert('No Location Selected: Please click on the map to select a location.');
       return;
     }
 
@@ -383,12 +457,11 @@
       lng: clickedLngLat[0]
     };
 
-    // Send to server
+    // Send to server (no CSRF token required for this project)
     fetch('/climate-hazards-analysis-v2/api/add-facility/', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken')
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(facilityData)
     })
@@ -414,29 +487,69 @@
         // Reset the form
         document.getElementById('facility-name').value = '';
       } else {
-        alert('Error adding facility: ' + data.error);
+        alert('Error Adding Facility: ' + (data.error || 'Unknown error occurred while adding facility.'));
       }
     })
     .catch(error => {
       console.error('Error:', error);
-      alert('Error adding facility');
+      alert('Error Adding Facility: An unexpected error occurred while adding the facility. Please try again.');
     });
   }
 
   // Show polygon asset modal
   function showPolygonAssetModal(lat, lng) {
-    // Update coordinates display
-    document.getElementById('polygon-centroid-coordinates').textContent =
-      `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
+    try {
+      console.log('Showing polygon asset modal with coordinates:', { lat, lng });
 
-    // Reset form
-    document.getElementById('polygon-asset-name').value = '';
-    document.getElementById('polygon-asset-archetype').value = 'default archetype';
-    document.getElementById('polygon-asset-name').classList.remove('is-invalid');
+      // Update coordinates display
+      const coordsElement = document.getElementById('polygon-centroid-coordinates');
+      if (coordsElement) {
+        coordsElement.textContent = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
+      }
 
-    // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('polygonAssetModal'));
-    modal.show();
+      // Reset form
+      const nameInput = document.getElementById('polygon-asset-name');
+      const archetypeSelect = document.getElementById('polygon-asset-archetype');
+
+      if (nameInput) {
+        nameInput.value = '';
+        nameInput.classList.remove('is-invalid');
+      }
+
+      if (archetypeSelect) {
+        archetypeSelect.value = 'default archetype';
+      }
+
+      // Add event listener for form submission if not already added
+      const form = document.getElementById('polygon-asset-form');
+      if (form && !form.hasAttribute('data-handler-attached')) {
+        form.setAttribute('data-handler-attached', 'true');
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          console.log('Form submitted, calling confirmPolygonAsset...');
+          confirmPolygonAsset();
+        });
+      }
+
+      // Show modal
+      const modalElement = document.getElementById('polygonAssetModal');
+      if (modalElement) {
+        // Ensure any existing modal instance is disposed
+        const existingModal = bootstrap.Modal.getInstance(modalElement);
+        if (existingModal) {
+          existingModal.dispose();
+        }
+
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+        console.log('Modal should be shown now');
+      } else {
+        console.error('Modal element not found');
+      }
+    } catch (error) {
+      console.error('Error showing polygon asset modal:', error);
+      alert('Error: Could not open the asset modal. Please try again.');
+    }
   }
 
   // Cancel polygon asset
@@ -453,7 +566,7 @@
   // Confirm polygon asset
   function confirmPolygonAsset() {
     const assetName = document.getElementById('polygon-asset-name').value.trim();
-    const assetArchetype = document.getElementById('polygon-asset-archetype').value.trim() || 'default archetype';
+    const assetArchetype = document.getElementById('polygon-asset-archetype').value || 'default archetype';
 
     // Validate asset name
     if (!assetName) {
@@ -462,9 +575,15 @@
     }
 
     if (!drawnPolygonData) {
-      alert('No polygon data found. Please draw a polygon first.');
+      alert('No Polygon Drawn: Please draw a polygon on the map first.');
       return;
     }
+
+    // Disable submit button to prevent double submission
+    const submitBtn = document.querySelector('#polygonAssetModal .btn-primary');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Adding Asset...';
 
     // Create facility data with polygon geometry
     const facilityData = {
@@ -475,44 +594,52 @@
       geometry: drawnPolygonData.geometry
     };
 
-    // Send to server
-    fetch('/climate-hazards-analysis-v2/api/add-facility/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken')
-      },
-      body: JSON.stringify(facilityData)
-    })
-    .then(response => response.json())
-    .then(data => {
-      if (data.success) {
-        // Clear the drawing
-        draw.deleteAll();
+        // Send to server (no CSRF token required for this project)
+      fetch('/climate-hazards-analysis-v2/api/add-facility/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(facilityData)
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          // Clear the drawing
+          draw.deleteAll();
 
-        // Add the new facility marker with polygon
-        addFacilityMarker({
-          Facility: facilityData.name,
-          Archetype: facilityData.archetype,
-          Lat: facilityData.lat,
-          Long: facilityData.lng,
-          geometry: facilityData.geometry
-        });
+          // Add the new facility marker with polygon
+          addFacilityMarker({
+            Facility: facilityData.name,
+            Archetype: facilityData.archetype,
+            Lat: facilityData.lat,
+            Long: facilityData.lng,
+            geometry: facilityData.geometry
+          });
 
-        // Hide modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('polygonAssetModal'));
-        if (modal) modal.hide();
+          // Hide modal
+          const modal = bootstrap.Modal.getInstance(document.getElementById('polygonAssetModal'));
+          if (modal) modal.hide();
 
-        // Reset drawn polygon data
-        drawnPolygonData = null;
-      } else {
-        alert('Error adding asset: ' + data.error);
-      }
-    })
-    .catch(error => {
-      console.error('Error:', error);
-      alert('Error adding asset');
-    });
+          // Reset drawn polygon data
+          drawnPolygonData = null;
+
+          // Show success message
+          alert(`Success! Polygon asset "${facilityData.name}" has been added successfully.`);
+
+        } else {
+          alert('Error Adding Asset: ' + (data.error || 'Unknown error occurred.'));
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Error Adding Asset: An unexpected error occurred. Please try again.');
+      })
+      .finally(() => {
+        // Re-enable submit button
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+      });
   }
 
   
@@ -524,13 +651,13 @@ window.facilityPolygons = [];
 function addFacilityMarker(facility) {
   // Create marker element
   const el = baseBlueCircle.cloneNode(true);
-  
+
   // Create popup content for detailed sidebar
   let sidebarContent = `
     <h4><strong>${facility.Facility}</strong></h4>
     <p><strong>Coordinates:</strong> ${facility.Lat.toFixed(6)}, ${facility.Long.toFixed(6)}</p>
     ${facility.Archetype ? `<p><strong>Archetype:</strong> ${facility.Archetype}</p>` : ''}
-    ${facility.geometry ? `<p><span class="badge bg-info">Polygon Asset</span></p>` : ''}
+    ${facility.geometry || facility.AssetType === 'polygon' ? `<p><span class="badge bg-info">Polygon Asset</span></p>` : ''}
     <hr>
     <h5>Hazard Profile</h5>
     <div style="text-align: center; margin-bottom: 10px;">
@@ -599,37 +726,44 @@ function addFacilityMarker(facility) {
   window.facilityMarkers.push(marker);
 
   // Add polygon display if geometry is provided
-  if (facility.geometry) {
-    const sourceId = `facility-poly-${window.facilityPolygons.length}`;
-    multiHazardMap.addSource(sourceId, {
-      type: 'geojson',
-      data: {
-        type: 'Feature',
-        geometry: facility.geometry
-      }
-    });
+  if (facility.geometry || facility.AssetType === 'polygon') {
+    const polygonGeometry = facility.geometry || {
+      type: 'Polygon',
+      coordinates: facility.polygon_coordinates || [[]]
+    };
 
-    multiHazardMap.addLayer({
-      id: `${sourceId}-fill`,
-      type: 'fill',
-      source: sourceId,
-      paint: {
-        'fill-color': '#088',
-        'fill-opacity': 0.4
-      }
-    });
+    if (polygonGeometry && polygonGeometry.coordinates && polygonGeometry.coordinates[0].length > 0) {
+      const sourceId = `facility-poly-${window.facilityPolygons.length}`;
+      multiHazardMap.addSource(sourceId, {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: polygonGeometry
+        }
+      });
 
-    multiHazardMap.addLayer({
-      id: `${sourceId}-outline`,
-      type: 'line',
-      source: sourceId,
-      paint: {
-        'line-color': '#000',
-        'line-width': 2
-      }
-    });
+      multiHazardMap.addLayer({
+        id: `${sourceId}-fill`,
+        type: 'fill',
+        source: sourceId,
+        paint: {
+          'fill-color': '#007bff',
+          'fill-opacity': 0.4
+        }
+      });
 
-    window.facilityPolygons.push(sourceId);
+      multiHazardMap.addLayer({
+        id: `${sourceId}-outline`,
+        type: 'line',
+        source: sourceId,
+        paint: {
+          'line-color': '#000',
+          'line-width': 2
+        }
+      });
+
+      window.facilityPolygons.push(sourceId);
+    }
   }
   
   // Update proceed button visibility whenever markers are added
@@ -812,6 +946,17 @@ function loadFacilityData() {
       if (document.getElementById('climate-hazard-map')) initializeMultiHazardMap();
     });
   }
+
+// Expose map variables and functions to global scope for polygon handler
+function exposeMapVariables() {
+  window.multiHazardMap = multiHazardMap;
+  window.draw = draw;
+  window.isDrawMode = isDrawMode;
+  window.drawnPolygonData = drawnPolygonData;
+  window.toggleDrawMode = toggleDrawMode;
+  window.showPolygonAssetModal = showPolygonAssetModal;
+  window.turf = turf;
+}
   
 
 </script>

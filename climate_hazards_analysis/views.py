@@ -103,12 +103,14 @@ def climate_hazards_analysis(request):
         try:
             return render(request, 'error.html', {
                 'error': error_message,
-                'climate_hazards_fields': climate_hazards_fields  # Include fields in error response
+                'climate_hazards_fields': climate_hazards_fields,  # Include fields in error response
+                'groups': {}  # Empty groups for error case
             })
         except:
             return render(request, 'upload.html', {
                 'error': error_message,
-                'climate_hazards_fields': climate_hazards_fields  # Include fields in error response
+                'climate_hazards_fields': climate_hazards_fields,  # Include fields in error response
+                'groups': {}  # Empty groups for error case
             })
 
     # Get the path to the combined output CSV.
@@ -116,7 +118,8 @@ def climate_hazards_analysis(request):
     if not combined_csv_path or not os.path.exists(combined_csv_path):
         return render(request, 'upload.html', {
             'error': 'Combined CSV output not found.',
-            'climate_hazards_fields': climate_hazards_fields  # Include fields in error response
+            'climate_hazards_fields': climate_hazards_fields,  # Include fields in error response
+            'groups': {}  # Empty groups for error case
         })
 
     # Load the combined CSV file.
@@ -128,13 +131,66 @@ def climate_hazards_analysis(request):
     plot_path = result.get('plot_path')
     all_plots = result.get('all_plots', [])
 
+    # Create column groups for table header
+    groups = {}
+
+    # Base group - Facility Information
+    facility_cols = ['Facility', 'Lat', 'Long']
+    facility_count = sum(1 for col in facility_cols if col in columns)
+    if facility_count > 0:
+        groups['Facility Information'] = facility_count
+
+    # Create groups for each hazard type based on available columns
+    hazard_columns = {
+        'Flood': ['Flood Depth (meters)'],
+        'Water Stress': [
+            'Water Stress Exposure (%)',
+            'Water Stress Exposure 2030 (%) - Moderate Case',
+            'Water Stress Exposure 2050 (%) - Moderate Case',
+            'Water Stress Exposure 2030 (%) - Worst Case',
+            'Water Stress Exposure 2050 (%) - Worst Case'
+        ],
+        'Sea Level Rise': [
+            '2030 Sea Level Rise (meters) - Moderate Case',
+            '2040 Sea Level Rise (meters) - Moderate Case',
+            '2050 Sea Level Rise (meters) - Moderate Case',
+            '2030 Sea Level Rise (meters) - Worst Case',
+            '2040 Sea Level Rise (meters) - Worst Case',
+            '2050 Sea Level Rise (meters) - Worst Case'
+        ],
+        'Tropical Cyclones': [
+            'Extreme Windspeed 10 year Return Period (km/h)',
+            'Extreme Windspeed 20 year Return Period (km/h)',
+            'Extreme Windspeed 50 year Return Period (km/h)',
+            'Extreme Windspeed 100 year Return Period (km/h)'
+        ],
+        'Heat': [
+            'Days over 30° Celsius',
+            'Days over 33° Celsius',
+            'Days over 35° Celsius'
+        ],
+        'Storm Surge': [
+            'Storm Surge Flood Depth (meters)'
+        ],
+        'Rainfall Induced Landslide': [
+            'Rainfall-Induced Landslide (factor of safety)'
+        ]
+    }
+
+    # Add column groups for each hazard type that has columns in the data
+    for hazard, cols in hazard_columns.items():
+        count = sum(1 for col in cols if col in columns)
+        if count > 0:
+            groups[hazard] = count
+
     context = {
         'data': data,
         'columns': columns,
         'plot_path': plot_path,
         'all_plots': all_plots,
         'selected_dynamic_fields': selected_fields,
-        'climate_hazards_fields': climate_hazards_fields  # Add climate_hazards_fields to the context
+        'climate_hazards_fields': climate_hazards_fields,  # Add climate_hazards_fields to the context
+        'groups': groups  # Add column groups for table header
     }
 
     # Use the existing analysis template if available
@@ -162,7 +218,8 @@ def climate_hazards_analysis(request):
             'data': data,
             'columns': columns,
             'error': 'Analysis completed but display template not found.',
-            'climate_hazards_fields': climate_hazards_fields  # Include fields in basic result
+            'climate_hazards_fields': climate_hazards_fields,  # Include fields in basic result
+            'groups': groups  # Include groups even in fallback
         })
 
 def water_stress_mapbox_fetch(request):

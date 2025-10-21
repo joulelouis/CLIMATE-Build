@@ -1167,7 +1167,7 @@ function exportToExcel() {
         console.log('Excel file exported successfully');
     } catch (error) {
         console.error('Error exporting to Excel:', error);
-        alert('Error exporting to Excel. Please try again.');
+        alert('Export Failed: Error exporting to Excel. Please try again.');
     }
 }
 
@@ -1448,7 +1448,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // Export function for button
 window.SensitivityTable = {
     complete: function() {
-        alert("Sensitivity Analysis Complete!\n\nYou have successfully configured and applied sensitivity parameters.");
+        alert('Sensitivity Analysis Complete! You have successfully configured and applied sensitivity parameters.');
     }
 };
 </script>

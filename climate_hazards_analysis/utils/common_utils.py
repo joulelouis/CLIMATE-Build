@@ -315,6 +315,7 @@ def process_nan_values_in_dataframe(df: pd.DataFrame,
     Process NaN values in a dataframe with column-specific replacements.
 
     Consolidated from climate_hazards_analysis.py with enhanced configurability.
+    Enhanced to handle different data types appropriately, including pandas Int64 dtype.
 
     Args:
         df (pd.DataFrame): Input dataframe
@@ -341,15 +342,15 @@ def process_nan_values_in_dataframe(df: pd.DataFrame,
 
     logger.info(f"Processing NaN values for {len(df)} rows and {len(df.columns)} columns")
 
-    for idx, col in enumerate(df.columns):
+    for col in df.columns:
         if col in ['Facility', 'Lat', 'Long']:
             continue
 
-        col_series = df.iloc[:, idx]
+        col_series = df[col]
         initial_nan_count = col_series.isna().sum()
 
         if initial_nan_count > 0:
-            logger.info(f"Processing {initial_nan_count} NaN values in column '{col}'")
+            logger.info(f"Processing {initial_nan_count} NaN values in column '{col}' (dtype: {col_series.dtype})")
 
             # Find appropriate replacement based on column mappings
             replacement = 'N/A'  # Default
@@ -358,11 +359,39 @@ def process_nan_values_in_dataframe(df: pd.DataFrame,
                     replacement = value
                     break
 
-            # Apply replacement
-            col_series = col_series.fillna(replacement)
-            df.iloc[:, idx] = col_series.astype(object)
+            # Handle different data types appropriately
+            dtype = col_series.dtype
 
-            logger.info(f"Replaced NaN values in '{col}' with '{replacement}'")
+            # Check for pandas nullable integer types (Int64, Int32, etc.)
+            if pd.api.types.is_integer_dtype(dtype) and str(dtype).startswith('Int'):
+                # For nullable integer types, use a numeric replacement or keep as NaN
+                # Int64 columns in tropical cyclone analysis should stay as integers
+                if 'Windspeed' in col or 'Tropical Cyclone' in col:
+                    # For windspeed columns, use 0 as replacement (meaning no extreme winds)
+                    logger.info(f"Filling NaN values in Int64 column '{col}' with 0")
+                    df[col] = col_series.fillna(0)
+                else:
+                    # For other integer columns, use 0 as default
+                    logger.info(f"Filling NaN values in Int64 column '{col}' with 0")
+                    df[col] = col_series.fillna(0)
+
+            # Check for float dtypes
+            elif pd.api.types.is_float_dtype(dtype):
+                # For float columns, use 0.0 as replacement
+                logger.info(f"Filling NaN values in float column '{col}' with 0.0")
+                df[col] = col_series.fillna(0.0)
+
+            # Check for datetime dtypes
+            elif pd.api.types.is_datetime64_any_dtype(dtype):
+                # For datetime columns, keep as NaT (Not a Time)
+                logger.info(f"Keeping NaN values as NaT in datetime column '{col}'")
+                # No replacement needed
+
+            # For object/string dtypes and all others
+            else:
+                # Apply string replacement and convert to object dtype
+                logger.info(f"Filling NaN values in column '{col}' with '{replacement}'")
+                df[col] = col_series.fillna(replacement).astype(object)
 
     logger.info("NaN processing complete")
     return df

@@ -729,9 +729,34 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         
         df_fac = standardize_facility_dataframe(df_fac)
         logger.info(f"Loaded facility data with {len(df_fac)} facilities")
-        
-        # Initialize combined DataFrame with base columns
-        combined_df = df_fac[['Facility', 'Lat', 'Long']].copy()
+        logger.info(f"Facility DataFrame columns: {df_fac.columns.tolist()}")
+
+        # Initialize combined DataFrame with base columns, including Asset Archetype if available
+        base_columns = ['Facility', 'Lat', 'Long']
+
+        # Look for Asset Archetype column with various naming conventions
+        archetype_column = None
+        possible_names = [
+            'Asset Archetype', 'asset archetype', 'AssetArchetype', 'assetarchetype',
+            'Archetype', 'archetype', 'Asset Type', 'asset type', 'AssetType', 'assettype',
+            'Type', 'type', 'Category', 'category', 'Asset Category', 'asset category'
+        ]
+
+        for col_name in possible_names:
+            if col_name in df_fac.columns:
+                archetype_column = col_name
+                break
+
+        if archetype_column:
+            # Standardize the column name to 'Asset Archetype'
+            if archetype_column != 'Asset Archetype':
+                df_fac.rename(columns={archetype_column: 'Asset Archetype'}, inplace=True)
+            base_columns.append('Asset Archetype')
+            logger.info(f"Found and included Asset Archetype column: '{archetype_column}' -> 'Asset Archetype'")
+        else:
+            logger.info("No Asset Archetype column found in facility data, will add default later")
+
+        combined_df = df_fac[base_columns].copy()
         logger.info(f"Initialized combined DataFrame with columns: {combined_df.columns.tolist()}")
         
         # Track plots for visualization
@@ -955,6 +980,7 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         # Final desired column order for output CSV
         final_order = [
             'Facility',
+            'Asset Archetype',  # Added Asset Archetype as 2nd column
             'Lat',
             'Long',
             'Flood Depth (meters)',

@@ -1,6 +1,7 @@
 {% load static %}
 <html lang="en" data-bs-theme="auto">
-  <head><script src="/docs/5.3/assets/js/color-modes.js"></script>
+  <head>
+    <!-- Color mode script removed due to 404 error -->
 
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,6 +15,7 @@
     <!-- Font Awesome CDN -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
+  
     <!-- Mapbox GL JS -->
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
@@ -26,6 +28,8 @@
     <link href="{% static 'css/dashboard.css' %}" rel="stylesheet">
     <link href="{% static 'css/progress.css' %}" rel="stylesheet">
     {% comment %} <link href="{% static 'css/sidebar.css' %}" rel="stylesheet"> {% endcomment %}
+
+    {% block extra_head %}{% endblock %}
   </head>
   <body>
     
@@ -90,8 +94,22 @@
 {% comment %} <script src="/docs/5.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script> {% endcomment %}
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.2/dist/chart.umd.js" integrity="sha384-eI7PSr3L1XLISH8JdDII5YN/njoSsxfbrkCTnJrzXt+ENP5MOVBxD+l6sEG4zoLp" crossorigin="anonymous"></script>
-    <script src="{% static 'js/main.js' %}"></script>
+
   
+    <!-- CSRF Manager for robust CSRF handling -->
+    <script src="{% static 'js/csrf-manager.js' %}"></script>
+
+    <!-- CSRF Testing (only in development/debug mode) -->
+    {% if debug %}
+    <script src="{% static 'js/csrf-test.js' %}"></script>
+    {% endif %}
+
+    <script src="{% static 'js/main.js' %}"></script>
+
+    <!-- Enhanced Frontend Handlers -->
+    <script src="{% static 'js/upload-handler.js' %}"></script>
+    <script src="{% static 'js/main-page-utils.js' %}"></script>
+
     <script src="{% static 'js/sidebar.js' %}"></script>
 </body>
 </html>

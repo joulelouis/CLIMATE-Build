@@ -212,11 +212,74 @@ Adjust Sensitivity Thresholds
         font-weight: 600;
         border: 2px solid #F1D500;
         box-shadow: 0 2px 8px rgba(241, 213, 0, 0.3);
+        transform: translateY(-2px);
+        position: relative;
+    }
+
+    .archetype-item.selected::after {
+        content: '';
+        position: absolute;
+        top: -2px;
+        left: -2px;
+        right: -2px;
+        bottom: -2px;
+        background: linear-gradient(45deg, #F1D500, #F4C430, #F1D500);
+        border-radius: 8px;
+        z-index: -1;
+        opacity: 0.2;
+        animation: pulse-yellow 2s infinite;
     }
 
     .archetype-item.selected .archetype-number {
         background-color: #000;
         color: #F1D500;
+        transform: scale(1.1);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Add animation for selection feedback */
+    @keyframes pulse-yellow {
+        0% {
+            opacity: 0.2;
+            transform: scale(1);
+        }
+        50% {
+            opacity: 0.4;
+            transform: scale(1.02);
+        }
+        100% {
+            opacity: 0.2;
+            transform: scale(1);
+        }
+    }
+
+    /* Selection animation */
+    @keyframes archetype-select {
+        0% {
+            transform: scale(1);
+        }
+        50% {
+            transform: scale(1.05);
+        }
+        100% {
+            transform: scale(1);
+        }
+    }
+
+    /* Fade in/out animation for feedback */
+    @keyframes fadeInOut {
+        0% {
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0.9);
+        }
+        50% {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        100% {
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0.9);
+        }
     }
 
     .archetype-number {
@@ -349,7 +412,7 @@ Adjust Sensitivity Thresholds
                             Click on an asset archetype to configure its specific sensitivity parameters
                         </div>
                         {% for archetype in asset_archetypes %}
-                            <div class="archetype-item" onclick="selectArchetype('{{ archetype.name|escapejs }}', {{ archetype.number }}, event)" data-archetype="{{ archetype.name|escapejs }}">
+                            <div class="archetype-item" data-archetype="{{ archetype.name|escapejs }}" data-number="{{ archetype.number }}">
                                 <span class="archetype-number">{{ archetype.number }}</span>
                                 <span class="archetype-name">{{ archetype.name }}</span>
                             </div>
@@ -628,7 +691,14 @@ Adjust Sensitivity Thresholds
 </div>
 
 <script>
-    // Variables to store archetype-specific parameters
+    // Django template variables (parsed server-side) - v20251020_2101
+    window.djangoArchetypeParams = {% if archetype_params_json %}{{ archetype_params_json|safe }}{% else %}{}{% endif %};
+</script>
+
+<script>
+    // Variables to store archetype-specific parameters - v20251020_2103
+    console.log('🔄 Loading updated sensitivity parameters script - v20251020_2103');
+    console.log('🔍 SCRIPT LOADED - Test: ', document.getElementById('test-script'));
     let archetypeParameters = {};
     let currentSelectedArchetype = null;
     let defaultParameters = null;
@@ -755,72 +825,110 @@ Adjust Sensitivity Thresholds
 
     // Update slider values when numeric inputs change
     function updateSliderFromInput(prefix, bound, value) {
-        const slider = document.getElementById(prefix + bound);
-        if (slider) {
-            slider.value = value;
-            updateAllDisplayValues();
+        try {
+            const slider = document.getElementById(prefix + bound);
+            if (slider) {
+                slider.value = value;
+                updateAllDisplayValues();
+            }
+        } catch (error) {
+            console.error('Error in updateSliderFromInput:', error);
         }
     }
 
     // Function to update all range value displays
     function updateAllDisplayValues() {
-        ['waterStress', 'flood', 'heat', 'tropicalCyclone', 'stormSurge', 'landslide'].forEach(prefix => {
-            const lowEl = document.getElementById(prefix + 'Low');
-            const highEl = document.getElementById(prefix + 'High');
-            if (!lowEl || !highEl) return;
-            enforceSliderOrder(prefix);
-            const lowVal = lowEl.value;
-            const highVal = highEl.value;
-            ['LowValue', 'MediumLow'].forEach(suffix => {
-                const el = document.getElementById(prefix + suffix);
-                if (el) el.value = lowVal;
+        try {
+            ['waterStress', 'flood', 'heat', 'tropicalCyclone', 'stormSurge', 'landslide'].forEach(prefix => {
+                try {
+                    const lowEl = document.getElementById(prefix + 'Low');
+                    const highEl = document.getElementById(prefix + 'High');
+                    if (!lowEl || !highEl) return;
+                    enforceSliderOrder(prefix);
+                    const lowVal = lowEl.value;
+                    const highVal = highEl.value;
+                    ['LowValue', 'MediumLow'].forEach(suffix => {
+                        const el = document.getElementById(prefix + suffix);
+                        if (el) el.value = lowVal;
+                    });
+                    ['HighValue', 'MediumHigh'].forEach(suffix => {
+                        const el = document.getElementById(prefix + suffix);
+                        if (el) el.value = highVal;
+                    });
+                    updateSliderTrack(prefix);
+                } catch (prefixError) {
+                    console.error(`Error updating display values for ${prefix}:`, prefixError);
+                }
             });
-            ['HighValue', 'MediumHigh'].forEach(suffix => {
-                const el = document.getElementById(prefix + suffix);
-                if (el) el.value = highVal;
-            });
-            updateSliderTrack(prefix);
-        });
+        } catch (error) {
+            console.error('Error in updateAllDisplayValues:', error);
+        }
     }
 
     // Function to select an archetype
     function selectArchetype(archetypeName, archetypeNumber, event) {
+        console.log('🎯 selectArchetype called with:', { archetypeName, archetypeNumber, event });
+        console.log('🎯 Function exists, typeof:', typeof selectArchetype);
+
         // Input validation
         if (!archetypeName || archetypeNumber == null) {
-            console.error('Invalid archetype parameters:', { archetypeName, archetypeNumber });
+            console.error('❌ Invalid archetype parameters:', { archetypeName, archetypeNumber });
             return;
         }
 
         try {
+            // Show visual feedback immediately
+            showSelectionFeedback(archetypeName);
+
             // Save current parameters if an archetype was previously selected
-            if (currentSelectedArchetype) {
+            if (currentSelectedArchetype && currentSelectedArchetype !== archetypeName) {
+                console.log('💾 Saving parameters for previous archetype:', currentSelectedArchetype);
                 archetypeParameters[currentSelectedArchetype] = getCurrentParameters();
+                // Show save indicator for previous archetype
+                showArchetypeSaveIndicator(currentSelectedArchetype);
             } else if (!defaultParameters) {
                 // Save default parameters on first selection
+                console.log('💾 Saving default parameters');
                 defaultParameters = getCurrentParameters();
             }
 
-            // Update UI
+            // Update UI - Remove selection from all items first
             document.querySelectorAll('.archetype-item').forEach(item => {
                 item.classList.remove('selected');
+                // Remove any save indicators
+                const saveIndicator = item.querySelector('.save-indicator');
+                if (saveIndicator) {
+                    saveIndicator.remove();
+                }
             });
 
-            // Use event parameter instead of global event object
+            // Use event parameter if available, otherwise find by data attribute
+            let targetElement = null;
             if (event && event.currentTarget) {
-                event.currentTarget.classList.add('selected');
+                targetElement = event.currentTarget;
             } else {
                 // Fallback: find the archetype item by data attribute
-                const archetypeItem = document.querySelector(`[data-archetype="${archetypeName}"]`);
-                if (archetypeItem) {
-                    archetypeItem.classList.add('selected');
-                }
+                targetElement = document.querySelector(`[data-archetype="${archetypeName}"]`);
             }
 
-            // Show selected archetype indicator
-            document.getElementById('selected-archetype-indicator').style.display = 'block';
-            document.getElementById('selected-archetype-name').textContent = archetypeName;
-            document.getElementById('default-instructions').style.display = 'none';
-            document.getElementById('save-archetype-btn').style.display = 'block';
+            if (targetElement) {
+                // Add selection with animation
+                targetElement.classList.add('selected');
+
+                // Add selection animation
+                targetElement.style.animation = 'none';
+                setTimeout(() => {
+                    targetElement.style.animation = 'archetype-select 0.3s ease-out';
+                }, 10);
+
+                console.log('✅ Successfully selected archetype:', archetypeName);
+            } else {
+                console.error('❌ Could not find archetype element for:', archetypeName);
+                return;
+            }
+
+            // Update UI indicators
+            updateSelectionIndicators(archetypeName);
 
             // Update hidden form field
             document.getElementById('selected-archetype-input').value = archetypeName;
@@ -828,21 +936,157 @@ Adjust Sensitivity Thresholds
             // Load parameters for this archetype (or default if not set)
             const paramsToLoad = archetypeParameters[archetypeName] || defaultParameters;
             if (paramsToLoad) {
+                console.log('📊 Loading parameters for archetype:', archetypeName);
                 applyParameters(paramsToLoad);
             }
 
+            // Update state
             currentSelectedArchetype = archetypeName;
             isAccordionEnabled = true;
 
             // Clear reset flag when an archetype is selected
             hasBeenReset = false;
 
+            // Enable parameter controls
             updateAccordionState();
+
+            // Store selection in session storage for persistence
+            sessionStorage.setItem('selectedArchetype', archetypeName);
+            sessionStorage.setItem('archetypeParameters', JSON.stringify(archetypeParameters));
+
+            console.log('🎯 Archetype selection completed:', {
+                selected: archetypeName,
+                parameters: archetypeParameters[archetypeName],
+                state: 'active'
+            });
+
         } catch (error) {
-            console.error('Error in selectArchetype:', error);
-            // Optionally show user-friendly error message
-            alert('An error occurred while selecting the archetype. Please try again.');
+            console.error('❌ Error in selectArchetype:', error);
+            // Show user-friendly error message
+            showErrorMessage('Selection Error: An error occurred while selecting the archetype. Please try again.');
         }
+    }
+
+    // Show visual feedback during selection
+    function showSelectionFeedback(archetypeName) {
+        const feedbackDiv = document.createElement('div');
+        feedbackDiv.className = 'selection-feedback';
+        feedbackDiv.textContent = `Selecting ${archetypeName}...`;
+        feedbackDiv.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(241, 213, 0, 0.9);
+            color: #000;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-weight: 600;
+            z-index: 10000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            animation: fadeInOut 1s ease-in-out;
+        `;
+
+        document.body.appendChild(feedbackDiv);
+
+        setTimeout(() => {
+            if (feedbackDiv.parentNode) {
+                feedbackDiv.parentNode.removeChild(feedbackDiv);
+            }
+        }, 1000);
+    }
+
+    // Show save indicator for archetype
+    function showArchetypeSaveIndicator(archetypeName) {
+        const archetypeItem = document.querySelector(`[data-archetype="${archetypeName}"]`);
+        if (archetypeItem && !archetypeItem.querySelector('.save-indicator')) {
+            const indicator = document.createElement('span');
+            indicator.className = 'save-indicator';
+            indicator.innerHTML = '<i class="fas fa-check-circle" title="Parameters saved"></i>';
+            indicator.style.cssText = `
+                position: absolute;
+                top: 8px;
+                right: 8px;
+                background: #28a745;
+                color: white;
+                border-radius: 50%;
+                width: 20px;
+                height: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 10px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            `;
+
+            archetypeItem.style.position = 'relative';
+            archetypeItem.appendChild(indicator);
+
+            // Fade out indicator after 3 seconds
+            setTimeout(() => {
+                if (indicator.parentNode) {
+                    indicator.style.opacity = '0';
+                    indicator.style.transition = 'opacity 0.5s';
+                    setTimeout(() => {
+                        if (indicator.parentNode) {
+                            indicator.parentNode.removeChild(indicator);
+                        }
+                    }, 500);
+                }
+            }, 3000);
+        }
+    }
+
+    // Update UI indicators when archetype is selected
+    function updateSelectionIndicators(archetypeName) {
+        // Show selected archetype indicator
+        const indicator = document.getElementById('selected-archetype-indicator');
+        if (indicator) {
+            indicator.style.display = 'block';
+            const nameSpan = document.getElementById('selected-archetype-name');
+            if (nameSpan) {
+                nameSpan.textContent = archetypeName;
+            }
+        }
+
+        // Hide default instructions
+        const defaultInstructions = document.getElementById('default-instructions');
+        if (defaultInstructions) {
+            defaultInstructions.style.display = 'none';
+        }
+
+        // Show save button
+        const saveBtn = document.getElementById('save-archetype-btn');
+        if (saveBtn) {
+            saveBtn.style.display = 'block';
+        }
+
+        // Add visual feedback to archetype name
+        const archetypeItem = document.querySelector(`[data-archetype="${archetypeName}"]`);
+        if (archetypeItem) {
+            const nameElement = archetypeItem.querySelector('.archetype-name');
+            if (nameElement) {
+                nameElement.style.fontWeight = '700';
+            }
+        }
+    }
+
+    // Show error message
+    function showErrorMessage(message) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'alert alert-danger alert-dismissible fade show position-fixed';
+        errorDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+        errorDiv.innerHTML = `
+            <strong><i class="fas fa-exclamation-triangle me-2"></i>Error!</strong> ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        `;
+        document.body.appendChild(errorDiv);
+
+        setTimeout(() => {
+            if (errorDiv.parentNode) {
+                errorDiv.parentNode.removeChild(errorDiv);
+            }
+        }, 5000);
     }
 
     // Function to save parameters for current archetype
@@ -850,14 +1094,14 @@ Adjust Sensitivity Thresholds
         try {
             if (!currentSelectedArchetype) {
                 console.warn('No archetype selected for saving parameters');
-                alert('Please select an archetype first.');
+                alert('No Archetype Selected: Please select an archetype first.');
                 return;
             }
 
             const currentParams = getCurrentParameters();
             if (!currentParams) {
                 console.error('Failed to get current parameters for saving');
-                alert('Error: Could not retrieve current parameters. Please try again.');
+                alert('Parameter Error: Could not retrieve current parameters. Please try again.');
                 return;
             }
 
@@ -881,7 +1125,7 @@ Adjust Sensitivity Thresholds
             console.log(`Parameters saved for archetype: ${currentSelectedArchetype}`, currentParams);
         } catch (error) {
             console.error('Error saving archetype parameters:', error);
-            alert('An error occurred while saving parameters. Please try again.');
+            alert('Save Error: An error occurred while saving parameters. Please try again.');
         }
     }
 
@@ -902,8 +1146,19 @@ Adjust Sensitivity Thresholds
                     }
 
                     const disabled = !isAccordionEnabled || checkbox.checked;
+
+                    // Disable accordion button when no archetype selected
                     accordionButton.disabled = disabled;
-                    sliderInputs.forEach(input => input.disabled = disabled);
+                    accordionButton.style.opacity = disabled ? '0.6' : '1';
+                    accordionButton.style.cursor = disabled ? 'not-allowed' : 'pointer';
+
+                    // Disable slider inputs when no archetype selected
+                    sliderInputs.forEach(input => {
+                        input.disabled = disabled;
+                        input.style.opacity = disabled ? '0.5' : '1';
+                    });
+
+                    // Only enable checkbox when archetype is selected
                     checkbox.disabled = !isAccordionEnabled;
 
                     // Safely handle Bootstrap collapse
@@ -978,76 +1233,82 @@ Adjust Sensitivity Thresholds
 
     // Function to reset all parameters to defaults
     function resetToDefaults() {
-        if (confirm('Are you sure you want to reset all Water Stress, Flood, Tropical Cyclones, Heat, Storm Surge, and Rainfall-Induced Landslide parameters to their default values?')) {
-            try {
-                // Define default values
-                const defaultValues = {
-                    waterStress: { low: 10, high: 31, notMaterial: false },
-                    flood: { low: 0.5, high: 1.5, notMaterial: false },
-                    heat: { low: 10, high: 45, notMaterial: false },
-                    tropicalCyclone: { low: 119, high: 178, notMaterial: false },
-                    stormSurge: { low: 0.5, high: 1.5, notMaterial: false },
-                    landslide: { low: 1, high: 1.5, notMaterial: false }
-                };
-
-                // Reset each hazard systematically
-                Object.keys(defaultValues).forEach(prefix => {
-                    const values = defaultValues[prefix];
-
-                    // Reset slider values
-                    const lowSlider = document.getElementById(prefix + 'Low');
-                    const highSlider = document.getElementById(prefix + 'High');
-                    const checkbox = document.getElementById(prefix + 'NotMaterial');
-
-                    if (lowSlider) lowSlider.value = values.low;
-                    if (highSlider) highSlider.value = values.high;
-
-                    // Properly reset checkbox and trigger change event
-                    if (checkbox) {
-                        checkbox.checked = values.notMaterial;
-                        // Trigger change event to ensure UI updates
-                        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                });
-
-                // Update all display values
-                updateAllDisplayValues();
-
-                // Force update accordion state for all hazards
-                ['waterStress', 'flood', 'heat', 'tropicalCyclone', 'stormSurge', 'landslide'].forEach(prefix => {
-                    toggleHazard(prefix);
-                });
-
-                // Clear archetype-specific parameters completely
-                archetypeParameters = {};
-                currentSelectedArchetype = null;
-
-                // Reset default parameters to the actual default values we just set
-                defaultParameters = getCurrentParameters();
-
-                // Set flag to indicate reset has occurred
-                hasBeenReset = true;
-
-                // Reset UI
-                document.querySelectorAll('.archetype-item').forEach(item => {
-                    item.classList.remove('selected');
-                });
-
-                document.getElementById('selected-archetype-indicator').style.display = 'none';
-                document.getElementById('default-instructions').style.display = 'block';
-                document.getElementById('save-archetype-btn').style.display = 'none';
-                document.getElementById('selected-archetype-input').value = '';
-
-                isAccordionEnabled = false;
-                updateAccordionState();
-
-                console.log('Reset to defaults completed', defaultParameters);
-            } catch (error) {
-                console.error('Error resetting to defaults:', error);
-                alert('An error occurred while resetting to defaults. Please refresh the page and try again.');
-            }
+        const confirmed = confirm('Are you sure you want to reset all Water Stress, Flood, Tropical Cyclones, Heat, Storm Surge, and Rainfall-Induced Landslide parameters to their default values?');
+        if (confirmed) {
+            performReset();
         }
     }
+
+    function performReset() {
+        try {
+            // Define default values
+            const defaultValues = {
+                waterStress: { low: 10, high: 31, notMaterial: false },
+                flood: { low: 0.5, high: 1.5, notMaterial: false },
+                heat: { low: 10, high: 45, notMaterial: false },
+                tropicalCyclone: { low: 119, high: 178, notMaterial: false },
+                stormSurge: { low: 0.5, high: 1.5, notMaterial: false },
+                landslide: { low: 1, high: 1.5, notMaterial: false }
+            };
+
+            // Reset each hazard systematically
+            Object.keys(defaultValues).forEach(prefix => {
+                const values = defaultValues[prefix];
+
+                // Reset slider values
+                const lowSlider = document.getElementById(prefix + 'Low');
+                const highSlider = document.getElementById(prefix + 'High');
+                const checkbox = document.getElementById(prefix + 'NotMaterial');
+
+                if (lowSlider) lowSlider.value = values.low;
+                if (highSlider) highSlider.value = values.high;
+
+                // Properly reset checkbox and trigger change event
+                if (checkbox) {
+                    checkbox.checked = values.notMaterial;
+                    // Trigger change event to ensure UI updates
+                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            });
+
+            // Update all display values
+            updateAllDisplayValues();
+
+            // Force update accordion state for all hazards
+            ['waterStress', 'flood', 'heat', 'tropicalCyclone', 'stormSurge', 'landslide'].forEach(prefix => {
+                toggleHazard(prefix);
+            });
+
+            // Clear archetype-specific parameters completely
+            archetypeParameters = {};
+            currentSelectedArchetype = null;
+
+            // Reset default parameters to the actual default values we just set
+            defaultParameters = getCurrentParameters();
+
+            // Set flag to indicate reset has occurred
+            hasBeenReset = true;
+
+            // Reset UI
+            document.querySelectorAll('.archetype-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+
+            document.getElementById('selected-archetype-indicator').style.display = 'none';
+            document.getElementById('default-instructions').style.display = 'block';
+            document.getElementById('save-archetype-btn').style.display = 'none';
+            document.getElementById('selected-archetype-input').value = '';
+
+            isAccordionEnabled = false;
+            updateAccordionState();
+
+            console.log('Reset to defaults completed', defaultParameters);
+        } catch (error) {
+            console.error('Error resetting to defaults:', error);
+            alert('Reset Error: An error occurred while resetting to defaults. Please refresh the page and try again.');
+        }
+    }
+    
 
     // Add parameter validation function
     function validateParameters() {
@@ -1073,22 +1334,95 @@ Adjust Sensitivity Thresholds
         }
     }
 
-    // Initialize on page load - consolidated handler
+    // Initialize on page load - Enhanced with session restoration
     document.addEventListener('DOMContentLoaded', function() {
         try {
-            // Load archetype parameters from Django context
-            const djangoArchetypeParams = {{ archetype_params_json|safe }};
-            if (djangoArchetypeParams && typeof djangoArchetypeParams === 'object') {
+            console.log('🚀 Initializing sensitivity parameters page...');
+
+            // Load archetype parameters from window object (set by Django template)
+            let djangoArchetypeParams = window.djangoArchetypeParams || {};
+
+            if (djangoArchetypeParams && typeof djangoArchetypeParams === 'object' && Object.keys(djangoArchetypeParams).length > 0) {
                 archetypeParameters = djangoArchetypeParams;
-                console.log('Loaded archetype parameters from session:', archetypeParameters);
+                console.log('📦 Loaded archetype parameters from Django session:', archetypeParameters);
+            } else {
+                archetypeParameters = {};
+                console.log('📦 No archetype parameters found in Django session, starting with empty object');
             }
 
-            // Capture default parameters
-            defaultParameters = getCurrentParameters();
-            updateAllDisplayValues();
+            // Try to restore from sessionStorage (client-side persistence)
+            try {
+                const sessionSelectedArchetype = sessionStorage.getItem('selectedArchetype');
+                const sessionArchetypeParams = sessionStorage.getItem('archetypeParameters');
 
-            // Initially keep the accordion disabled until an archetype is selected
-            updateAccordionState();
+                if (sessionSelectedArchetype && sessionArchetypeParams) {
+                    const parsedParams = JSON.parse(sessionArchetypeParams);
+                    if (parsedParams && typeof parsedParams === 'object') {
+                        archetypeParameters = { ...archetypeParameters, ...parsedParams };
+                        currentSelectedArchetype = sessionSelectedArchetype;
+                        console.log('🔄 Restored archetype selection from session storage:', currentSelectedArchetype);
+                    }
+                }
+            } catch (sessionError) {
+                console.warn('Could not restore from session storage:', sessionError);
+            }
+
+            // Setup archetype item click event delegation
+            const archetypeList = document.querySelector('.archetype-list');
+            console.log('🔍 archetypeList found:', !!archetypeList);
+            if (archetypeList) {
+                archetypeList.addEventListener('click', function(e) {
+                    console.log('🔍 Click detected on archetype list');
+                    const archetypeItem = e.target.closest('.archetype-item');
+                    console.log('🔍 Clicked archetypeItem:', archetypeItem);
+                    if (archetypeItem) {
+                        const archetypeName = archetypeItem.dataset.archetype;
+                        const archetypeNumber = parseInt(archetypeItem.dataset.number);
+                        console.log('🔍 Extracted data:', { archetypeName, archetypeNumber });
+                        console.log('🔍 selectArchetype function exists:', typeof selectArchetype);
+                        console.log('🔍 About to call selectArchetype...');
+                        selectArchetype(archetypeName, archetypeNumber, e);
+                    }
+                });
+            }
+
+            // Wait a bit for Bootstrap to fully load before initializing
+            setTimeout(() => {
+                try {
+                    // Capture default parameters
+                    defaultParameters = getCurrentParameters();
+                    updateAllDisplayValues();
+
+                    // Restore previous selection if exists
+                    if (currentSelectedArchetype) {
+                        console.log('🔄 Restoring previous selection:', currentSelectedArchetype);
+
+                        // Find and highlight the previously selected archetype
+                        const targetArchetype = document.querySelector(`[data-archetype="${currentSelectedArchetype}"]`);
+                        if (targetArchetype) {
+                            // Manually trigger selection without event
+                            targetArchetype.classList.add('selected');
+                            updateSelectionIndicators(currentSelectedArchetype);
+
+                            // Load the saved parameters
+                            const savedParams = archetypeParameters[currentSelectedArchetype];
+                            if (savedParams) {
+                                applyParameters(savedParams);
+                            }
+
+                            isAccordionEnabled = true;
+                            updateAccordionState();
+
+                            console.log('✅ Previous archetype selection restored');
+                        }
+                    } else {
+                        // Initially keep the accordion disabled until an archetype is selected
+                        updateAccordionState();
+                    }
+                } catch (initError) {
+                    console.error('Error during delayed initialization:', initError);
+                }
+            }, 100);
 
             // Setup hazard checkbox event listeners
             ['waterStress', 'flood', 'heat', 'tropicalCyclone', 'stormSurge', 'landslide'].forEach(prefix => {

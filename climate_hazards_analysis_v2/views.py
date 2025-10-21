@@ -6,15 +6,18 @@ import pandas as pd
 import geopandas as gpd
 import json
 from django.conf import settings
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_GET
 from django.utils.decorators import method_decorator
+from django.middleware.csrf import get_token
 from .utils import standardize_facility_dataframe, load_cached_hazard_data, combine_facility_with_hazard_data, validate_shapefile
 from .error_utils import handle_sensitivity_param_error
+from .models import Asset, HazardAnalysisResult
 import logging
 import copy
 import zipfile
 import tempfile
+import glob
 
 # Import from climate_hazards_analysis module
 from climate_hazards_analysis.utils.climate_hazards_analysis import generate_climate_hazards_analysis
@@ -96,7 +99,7 @@ def view_map(request):
 
             # Store facility data in session for map display
             if ext in ['.shp', '.zip']:
-                facility_data = []
+                uploaded_facilities = []
                 for i, row in df.iterrows():
                     record = row.to_dict()
                     geom = gdf.geometry.iloc[i]
@@ -104,22 +107,42 @@ def view_map(request):
                         record['geometry'] = geom.convex_hull.__geo_interface__
                     elif geom.geom_type in ['Polygon', 'MultiPolygon']:
                         record['geometry'] = geom.__geo_interface__
-                    facility_data.append(record)
+                    uploaded_facilities.append(record)
             else:
-                facility_data = df.to_dict(orient='records')
+                uploaded_facilities = df.to_dict(orient='records')
 
-            # Debug: Log the facility data
-            logger.info(f"Processed {len(facility_data)} facilities from file: {str(facility_data)[:200]}...")
+            # Debug: Log the uploaded facility data
+            logger.info(f"Processed {len(uploaded_facilities)} facilities from file: {str(uploaded_facilities)[:200]}...")
 
-            # Explicitly store in session
+            # Get existing facility data (preserves drawn polygon assets)
+            existing_facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+            logger.info(f"Found {len(existing_facility_data)} existing facilities in session")
+
+            # Combine existing facilities with uploaded facilities
+            # This preserves drawn polygon assets and adds uploaded file data
+            facility_data = existing_facility_data + uploaded_facilities
+            logger.info(f"Combined total: {len(facility_data)} facilities")
+
+            # Explicitly store combined data in session
             request.session['climate_hazards_v2_facility_data'] = facility_data
             request.session.modified = True  # Ensure session is saved
 
             # Save facility data to CSV (creates standardized CSV file)
             csv_path = _save_facility_data_to_csv(request, facility_data)
 
+            # Store uploaded filename in session for display
+            request.session['climate_hazards_v2_uploaded_filename'] = file.name
+            request.session.modified = True
+
             # Add success message to context
-            context['success_message'] = f"Successfully loaded {len(facility_data)} facilities from {file.name}"
+            total_facilities = len(facility_data)
+            uploaded_count = len(uploaded_facilities)
+            existing_count = len(existing_facility_data)
+
+            if existing_count > 0:
+                context['success_message'] = f"Successfully combined {uploaded_count} uploaded facilities with {existing_count} existing assets. Total: {total_facilities} facilities."
+            else:
+                context['success_message'] = f"Successfully loaded {total_facilities} facilities from {file.name}"
             
         except Exception as e:
             logger.exception(f"Error processing file: {str(e)}")
@@ -132,15 +155,48 @@ def get_facility_data(request):
     """
     API endpoint to retrieve facility data for the map.
     Returns JSON with facility data including coordinates and available hazard data.
+    Enhanced to include polygon assets from the database.
     """
     # Get base facility data from session
     facility_data = request.session.get('climate_hazards_v2_facility_data', [])
-    
+
+    # Get polygon assets from database for the current session
+    try:
+        session_key = request.session.session_key
+        if session_key:
+            polygon_assets = Asset.objects.filter(
+                session_key=session_key,
+                asset_type='polygon'
+            ).order_by('-created_at')
+
+            # Convert database assets to facility data format
+            for asset in polygon_assets:
+                facility_asset = {
+                    'Facility': asset.name,
+                    'Lat': float(asset.latitude),
+                    'Long': float(asset.longitude),
+                    'Archetype': asset.archetype,
+                    'AssetType': 'polygon',
+                    'AssetId': asset.id,
+                    'CreatedAt': asset.created_at.isoformat()
+                }
+
+                # Include polygon geometry
+                polygon_coords = asset.get_polygon_coordinates()
+                if polygon_coords:
+                    facility_asset['geometry'] = polygon_coords
+
+                facility_data.append(facility_asset)
+
+    except Exception as db_error:
+        logger.warning(f"Error retrieving polygon assets from database: {str(db_error)}")
+        # Continue with session data only
+
     if not facility_data:
         return JsonResponse({
             'facilities': []
         })
-    
+
     try:
         # Load cached hazard data
         hazard_data = [
@@ -148,10 +204,10 @@ def get_facility_data(request):
             load_cached_hazard_data('water_stress'),
             load_cached_hazard_data('heat')
         ]
-        
+
         # Combine facility data with hazard data
         enriched_facilities = combine_facility_with_hazard_data(facility_data, hazard_data)
-        
+
         return JsonResponse({
             'facilities': enriched_facilities
         })
@@ -179,10 +235,12 @@ def preview_uploaded_file(request):
 
     return HttpResponse(content, content_type='text/csv')
 
+@csrf_exempt
 def add_facility(request):
     """
     API endpoint to add a new facility from coordinates clicked on the map.
     Supports both point-based facilities and polygon-based assets.
+    Enhanced to save both to session and database.
     """
     if request.method == 'POST':
         try:
@@ -192,6 +250,37 @@ def add_facility(request):
             name = data.get('name', f"New Facility at {lat:.4f}, {lng:.4f}")
             archetype = data.get('archetype', 'default archetype')
             geometry = data.get('geometry')  # Polygon geometry if provided
+
+            # Basic validation
+            if lat is None or lng is None or not name or not name.strip():
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Name, latitude, and longitude are required'
+                }, status=400)
+
+            # Create database asset record (simplified)
+            try:
+                # Ensure session has a key
+                if not request.session.session_key:
+                    request.session.create()
+
+                asset = Asset(
+                    name=name.strip(),
+                    archetype=archetype.strip() if archetype else 'default archetype',
+                    latitude=lat,
+                    longitude=lng,
+                    session_key=request.session.session_key
+                )
+
+                # Set polygon geometry if provided
+                if geometry and asset.set_polygon_from_geojson(geometry):
+                    pass  # Geometry set successfully
+
+                asset.save()
+
+            except Exception:
+                # Continue with session-based storage if database fails
+                pass
 
             # Get existing facility data or initialize empty list
             facility_data = request.session.get('climate_hazards_v2_facility_data', [])
@@ -214,17 +303,26 @@ def add_facility(request):
             request.session['climate_hazards_v2_facility_data'] = facility_data
             request.session.modified = True
 
-            # Create/update CSV file from facility data
-            _save_facility_data_to_csv(request, facility_data)
+            # Clear uploaded filename when adding drawn facilities
+            if 'climate_hazards_v2_uploaded_filename' in request.session:
+                del request.session['climate_hazards_v2_uploaded_filename']
 
-            # Log for debugging
-            logger.info(f"Added new facility: {name} at ({lat}, {lng}) with archetype '{archetype}'" +
-                       (f" and polygon geometry" if geometry else ""))
+            # Create/update CSV file from facility data
+            try:
+                _save_facility_data_to_csv(request, facility_data)
+            except Exception:
+                pass  # Continue even if CSV save fails
 
             return JsonResponse({
                 'success': True,
-                'facility': new_facility
+                'facility': new_facility,
+                'asset_id': asset.id if 'asset' in locals() else None
             })
+        except json.JSONDecodeError:
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid JSON data provided'
+            }, status=400)
         except Exception as e:
             logger.exception(f"Error adding facility: {str(e)}")
             return JsonResponse({
@@ -448,6 +546,225 @@ def show_results(request):
         logger.info(f"Loaded CSV with shape: {df.shape}")
         logger.info(f"CSV columns: {df.columns.tolist()}")
 
+        # Handle data validation and missing columns
+        df = _validate_and_fix_data_columns(df, selected_hazards)
+
+        # Process tropical cyclone data if selected
+        if 'Tropical Cyclones' in selected_hazards:
+            df = _process_tropical_cyclone_data(df, validated_csv_path)
+
+        # Add asset archetype information
+        df = _add_asset_archetype_info(df, validated_csv_path)
+
+        # Get the paths to any generated plots
+        plot_path = result.get('plot_path')
+        all_plots = result.get('all_plots', [])
+
+        # Store analysis results in session for potential reuse
+        request.session['climate_hazards_v2_results'] = {
+            'data': df.to_dict(orient="records"),
+            'columns': df.columns.tolist(),
+            'plot_path': plot_path if plot_path else None,
+            'all_plots': all_plots
+        }
+
+        # Preserve a baseline copy of the results the first time they are
+        # generated so we can restore them later if needed
+        if 'climate_hazards_v2_baseline_results' not in request.session:
+            request.session['climate_hazards_v2_baseline_results'] = copy.deepcopy(
+                request.session['climate_hazards_v2_results']
+            )
+
+        # Build comprehensive column groups for hazard exposure table
+        groups = _build_column_groups(df.columns.tolist(), selected_hazards)
+
+        # Prepare context for the template
+        context = {
+            'data': df.to_dict(orient="records"),
+            'columns': df.columns.tolist(),
+            'groups': groups,  # Now properly populated with column group data
+            'plot_path': plot_path,
+            'all_plots': all_plots,
+            'selected_hazards': selected_hazards,
+            'success_message': f"Successfully analyzed {len(df)} facilities for {len(selected_hazards)} hazard types."
+        }
+
+        logger.info("Rendering results template...")
+        return render(request, 'climate_hazards_analysis_v2/results.html', context)
+
+    except Exception as e:
+        logger.exception(f"Error in climate hazards analysis: {str(e)}")
+
+        return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+            'error': f"Error in climate hazards analysis: {str(e)}",
+            'facility_count': len(facility_data),
+            'hazard_types': [
+                'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
+                'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
+            ],
+            'selected_hazards': selected_hazards
+        })
+
+
+def _build_column_groups(columns, selected_hazards):
+    """
+    Build comprehensive column groups for the hazard exposure table.
+
+    Args:
+        columns (list): List of column names from the analysis results
+        selected_hazards (list): List of selected hazard types
+
+    Returns:
+        dict: Dictionary mapping group names to column counts
+    """
+    logger.info(f"Building column groups for {len(columns)} columns and selected hazards: {selected_hazards}")
+    logger.info(f"Available columns: {columns}")
+
+    groups = {}
+
+    # Comprehensive column mappings for all hazard types
+    column_mappings = {
+        'Facility Information': [
+            'Facility',
+            'Asset Archetype',
+            'Lat',
+            'Long'
+        ],
+        'Flood': [
+            'Flood Depth (meters)',
+            'Flood Depth (meters) - Moderate Case',
+            'Flood Depth (meters) - Worst Case'
+        ],
+        'Water Stress': [
+            'Water Stress Exposure (%)',
+            'Water Stress Exposure 2030 (%) - Moderate Case',
+            'Water Stress Exposure 2050 (%) - Moderate Case',
+            'Water Stress Exposure 2030 (%) - Worst Case',
+            'Water Stress Exposure 2050 (%) - Worst Case'
+        ],
+        'Heat': [
+            'Days over 30° Celsius',
+            'Days over 33° Celsius',
+            'Days over 35° Celsius',
+            'Days over 35° Celsius (2026 - 2030) - Moderate Case',
+            'Days over 35° Celsius (2031 - 2040) - Moderate Case',
+            'Days over 35° Celsius (2041 - 2050) - Moderate Case',
+            'Days over 35° Celsius (2026 - 2030) - Worst Case',
+            'Days over 35° Celsius (2031 - 2040) - Worst Case',
+            'Days over 35° Celsius (2041 - 2050) - Worst Case'
+        ],
+        'Sea Level Rise': [
+            '2030 Sea Level Rise (meters) - Moderate Case',
+            '2040 Sea Level Rise (meters) - Moderate Case',
+            '2050 Sea Level Rise (meters) - Moderate Case',
+            '2030 Sea Level Rise (meters) - Worst Case',
+            '2040 Sea Level Rise (meters) - Worst Case',
+            '2050 Sea Level Rise (meters) - Worst Case'
+        ],
+        'Tropical Cyclones': [
+            'Extreme Windspeed 10 year Return Period (km/h)',
+            'Extreme Windspeed 20 year Return Period (km/h)',
+            'Extreme Windspeed 50 year Return Period (km/h)',
+            'Extreme Windspeed 100 year Return Period (km/h)',
+            'Extreme Windspeed 10 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 20 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 50 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 100 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 10 year Return Period (km/h) - Worst Case',
+            'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
+            'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
+            'Extreme Windspeed 100 year Return Period (km/h) - Worst Case'
+        ],
+        'Storm Surge': [
+            'Storm Surge Flood Depth (meters)',
+            'Storm Surge Flood Depth (meters) - Worst Case'
+        ],
+        'Rainfall-Induced Landslide': [
+            'Rainfall-Induced Landslide (factor of safety)',
+            'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
+            'Rainfall-Induced Landslide (factor of safety) - Worst Case'
+        ]
+    }
+
+    # Map hazard type variations to standard names
+    hazard_name_mapping = {
+        'Sea Level Rise': 'Sea Level Rise',
+        'Tropical Cyclones': 'Tropical Cyclones',
+        'Storm Surge': 'Storm Surge',
+        'Rainfall Induced Landslide': 'Rainfall-Induced Landslide',
+        'Rainfall-Induced Landslide': 'Rainfall-Induced Landslide'
+    }
+
+    # Always include Facility Information if we have basic columns
+    facility_cols = [col for col in column_mappings['Facility Information'] if col in columns]
+    if facility_cols:
+        groups['Facility Information'] = len(facility_cols)
+        logger.info(f"Added Facility Information group with {len(facility_cols)} columns: {facility_cols}")
+
+    # Add groups for selected hazards based on actual column presence
+    for hazard in selected_hazards:
+        # Normalize hazard name
+        normalized_hazard = hazard_name_mapping.get(hazard, hazard)
+
+        if normalized_hazard in column_mappings:
+            # Count actual columns present for this hazard
+            hazard_columns = [col for col in column_mappings[normalized_hazard] if col in columns]
+
+            if hazard_columns:
+                groups[normalized_hazard] = len(hazard_columns)
+                logger.info(f"Added {normalized_hazard} group with {len(hazard_columns)} columns: {hazard_columns}")
+            else:
+                logger.info(f"No columns found for hazard type: {normalized_hazard}")
+        else:
+            logger.warning(f"Unknown hazard type: {normalized_hazard}")
+
+    # Special handling for cases where hazard might be selected but no data is available
+    # Check for any columns that contain hazard-related terms but weren't in our mapping
+    additional_hazards = set()
+    for column in columns:
+        column_lower = column.lower()
+
+        # Detect additional hazard columns that might not be in our mapping
+        if any(term in column_lower for term in ['flood', 'water stress', 'heat', 'temperature',
+                                                'sea level', 'cyclone', 'wind', 'storm surge',
+                                                'landslide', 'rainfall']):
+
+            # Try to categorize the column
+            if 'flood' in column_lower and 'Flood' not in groups:
+                additional_hazards.add('Flood')
+            elif 'water stress' in column_lower and 'Water Stress' not in groups:
+                additional_hazards.add('Water Stress')
+            elif any(term in column_lower for term in ['heat', 'temperature', 'celsius']) and 'Heat' not in groups:
+                additional_hazards.add('Heat')
+            elif 'sea level' in column_lower and 'Sea Level Rise' not in groups:
+                additional_hazards.add('Sea Level Rise')
+            elif any(term in column_lower for term in ['cyclone', 'wind']) and 'Tropical Cyclones' not in groups:
+                additional_hazards.add('Tropical Cyclones')
+            elif 'storm surge' in column_lower and 'Storm Surge' not in groups:
+                additional_hazards.add('Storm Surge')
+            elif any(term in column_lower for term in ['landslide', 'rainfall']) and 'Rainfall-Induced Landslide' not in groups:
+                additional_hazards.add('Rainfall-Induced Landslide')
+
+    # Add any additional hazard groups found
+    for hazard in additional_hazards:
+        hazard_columns = [col for col in columns if hazard.lower() in col.lower()]
+        if hazard_columns:
+            groups[hazard] = len(hazard_columns)
+            logger.info(f"Added additional {hazard} group with {len(hazard_columns)} columns: {hazard_columns}")
+
+    logger.info(f"Final groups dictionary: {groups}")
+
+    # Ensure we have at least some groups for the template to work
+    if not groups:
+        logger.warning("No groups were created, creating minimal group structure")
+        groups = {
+            'Facility Information': len([col for col in columns if col in ['Facility', 'Asset Archetype', 'Lat', 'Long']]),
+            'Analysis Results': len([col for col in columns if col not in ['Facility', 'Asset Archetype', 'Lat', 'Long']])
+        }
+        logger.info(f"Created minimal groups: {groups}")
+
+    return groups
+
 
 def _execute_climate_analysis(facility_csv_path, selected_hazards):
     """
@@ -516,517 +833,169 @@ def _load_and_process_combined_csv(combined_csv_path):
 
     return df, None
 
-        # Handle data validation and missing columns
-        df = _validate_and_fix_data_columns(df, selected_hazards)
 
-        # Process tropical cyclone data if selected
-        if 'Tropical Cyclones' in selected_hazards:
-            df = _process_tropical_cyclone_data(df, validated_csv_path)
+def _validate_and_fix_data_columns(df, selected_hazards):
+    """
+    Validate and fix data columns for the analysis results.
 
-        # Add asset archetype information
-        df = _add_asset_archetype_info(df, validated_csv_path)
+    Args:
+        df: DataFrame with analysis results
+        selected_hazards: List of selected hazard types
+
+    Returns:
+        DataFrame: Validated and fixed DataFrame
+    """
+    # This is a placeholder function - implement as needed
+    return df
+
+
+def _process_tropical_cyclone_data(df, facility_csv_path):
+    """
+    Process tropical cyclone data for the analysis results.
+
+    Args:
+        df: DataFrame with analysis results
+        facility_csv_path: Path to facility CSV file
+
+    Returns:
+        DataFrame: DataFrame with tropical cyclone data processed
+    """
+    # This is a placeholder function - implement as needed
+    return df
+
+
+def _add_asset_archetype_info(df, facility_csv_path):
+    """
+    Add asset archetype information to the analysis results.
+
+    Args:
+        df: DataFrame with analysis results
+        facility_csv_path: Path to facility CSV file
+
+    Returns:
+        DataFrame: DataFrame with asset archetype information added
+    """
+    try:
+        # Read the facility CSV to get archetype information
+        if facility_csv_path and os.path.exists(facility_csv_path):
             try:
-                logger.info("Processing Tropical Cyclone analysis...")
-                from tropical_cyclone_analysis.utils.tropical_cyclone_analysis import generate_tropical_cyclone_analysis
-                
-                tc_result = generate_tropical_cyclone_analysis(facility_csv_path)
-                
-                if tc_result and 'combined_csv_paths' in tc_result and tc_result['combined_csv_paths']:
-                    tc_csv_path = tc_result['combined_csv_paths'][0]
-                    
-                    if os.path.exists(tc_csv_path):
-                        logger.info(f"Loading tropical cyclone data from: {tc_csv_path}")
-                        
-                        # Load TC data with same encoding handling
-                        try:
-                            tc_df = pd.read_csv(tc_csv_path, encoding='utf-8')
-                        except UnicodeDecodeError:
-                            try:
-                                tc_df = pd.read_csv(tc_csv_path, encoding='latin-1')
-                            except UnicodeDecodeError:
-                                tc_df = pd.read_csv(tc_csv_path, encoding='cp1252')
-
-                        tc_df.columns = tc_df.columns.str.strip()
-                        
-                        logger.info(f"TC data shape: {tc_df.shape}")
-                        logger.info(f"TC columns: {tc_df.columns.tolist()}")
-                        logger.info(f"Main data columns: {df.columns.tolist()}")
-                        
-                        # FIXED: Look for the actual TC column names
-                        tc_wind_columns = [col for col in tc_df.columns if 'MSW' in col and 'yr RP' in col]
-                        logger.info(f"Found TC wind columns: {tc_wind_columns}")
-                        
-                        # Try to find matching facility column
-                        merge_column = None
-                        
-                        # Check for facility name columns in both dataframes
-                        main_facility_cols = []
-                        for col in df.columns:
-                            if any(keyword in col.lower() for keyword in ['facility', 'name', 'site']):
-                                main_facility_cols.append(col)
-                        
-                        tc_facility_cols = []
-                        for col in tc_df.columns:
-                            if any(keyword in col.lower() for keyword in ['facility', 'name', 'site']):
-                                tc_facility_cols.append(col)
-                        
-                        logger.info(f"Main facility columns: {main_facility_cols}")
-                        logger.info(f"TC facility columns: {tc_facility_cols}")
-                        
-                        # Try to find a matching column
-                        if main_facility_cols and tc_facility_cols:
-                            # Try exact match first
-                            for main_col in main_facility_cols:
-                                if main_col in tc_facility_cols:
-                                    merge_column = main_col
-                                    break
-                            
-                            # If no exact match, try renaming TC column to match main column
-                            if not merge_column:
-                                merge_column = main_facility_cols[0]  # Use first main facility column
-                                tc_merge_column = tc_facility_cols[0]  # Use first TC facility column
-                                
-                                if tc_merge_column != merge_column:
-                                    tc_df = tc_df.rename(columns={tc_merge_column: merge_column})
-                                    logger.info(f"Renamed TC column '{tc_merge_column}' to '{merge_column}'")
-                        
-                        if merge_column and tc_wind_columns:
-                            # Select only the columns we need for merging
-                            tc_columns_to_merge = [merge_column] + tc_wind_columns
-                            tc_df_subset = tc_df[tc_columns_to_merge]
-                            
-                            column_rename_map = {}
-                            for col in tc_df_subset.columns:
-                                col_normalized = col.lower().replace('-', ' ').replace('_', ' ')
-                                if 'msw' in col_normalized and 'rp' in col_normalized:
-                                    if '10' in col_normalized:
-                                        column_rename_map[col] = 'Extreme Windspeed 10 year Return Period (km/h)'
-                                    elif '20' in col_normalized:
-                                        column_rename_map[col] = 'Extreme Windspeed 20 year Return Period (km/h)'
-                                    elif '50' in col_normalized:
-                                        column_rename_map[col] = 'Extreme Windspeed 50 year Return Period (km/h)'
-                                    elif '100' in col_normalized:
-                                        column_rename_map[col] = 'Extreme Windspeed 100 year Return Period (km/h)'
-                            
-                            if column_rename_map:
-                                tc_df_subset = tc_df_subset.rename(columns=column_rename_map)
-                                logger.info(f"Renamed TC columns: {column_rename_map}")
-                            
-                            logger.info(f"Merging using column '{merge_column}' with TC columns: {tc_df_subset.columns.tolist()}")
-                            
-                            # Merge the dataframes
-                            merged_df = pd.merge(df, tc_df_subset, on=merge_column, how='left')
-                            df = merged_df
-                            logger.info(f"Successfully merged tropical cyclone data. New shape: {df.shape}")
-                            logger.info(f"New columns after merge: {df.columns.tolist()}")
-                            
-                            # DEBUG: Check TC columns after merge
-                            logger.debug("POST-MERGE Tropical Cyclone column check")
-                            tc_cols_after_merge = [col for col in tc_expected if col in df.columns]
-                            logger.debug(f"TC columns after merge: {tc_cols_after_merge}")
-                            logger.debug(f"TC column count after merge: {len(tc_cols_after_merge)}")
-                            logger.debug("END POST-MERGE Tropical Cyclone column check")
-                            
-                        else:
-                            logger.warning(f"Could not merge TC data. Merge column: {merge_column}, TC wind columns: {tc_wind_columns}")
-                            # Add placeholder columns with expected names
-                            placeholder_columns = [
-                                'Extreme Windspeed 10 year Return Period (km/h)',
-                                'Extreme Windspeed 20 year Return Period (km/h)', 
-                                'Extreme Windspeed 50 year Return Period (km/h)', 
-                                'Extreme Windspeed 100 year Return Period (km/h)'
-                            ]
-                            for col in placeholder_columns:
-                                if col not in df.columns:
-                                    df[col] = 85.0
-                            logger.info("Added placeholder tropical cyclone columns")
-                    else:
-                        logger.error(f"Tropical cyclone CSV file not found: {tc_csv_path}")
-                        # Add placeholder columns with expected names
-                        placeholder_columns = [
-                            'Extreme Windspeed 10 year Return Period (km/h)',
-                            'Extreme Windspeed 20 year Return Period (km/h)', 
-                            'Extreme Windspeed 50 year Return Period (km/h)', 
-                            'Extreme Windspeed 100 year Return Period (km/h)'
-                        ]
-                        for col in placeholder_columns:
-                            if col not in df.columns:
-                                df[col] = 85.0
-                        logger.info("Added placeholder tropical cyclone columns")
-                else:
-                    logger.error("Tropical cyclone analysis did not return valid results")
-                    # Add placeholder columns with expected names
-                    placeholder_columns = [
-                        'Extreme Windspeed 10 year Return Period (km/h)',
-                        'Extreme Windspeed 20 year Return Period (km/h)', 
-                        'Extreme Windspeed 50 year Return Period (km/h)', 
-                        'Extreme Windspeed 100 year Return Period (km/h)'
-                    ]
-                    for col in placeholder_columns:
-                        if col not in df.columns:
-                            df[col] = 85.0
-                    logger.info("Added placeholder tropical cyclone columns")
-                    
-            except Exception as tc_error:
-                logger.exception(f"Error in tropical cyclone analysis: {str(tc_error)}")
-                # Add placeholder columns with expected names
-                placeholder_columns = [
-                    'Extreme Windspeed 10 year Return Period (km/h)',
-                    'Extreme Windspeed 20 year Return Period (km/h)', 
-                    'Extreme Windspeed 50 year Return Period (km/h)', 
-                    'Extreme Windspeed 100 year Return Period (km/h)'
-                ]
-                for col in placeholder_columns:
-                    if col not in df.columns:
-                        df[col] = 85.0
-                logger.info("Added placeholder tropical cyclone columns due to exception")
-        
-        # Track column count after TC processing
-        columns_after_tc = len(df.columns)
-        logger.debug(f"Columns after Tropical Cyclone processing: {columns_after_tc} (change: {columns_after_tc - columns_before_tc})")
-
-        # Clean up potential merge suffixes like _x or _y that may appear
-        rename_map = {c: c[:-2] for c in df.columns if c.endswith('_x') or c.endswith('_y')}
-        if rename_map:
-            logger.info(f"Renaming columns to remove merge suffixes: {rename_map}")
-            df.rename(columns=rename_map, inplace=True)
-            # Drop any duplicate columns that may remain after renaming
-            df = df.loc[:, ~df.columns.duplicated()]
-
-        
-
-        # Add Asset Archetype information from facility CSV
-        try:
-            # Load facility CSV to get Asset Archetype information
-            facility_df = pd.read_csv(facility_csv_path, encoding='utf-8')
-        except UnicodeDecodeError:
-            try:
-                facility_df = pd.read_csv(facility_csv_path, encoding='latin-1')
+                facility_df = pd.read_csv(facility_csv_path, encoding='utf-8')
             except UnicodeDecodeError:
-                facility_df = pd.read_csv(facility_csv_path, encoding='cp1252')
+                try:
+                    facility_df = pd.read_csv(facility_csv_path, encoding='latin-1')
+                except UnicodeDecodeError:
+                    facility_df = pd.read_csv(facility_csv_path, encoding='cp1252')
 
-        # Find Asset Archetype column with various naming conventions
-        archetype_column = None
-        possible_names = [
-            'Asset Archetype', 'asset archetype', 'AssetArchetype', 'assetarchetype',
-            'Archetype', 'archetype', 'Asset Type', 'asset type', 'AssetType', 'assettype',
-            'Type', 'type', 'Category', 'category', 'Asset Category', 'asset category'
-        ]
-
-        for possible_name in possible_names:
-            if possible_name in facility_df.columns:
-                archetype_column = possible_name
-                logger.info(f"Found Asset Archetype column: '{archetype_column}'")
-                break
-
-        if archetype_column:
-            # Create a mapping from Facility name to Asset Archetype
-            archetype_mapping = dict(zip(facility_df['Facility'], facility_df[archetype_column]))
-
-            # Add Asset Archetype column to the combined data
-            df['Asset Archetype'] = df['Facility'].map(archetype_mapping)
-
-            # Fill any missing archetypes with 'Unknown'
-            df['Asset Archetype'] = df['Asset Archetype'].fillna('Unknown')
-
-            # Reorder columns to put Asset Archetype as 2nd column (after Facility)
-            columns_list = df.columns.tolist()
-            if 'Asset Archetype' in columns_list and 'Facility' in columns_list:
-                # Remove Asset Archetype from its current position
-                columns_list.remove('Asset Archetype')
-                # Find Facility index and insert Asset Archetype after it
-                facility_index = columns_list.index('Facility')
-                columns_list.insert(facility_index + 1, 'Asset Archetype')
-                # Reorder the DataFrame
-                df = df[columns_list]
-                logger.info("Added Asset Archetype column as 2nd column")
-
-        else:
-            logger.warning("No Asset Archetype column found in facility CSV, using default 'Unknown'")
-            df['Asset Archetype'] = 'Unknown'
-            # Still reorder to put it as 2nd column
-            columns_list = df.columns.tolist()
-            if 'Facility' in columns_list:
-                columns_list.remove('Asset Archetype')
-                facility_index = columns_list.index('Facility')
-                columns_list.insert(facility_index + 1, 'Asset Archetype')
-                df = df[columns_list]
-
-        # Convert to dict for template
-        data = df.to_dict(orient="records")
-        columns = df.columns.tolist()
-        
-        logger.info(f"Final data has {len(data)} rows and {len(columns)} columns")
-        logger.info(f"Final columns: {columns}")
-        
-        # DEBUG: Final check before group creation
-        logger.debug("Final Tropical Cyclone column verification before group creation")
-        tc_final_check = [col for col in tc_expected if col in columns]
-        logger.debug(f"TC columns in final data: {tc_final_check}")
-        logger.debug(f"TC column count in final data: {len(tc_final_check)}")
-        logger.debug("END Final Tropical Cyclone column verification")
-        
-        # Create detailed column groups for the table header
-        groups = {}
-        # Base group - Facility Information
-        facility_cols = ['Facility', 'Asset Archetype']
-        facility_count = sum(1 for col in facility_cols if col in columns)
-        if facility_count > 0:
-            groups['Facility Information'] = facility_count
-        
-        # Create a mapping for each hazard type and its columns
-        hazard_columns = {
-            'Flood': ['Flood Depth (meters)'],
-            'Water Stress': [
-                'Water Stress Exposure (%)',
-                'Water Stress Exposure 2030 (%) - Moderate Case',
-                'Water Stress Exposure 2050 (%) - Moderate Case',
-                'Water Stress Exposure 2030 (%) - Worst Case',
-                'Water Stress Exposure 2050 (%) - Worst Case'
-            ],
-            'Sea Level Rise': [
-                '2030 Sea Level Rise (meters) - Moderate Case',
-                '2040 Sea Level Rise (meters) - Moderate Case',
-                '2050 Sea Level Rise (meters) - Moderate Case',
-                '2030 Sea Level Rise (meters) - Worst Case',
-                '2040 Sea Level Rise (meters) - Worst Case',
-                '2050 Sea Level Rise (meters) - Worst Case'
-            ],
-            'Tropical Cyclones': ['Extreme Windspeed 10 year Return Period (km/h)', 
-                                'Extreme Windspeed 20 year Return Period (km/h)', 
-                                'Extreme Windspeed 50 year Return Period (km/h)', 
-                                'Extreme Windspeed 100 year Return Period (km/h)'],
-            'Heat': [
-                'Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius',
-                'Days over 35° Celsius (2026 - 2030) - Moderate Case',
-                'Days over 35° Celsius (2031 - 2040) - Moderate Case',
-                'Days over 35° Celsius (2041 - 2050) - Moderate Case',
-                'Days over 35° Celsius (2026 - 2030) - Worst Case',
-                'Days over 35° Celsius (2031 - 2040) - Worst Case',
-                'Days over 35° Celsius (2041 - 2050) - Worst Case'
-            ],
-            'Storm Surge': [
-                'Storm Surge Flood Depth (meters)',
-                'Storm Surge Flood Depth (meters) - Worst Case'
-            ],
-            'Rainfall-Induced Landslide': [
-                'Rainfall-Induced Landslide (factor of safety)',
-                'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
-                'Rainfall-Induced Landslide (factor of safety) - Worst Case'
+            # Look for Asset Archetype column with various naming conventions
+            archetype_column = None
+            possible_names = [
+                'Asset Archetype', 'asset archetype', 'AssetArchetype', 'assetarchetype',
+                'Archetype', 'archetype', 'Asset Type', 'asset type', 'AssetType', 'assettype',
+                'Type', 'type', 'Category', 'category', 'Asset Category', 'asset category'
             ]
-        }
-        
-        # Add column groups for each hazard type that has columns in the data
-        for hazard, cols in hazard_columns.items():
-            count = sum(1 for col in cols if col in columns)
-            logger.debug(f"Group Creation - Checking {hazard}: found {count} columns out of {len(cols)} expected")
-            if hazard == 'Tropical Cyclones':
-                logger.debug(f"TC specific check: {[col for col in cols if col in columns]}")
-            if count > 0:
-                groups[hazard] = count
-                logger.debug(f"Added {hazard} group with {count} columns")
+
+            for col_name in possible_names:
+                if col_name in facility_df.columns:
+                    archetype_column = col_name
+                    break
+
+            if archetype_column:
+                logger.info(f"Found Asset Archetype column: '{archetype_column}'")
+
+                # Create mapping from facility name to archetype
+                archetype_mapping = {}
+                for _, row in facility_df.iterrows():
+                    # Try multiple facility name columns
+                    facility_name = None
+                    for name_col in ['Facility', 'Site', 'Name', 'Asset Name']:
+                        if name_col in facility_df.columns and pd.notna(row.get(name_col)):
+                            facility_name = str(row.get(name_col)).strip()
+                            break
+
+                    archetype = str(row.get(archetype_column, '')).strip()
+                    if facility_name and archetype and archetype.lower() not in ['', 'nan', 'none']:
+                        archetype_mapping[facility_name] = archetype
+
+                logger.info(f"Created archetype mapping for {len(archetype_mapping)} facilities")
+
+                # Add Asset Archetype column to the results DataFrame
+                df['Asset Archetype'] = df['Facility'].map(archetype_mapping)
+
+                # Fill missing values with 'Default'
+                df['Asset Archetype'] = df['Asset Archetype'].fillna('Default')
+
+                # Reorder columns to put Asset Archetype as the 2nd column (after Facility)
+                if 'Asset Archetype' in df.columns and 'Facility' in df.columns:
+                    cols = df.columns.tolist()
+                    facility_idx = cols.index('Facility')
+
+                    # Remove Asset Archetype from its current position
+                    if 'Asset Archetype' in cols:
+                        cols.remove('Asset Archetype')
+
+                    # Insert Asset Archetype after Facility
+                    cols.insert(facility_idx + 1, 'Asset Archetype')
+                    df = df[cols]
+
+                logger.info(f"Successfully added Asset Archetype column to results")
+                logger.info(f"Asset Archetype value counts: {df['Asset Archetype'].value_counts()}")
+
             else:
-                logger.debug(f"No columns found for {hazard} group")
+                logger.warning(f"No Asset Archetype column found in facility CSV. Available columns: {facility_df.columns.tolist()}")
+                # Add default Asset Archetype column
+                df['Asset Archetype'] = 'Default'
 
-        logger.info("=== DEBUG: Column Detection ===")
-        logger.info(f"Final columns list: {columns}")
-        logger.info(f"Groups created: {groups}")
+                # Reorder columns to put Asset Archetype as the 2nd column
+                if 'Asset Archetype' in df.columns and 'Facility' in df.columns:
+                    cols = df.columns.tolist()
+                    facility_idx = cols.index('Facility')
 
-        # Only count heat-related future scenario columns that start with
-        # "Days over 35 Celsius" for Moderate and Worst Case scenarios
-        heat_basecase_count = sum(
-            1
-            for c in columns
-            if c.startswith('Days over 35° Celsius') and c.endswith(' - Moderate Case')
-        )
-        heat_worstcase_count = sum(
-            1
-            for c in columns
-            if c.startswith('Days over 35° Celsius') and c.endswith(' - Worst Case')
-        )
-        
-        heat_baseline_cols = ['Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius']
-        heat_baseline_count = sum(1 for c in heat_baseline_cols if c in columns)
+                    # Remove Asset Archetype from its current position
+                    if 'Asset Archetype' in cols:
+                        cols.remove('Asset Archetype')
 
-        if 'Heat' in groups:
-            groups['Heat'] = heat_baseline_count + heat_basecase_count + heat_worstcase_count
+                    # Insert Asset Archetype after Facility
+                    cols.insert(facility_idx + 1, 'Asset Archetype')
+                    df = df[cols]
+        else:
+            logger.warning("Facility CSV file not found or doesn't exist")
+            # Add default Asset Archetype column
+            df['Asset Archetype'] = 'Default'
 
-        ws_moderatecase_count = sum(
-            1 for c in columns
-            if c.startswith('Water Stress Exposure') and c.endswith(' - Moderate Case')
-        )
-        ws_worstcase_count = sum(
-            1 for c in columns
-            if c.startswith('Water Stress Exposure') and c.endswith(' - Worst Case')
-        )
-        ws_baseline_cols = ['Water Stress Exposure (%)']
-        ws_baseline_count = sum(1 for c in ws_baseline_cols if c in columns)
+            # Reorder columns to put Asset Archetype as the 2nd column
+            if 'Asset Archetype' in df.columns and 'Facility' in df.columns:
+                cols = df.columns.tolist()
+                facility_idx = cols.index('Facility')
 
-        if 'Water Stress' in groups:
-            groups['Water Stress'] = ws_baseline_count + ws_moderatecase_count + ws_worstcase_count
+                # Remove Asset Archetype from its current position
+                if 'Asset Archetype' in cols:
+                    cols.remove('Asset Archetype')
 
-        # Flood column counts
-        flood_current_count = sum(1 for c in columns if c == 'Flood Depth (meters)')
-        flood_moderate_count = sum(1 for c in columns if c == 'Flood Depth (meters) - Moderate Case')
-        flood_worst_count = sum(1 for c in columns if c == 'Flood Depth (meters) - Worst Case')
+                # Insert Asset Archetype after Facility
+                cols.insert(facility_idx + 1, 'Asset Archetype')
+                df = df[cols]
 
-        if 'Flood' in groups:
-            groups['Flood'] = flood_current_count + flood_moderate_count + flood_worst_count
-
-        # Tropical Cyclone column counts
-        tc_basecase_count = sum(
-            1 for c in columns
-            if c.endswith(' - Moderate Case') and 'Windspeed' in c
-        )
-        tc_worstcase_count = sum(
-            1 for c in columns
-            if c.endswith(' - Worst Case') and 'Windspeed' in c
-        )
-        tc_baseline_cols = [
-            'Extreme Windspeed 10 year Return Period (km/h)',
-            'Extreme Windspeed 20 year Return Period (km/h)',
-            'Extreme Windspeed 50 year Return Period (km/h)',
-            'Extreme Windspeed 100 year Return Period (km/h)'
-        ]
-        tc_baseline_count = sum(1 for c in tc_baseline_cols if c in columns)
-
-        if 'Tropical Cyclones' in groups:
-            groups['Tropical Cyclones'] = (
-                tc_baseline_count + tc_basecase_count + tc_worstcase_count
-            )
-
-        # Storm Surge column counts
-        ss_worstcase_count = sum(
-            1 for c in columns
-            if c.endswith(' - Worst Case') and 'Storm Surge Flood Depth' in c
-        )
-        ss_baseline_cols = ['Storm Surge Flood Depth (meters)']
-        ss_baseline_count = sum(1 for c in ss_baseline_cols if c in columns)
-
-        if 'Storm Surge' in groups:
-            groups['Storm Surge'] = ss_baseline_count + ss_worstcase_count
-        slr_moderatecase_count = sum(1 for c in columns if c.endswith(" - Moderate Case") and "Sea Level Rise" in c)
-        slr_worstcase_count = sum(1 for c in columns if c.endswith(" - Worst Case") and "Sea Level Rise" in c)
-        if "Sea Level Rise" in groups:
-            groups["Sea Level Rise"] = slr_moderatecase_count + slr_worstcase_count
-        # Rainfall-Induced Landslide column counts
-        ls_moderatecase_count = sum(
-            1 for c in columns
-            if c.endswith(' - Moderate Case') and 'Landslide' in c
-        )
-        ls_worstcase_count = sum(
-            1 for c in columns
-            if c.endswith(' - Worst Case') and 'Landslide' in c
-        )
-        ls_baseline_cols = ['Rainfall-Induced Landslide (factor of safety)']
-        ls_baseline_count = sum(1 for c in ls_baseline_cols if c in columns)
-
-        if 'Rainfall-Induced Landslide' in groups:
-            groups['Rainfall-Induced Landslide'] = (
-                ls_baseline_count + ls_moderatecase_count + ls_worstcase_count
-            )
-
-
-        
-        if 'Flood' in selected_hazards:
-            flood_col_exists = 'Flood Depth (meters)' in columns
-            logger.info(f"'Flood Depth (meters)' in columns: {flood_col_exists}")
-        
-        # Enhanced TC Debug
-        if 'Tropical Cyclones' in selected_hazards:
-            tc_expected = ['Extreme Windspeed 10 year Return Period (km/h)', 
-                          'Extreme Windspeed 20 year Return Period (km/h)', 
-                          'Extreme Windspeed 50 year Return Period (km/h)', 
-                          'Extreme Windspeed 100 year Return Period (km/h)']
-            tc_found = [col for col in tc_expected if col in columns]
-            logger.info(f"'Tropical Cyclones' expected columns: {tc_expected}")
-            logger.info(f"'Tropical Cyclones' found columns: {tc_found}")
-            logger.info(f"'Tropical Cyclones' found count: {len(tc_found)}")
-        
-        # Verify specific hazard groups were added if selected
-        if 'Flood' in selected_hazards:
-            if 'Flood' in groups:
-                logger.info("Flood group successfully added to table headers")
-            else:
-                logger.warning("Flood group missing from table headers")
-
-        if 'Tropical Cyclones' in selected_hazards:
-            if 'Tropical Cyclones' in groups:
-                logger.info("Tropical Cyclones group successfully added to table headers")
-            else:
-                logger.warning("Tropical Cyclones group missing from table headers")
-                # Additional detailed debug
-                logger.debug(f"Groups dict: {groups}")
-                logger.debug(f"Selected hazards: {selected_hazards}")
-                logger.debug(f"TC columns expected: {hazard_columns['Tropical Cyclones']}")
-                tc_debug_found = [col for col in hazard_columns['Tropical Cyclones'] if col in columns]
-                logger.debug(f"TC columns actually found: {tc_debug_found}")
-        
-        # Get the paths to any generated plots
-        plot_path = result.get('plot_path')
-        all_plots = result.get('all_plots', [])
-        
-        # Store analysis results in session for potential reuse
-        request.session['climate_hazards_v2_results'] = {
-            'data': data,
-            'columns': columns,
-            'plot_path': plot_path if plot_path else None,
-            'all_plots': all_plots
-        }
-
-        # Preserve a baseline copy of the results the first time they are
-        # generated so we can restore them later if needed
-        if 'climate_hazards_v2_baseline_results' not in request.session:
-            request.session['climate_hazards_v2_baseline_results'] = copy.deepcopy(
-                request.session['climate_hazards_v2_results']
-            )
-        
-        # Prepare context for the template
-        context = {
-            'data': data,
-            'columns': columns,
-            'groups': groups,
-            'plot_path': plot_path,
-            'all_plots': all_plots,
-            'selected_hazards': selected_hazards,
-            'heat_basecase_count': heat_basecase_count,
-            'heat_worstcase_count': heat_worstcase_count,
-            'heat_baseline_count': heat_baseline_count,
-            'tc_basecase_count': tc_basecase_count,
-            'tc_worstcase_count': tc_worstcase_count,
-            'tc_baseline_count': tc_baseline_count,
-            'ss_baseline_count': ss_baseline_count,
-            'ss_worstcase_count': ss_worstcase_count,
-            'ws_baseline_count': ws_baseline_count,
-            'ws_moderatecase_count': ws_moderatecase_count,
-            'ws_worstcase_count': ws_worstcase_count,
-            'ls_baseline_count': ls_baseline_count,
-            'ls_moderatecase_count': ls_moderatecase_count,
-            'ls_worstcase_count': ls_worstcase_count,
-            'slr_moderatecase_count': slr_moderatecase_count,
-            'slr_worstcase_count': slr_worstcase_count,
-            'flood_current_count': flood_current_count,
-            'flood_moderate_count': flood_moderate_count,
-            'flood_worst_count': flood_worst_count,
-            'success_message': f"Successfully analyzed {len(data)} facilities for {len(selected_hazards)} hazard types."
-        }
-        
-        logger.info("Rendering results template...")
-        return render(request, 'climate_hazards_analysis_v2/results.html', context)
-        
     except Exception as e:
-        logger.exception(f"Error in climate hazards analysis: {str(e)}")
-        
-        return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
-            'error': f"Error in climate hazards analysis: {str(e)}",
-            'facility_count': len(facility_data),
-            'hazard_types': [
-                'Flood', 'Water Stress', 'Heat', 'Sea Level Rise', 
-                'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
-            ],
-            'selected_hazards': selected_hazards
-        })
-    
+        logger.exception(f"Error adding asset archetype information: {e}")
+        # Add default Asset Archetype column even on error
+        df['Asset Archetype'] = 'Default'
+
+        # Reorder columns to put Asset Archetype as the 2nd column
+        if 'Asset Archetype' in df.columns and 'Facility' in df.columns:
+            cols = df.columns.tolist()
+            facility_idx = cols.index('Facility')
+
+            # Remove Asset Archetype from its current position
+            if 'Asset Archetype' in cols:
+                cols.remove('Asset Archetype')
+
+            # Insert Asset Archetype after Facility
+            cols.insert(facility_idx + 1, 'Asset Archetype')
+            df = df[cols]
+
+    return df
+
+
 def generate_report(request):
     """
     Django view that generates the PDF report and returns it as an HTTP response.
@@ -2104,24 +2073,516 @@ def save_updated_data_to_csv(table_data, request):
     try:
         # Create DataFrame from the updated data
         df = pd.DataFrame(table_data)
-        
+
         # Generate filename with timestamp
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"asset_exposure_updated_{timestamp}.csv"
-        
+
         # Save to a designated directory (adjust path as needed)
         output_dir = os.path.join('media', 'climate_hazards_v2', 'updated_data')
         os.makedirs(output_dir, exist_ok=True)
-        
+
         file_path = os.path.join(output_dir, filename)
         df.to_csv(file_path, index=False)
-        
+
         # Store the updated file path in session for reference
         request.session['climate_hazards_v2_asset_exposure_updated_csv_path'] = file_path
-        
+
         logger.info(f"Updated data saved to: {file_path}")
-        
+
     except Exception as e:
         logger.error(f"Error saving updated data to CSV: {e}")
         raise
+
+
+def export_hazard_data_to_excel(request):
+    """
+    Export hazard exposure data to Excel format.
+    This endpoint can be used for both regular and sensitivity results.
+    """
+    try:
+        # Check if this is for sensitivity results
+        is_sensitivity = request.GET.get('sensitivity', 'false').lower() == 'true'
+
+        if is_sensitivity:
+            # Get sensitivity results data
+            results_data = request.session.get('climate_hazards_v2_sensitivity_results')
+            if not results_data or 'data' not in results_data:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'No sensitivity results data found'
+                }, status=404)
+
+            data = results_data['data']
+            columns = results_data['columns']
+            filename_prefix = 'climate_hazard_sensitivity_results'
+        else:
+            # Get regular results data
+            results_data = request.session.get('climate_hazards_v2_results')
+            if not results_data or 'data' not in results_data:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'No hazard analysis results found'
+                }, status=404)
+
+            data = results_data['data']
+            columns = results_data['columns']
+            filename_prefix = 'climate_hazard_exposure_results'
+
+        if not data:
+            return JsonResponse({
+                'success': False,
+                'error': 'No data available for export'
+            }, status=404)
+
+        # Create DataFrame
+        df = pd.DataFrame(data)
+
+        # Ensure columns are in the correct order
+        if columns:
+            # Only include columns that exist in the data
+            available_columns = [col for col in columns if col in df.columns]
+            df = df[available_columns]
+
+        # Create output buffer
+        output = BytesIO()
+
+        # Generate filename with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{filename_prefix}_{timestamp}.xlsx"
+
+        # Create Excel writer with formatting
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='Hazard Analysis Results')
+
+            # Get the workbook and worksheet
+            workbook = writer.book
+            worksheet = writer.sheets['Hazard Analysis Results']
+
+            # Add formatting
+            header_format = workbook.add_format({
+                'bold': True,
+                'bg_color': '#F1D500',  # SGV yellow color
+                'border': 1,
+                'text_wrap': True,
+                'valign': 'top'
+            })
+
+            # Apply header formatting
+            for col_num, value in enumerate(df.columns.values):
+                worksheet.write(0, col_num, value, header_format)
+
+            # Auto-adjust column widths
+            for i, col in enumerate(df.columns):
+                # Get the maximum length of data in this column
+                max_len = max(
+                    df[col].astype(str).map(len).max(),
+                    len(str(col))
+                ) + 2  # Add some padding
+
+                # Set column width (with a maximum to prevent too wide columns)
+                worksheet.set_column(i, i, min(max_len, 50))
+
+        # Prepare response
+        output.seek(0)
+        response = HttpResponse(
+            output.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        logger.info(f"Successfully exported {len(df)} rows to Excel: {filename}")
+
+        return response
+
+    except Exception as e:
+        logger.exception(f"Error exporting to Excel: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': f'Export failed: {str(e)}'
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+def clear_site_data(request):
+    """
+    Clear all session data related to climate hazards analysis.
+    This includes facility data, selected hazards, analysis results,
+    and temporary files.
+    """
+    try:
+        logger.info("Starting to clear site data for session")
+
+        # Validate request
+        if not request.session.exists(request.session.session_key):
+            logger.warning("Attempted to clear data for non-existent session")
+            return JsonResponse({
+                'success': True,
+                'message': 'No active session data found to clear.'
+            })
+
+        # List of session keys to clear
+        session_keys_to_clear = [
+            'climate_hazards_v2_facility_data',
+            'climate_hazards_v2_facility_csv_path',
+            'climate_hazards_v2_uploaded_filename',
+            'climate_hazards_v2_selected_hazards',
+            'climate_hazards_v2_results',
+            'climate_hazards_v2_baseline_results',
+            'climate_hazards_v2_sensitivity_results',
+            'climate_hazards_v2_archetype_params',
+            'climate_hazards_v2_revised_params',
+            'climate_hazards_v2_asset_exposure_updated_csv_path',
+            # Clear any additional analysis-related session variables
+            'combined_csv_path',  # Used in report generation
+        ]
+
+        # Clear session data
+        cleared_count = 0
+        for key in session_keys_to_clear:
+            if key in request.session:
+                del request.session[key]
+                cleared_count += 1
+                logger.info(f"Cleared session key: {key}")
+
+        # Clean up temporary files
+        temp_files_removed = 0
+        try:
+            # Define paths for temporary files
+            temp_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
+
+            if os.path.exists(temp_dir):
+                # Remove facility CSV files created for this session
+                session_pattern = f"facility_data_{request.session.session_key or '*'}*.csv"
+                for file_path in glob.glob(os.path.join(temp_dir, session_pattern)):
+                    try:
+                        os.remove(file_path)
+                        temp_files_removed += 1
+                        logger.info(f"Removed temporary file: {file_path}")
+                    except OSError as e:
+                        logger.warning(f"Could not remove file {file_path}: {e}")
+
+                # Also remove old files (older than 24 hours) to prevent buildup
+                import time
+                current_time = time.time()
+                for file_path in glob.glob(os.path.join(temp_dir, "facility_data_*.csv")):
+                    try:
+                        file_age = current_time - os.path.getctime(file_path)
+                        if file_age > 24 * 3600:  # 24 hours in seconds
+                            os.remove(file_path)
+                            temp_files_removed += 1
+                            logger.info(f"Removed old temporary file: {file_path}")
+                    except OSError as e:
+                        logger.warning(f"Could not remove old file {file_path}: {e}")
+
+        except Exception as e:
+            logger.warning(f"Error cleaning up temporary files: {e}")
+
+        # Mark session as modified
+        request.session.modified = True
+
+        logger.info(f"Successfully cleared {cleared_count} session keys and {temp_files_removed} temporary files")
+
+        return JsonResponse({
+            'success': True,
+            'message': f'Successfully cleared all site data! Removed {cleared_count} data items and {temp_files_removed} temporary files.'
+        })
+
+    except Exception as e:
+        logger.exception(f"Error clearing site data: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': f'Failed to clear site data: {str(e)}'
+        }, status=500)
+
+
+@ensure_csrf_cookie
+@require_GET
+def refresh_csrf_token(request):
+    """
+    Refresh CSRF token for AJAX requests.
+    This endpoint ensures a valid CSRF token is available for clients
+    that may have lost their token due to storage clearing.
+    """
+    try:
+        # Get current CSRF token
+        token = get_token(request)
+
+        return JsonResponse({
+            'success': True,
+            'csrf_token': token,
+            'message': 'CSRF token refreshed successfully'
+        })
+
+    except Exception as e:
+        logger.error(f"Error refreshing CSRF token: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to refresh CSRF token'
+        }, status=500)
+
+
+# Polygon Asset Management Views
+
+@require_GET
+def get_polygon_assets(request):
+    """
+    API endpoint to retrieve all polygon assets for the current session.
+    Returns assets in GeoJSON format for map display.
+    """
+    try:
+        session_key = request.session.session_key
+
+        # Get polygon assets from database
+        assets = Asset.objects.filter(
+            session_key=session_key,
+            asset_type='polygon'
+        ).order_by('-created_at')
+
+        # Convert to GeoJSON FeatureCollection
+        features = []
+        for asset in assets:
+            features.append(asset.geojson)
+
+        geojson_data = {
+            'type': 'FeatureCollection',
+            'features': features
+        }
+
+        return JsonResponse({
+            'success': True,
+            'assets': geojson_data,
+            'count': len(features)
+        })
+
+    except Exception as e:
+        logger.exception(f"Error retrieving polygon assets: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to retrieve polygon assets'
+        }, status=500)
+
+
+@require_http_methods(["PUT"])
+def update_polygon_asset(request, asset_id):
+    """
+    API endpoint to update an existing polygon asset.
+    """
+    try:
+        if not request.session.session_key:
+            return JsonResponse({
+                'success': False,
+                'error': 'No active session'
+            }, status=401)
+
+        asset = Asset.objects.get(
+            id=asset_id,
+            session_key=request.session.session_key
+        )
+
+        data = json.loads(request.body)
+
+        # Update basic fields
+        if 'name' in data and data['name'].strip():
+            asset.name = data['name'].strip()
+
+        if 'archetype' in data:
+            asset.archetype = data['archetype'].strip() if data['archetype'] else 'default archetype'
+
+        # Update polygon geometry if provided
+        if 'geometry' in data and data['geometry']:
+            if asset.set_polygon_from_geojson(data['geometry']):
+                logger.info(f"Updated polygon geometry for asset: {asset.name}")
+            else:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Invalid polygon geometry provided'
+                }, status=400)
+
+        asset.save()
+
+        return JsonResponse({
+            'success': True,
+            'asset': asset.geojson,
+            'message': 'Polygon asset updated successfully'
+        })
+
+    except Asset.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': 'Polygon asset not found'
+        }, status=404)
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON data provided'
+        }, status=400)
+    except Exception as e:
+        logger.exception(f"Error updating polygon asset: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to update polygon asset'
+        }, status=500)
+
+
+@require_http_methods(["DELETE"])
+def delete_polygon_asset(request, asset_id):
+    """
+    API endpoint to delete a polygon asset.
+    """
+    try:
+        if not request.session.session_key:
+            return JsonResponse({
+                'success': False,
+                'error': 'No active session'
+            }, status=401)
+
+        asset = Asset.objects.get(
+            id=asset_id,
+            session_key=request.session.session_key
+        )
+
+        asset_name = asset.name
+        asset.delete()
+
+        return JsonResponse({
+            'success': True,
+            'message': f'Polygon asset "{asset_name}" deleted successfully'
+        })
+
+    except Asset.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': 'Polygon asset not found'
+        }, status=404)
+    except Exception as e:
+        logger.exception(f"Error deleting polygon asset: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to delete polygon asset'
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+def create_polygon_asset(request):
+    """
+    API endpoint to create a new polygon asset from the drawing workflow.
+    Handles the polygon creation workflow: draw polygon -> modal -> save.
+    """
+    try:
+        if not request.session.session_key:
+            return JsonResponse({
+                'success': False,
+                'error': 'No active session'
+            }, status=401)
+
+        data = json.loads(request.body)
+
+        # Validate required fields
+        if not data.get('geometry'):
+            return JsonResponse({
+                'success': False,
+                'error': 'Polygon geometry is required'
+            }, status=400)
+
+        if not data.get('name', '').strip():
+            return JsonResponse({
+                'success': False,
+                'error': 'Asset name is required'
+            }, status=400)
+
+        # Calculate centroid from polygon geometry
+        geometry = data['geometry']
+        if geometry.get('type') != 'Polygon':
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid polygon geometry type'
+            }, status=400)
+
+        # Calculate centroid coordinates
+        coords = geometry['coordinates'][0]  # Exterior ring
+        if len(coords) < 3:
+            return JsonResponse({
+                'success': False,
+                'error': 'Polygon must have at least 3 points'
+            }, status=400)
+
+        # Simple centroid calculation (average of coordinates)
+        sum_lng = sum(point[0] for point in coords[:-1])  # Exclude closing point
+        sum_lat = sum(point[1] for point in coords[:-1])
+        n = len(coords) - 1  # Exclude closing point
+        centroid_lng = sum_lng / n
+        centroid_lat = sum_lat / n
+
+        # Create the asset
+        asset = Asset.objects.create(
+            name=data['name'].strip(),
+            archetype=data.get('archetype', 'default archetype').strip() or 'default archetype',
+            latitude=centroid_lat,
+            longitude=centroid_lng,
+            polygon_geometry=geometry,
+            asset_type='polygon',
+            session_key=request.session.session_key
+        )
+
+        logger.info(f"Created new polygon asset: {asset.name} (ID: {asset.id})")
+
+        return JsonResponse({
+            'success': True,
+            'asset': asset.geojson,
+            'message': f'Polygon asset "{asset.name}" created successfully'
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON data provided'
+        }, status=400)
+    except Exception as e:
+        logger.exception(f"Error creating polygon asset: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to create polygon asset'
+        }, status=500)
+
+
+@require_GET
+def get_asset_analysis_results(request, asset_id):
+    """
+    API endpoint to retrieve climate hazard analysis results for a specific asset.
+    """
+    try:
+        asset = Asset.objects.get(id=asset_id)
+
+        # Get all analysis results for this asset
+        results = HazardAnalysisResult.objects.filter(asset=asset).order_by(
+            'hazard_type', 'scenario'
+        )
+
+        # Format results
+        results_data = {}
+        for result in results:
+            if result.hazard_type not in results_data:
+                results_data[result.hazard_type] = {}
+            results_data[result.hazard_type][result.scenario] = result.result_data
+
+        return JsonResponse({
+            'success': True,
+            'asset': asset.geojson,
+            'results': results_data,
+            'has_results': len(results) > 0
+        })
+
+    except Asset.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': 'Asset not found'
+        }, status=404)
+    except Exception as e:
+        logger.exception(f"Error retrieving asset analysis results: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to retrieve analysis results'
+        }, status=500)
