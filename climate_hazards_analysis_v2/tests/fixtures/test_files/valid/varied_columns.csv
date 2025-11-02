@@ -1,0 +1,4 @@
+facility_name,latitude,longitude,type
+Test Facility A,48.8566,2.3522,Office
+Test Facility B,52.5200,13.4050,Warehouse
+Test Facility C,41.9028,12.4964,Retail

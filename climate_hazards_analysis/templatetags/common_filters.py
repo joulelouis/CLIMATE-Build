@@ -6,9 +6,44 @@ climate_hazards_analysis and climate_hazards_analysis_v2 modules.
 """
 
 from django import template
+from django.template.base import Node, TemplateSyntaxError
 import re
 
 register = template.Library()
+
+
+class AssignNode(Node):
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
+
+    def render(self, context):
+        try:
+            resolved_value = self.value.resolve(context)
+            context[self.name] = resolved_value
+        except template.VariableDoesNotExist:
+            context[self.name] = ''
+        return ''
+
+
+@register.tag(name="assign")
+def do_assign(parser, token):
+    """
+    Assign a value to a variable in the template context.
+    Usage: {% assign variable_name = value %}
+    """
+    try:
+        # Split the token content
+        bits = token.split_contents()
+        if len(bits) != 4 or bits[2] != '=':
+            raise TemplateSyntaxError("Usage: {% assign variable_name = value %}")
+
+        variable_name = bits[1]
+        value = parser.compile_filter(bits[3])
+
+        return AssignNode(variable_name, value)
+    except ValueError:
+        raise TemplateSyntaxError("Usage: {% assign variable_name = value %}")
 
 
 @register.filter(name="to_float")
@@ -135,6 +170,22 @@ def get_item(dictionary, key, default=None):
     return default
 
 
+@register.filter(name="lookup")
+def lookup(dictionary, key, default=None):
+    """
+    Alias for get_item filter for better template readability.
+
+    Args:
+        dictionary (dict): Dictionary to get value from
+        key: Key to look up
+        default: Default value if key not found
+
+    Returns:
+        Value from dictionary or default
+    """
+    return get_item(dictionary, key, default)
+
+
 @register.filter(name="truncate_words")
 def truncate_words(value, num_words=10, suffix="..."):
     """
@@ -173,3 +224,83 @@ def capitalize_words(value):
         return value
 
     return ' '.join(word.capitalize() for word in value.split())
+
+
+@register.filter(name="mul")
+def mul(value, multiplier):
+    """
+    Multiply a value by a multiplier.
+
+    Args:
+        value: Value to multiply
+        multiplier (float): Multiplier value
+
+    Returns:
+        float: Multiplied value
+    """
+    try:
+        if value is None:
+            return None
+        return float(value) * float(multiplier)
+    except (ValueError, TypeError):
+        return None
+
+
+@register.filter(name="plus")
+def plus(value, addend):
+    """
+    Add a value to another value.
+
+    Args:
+        value: Value to add to
+        addend (float): Value to add
+
+    Returns:
+        float: Sum of values
+    """
+    try:
+        if value is None:
+            return None
+        return float(value) + float(addend)
+    except (ValueError, TypeError):
+        return None
+
+
+@register.filter(name="divided_by")
+def divided_by(value, divisor):
+    """
+    Divide a value by another value.
+
+    Args:
+        value: Value to divide
+        divisor (float): Divisor
+
+    Returns:
+        float: Result of division
+    """
+    try:
+        if value is None or divisor == 0:
+            return None
+        return float(value) / float(divisor)
+    except (ValueError, TypeError, ZeroDivisionError):
+        return None
+
+
+@register.filter(name="append")
+def append(value, suffix):
+    """
+    Append a string to another string.
+
+    Args:
+        value: Original string
+        suffix (str): String to append
+
+    Returns:
+        str: Concatenated string
+    """
+    try:
+        if value is None:
+            value = ''
+        return str(value) + str(suffix)
+    except (ValueError, TypeError):
+        return str(value) if value is not None else str(suffix)

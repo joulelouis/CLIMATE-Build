@@ -4,6 +4,9 @@
 <!-- Mapbox GL Draw CSS -->
 <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.css" type="text/css">
 
+<!-- Mapbox Geocoder CSS -->
+<link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.1/mapbox-gl-geocoder.css" type="text/css">
+
 <!-- Map Container -->
 <div id="climate-hazard-map" style="width: 100%; height: 600px; position: relative;">
   <!-- Draw Polygon Button -->
@@ -21,13 +24,147 @@
 
   
   <!-- Drawing Instructions (shown during draw mode) -->
-  <div id="draw-instructions" style="position: absolute; top: 110px; left: 10px; z-index: 1000; display: none; background: rgba(255, 255, 255, 0.95); padding: 10px 15px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
-    <h6 class="mb-2" style="font-size: 14px; font-weight: bold;">Drawing Polygon:</h6>
-    <ul class="mb-0" style="font-size: 12px; padding-left: 20px; margin: 0;">
-      <li>Click on map to add points</li>
-      <li>Click on first point to close polygon</li>
-      <li>Or press <kbd>Enter</kbd> key to finish</li>
+  <div id="draw-instructions" style="position: absolute; top: 110px; left: 10px; z-index: 1000; display: none; background: rgba(255, 255, 255, 0.95); padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-left: 4px solid #007bff; max-width: 300px;">
+    <h6 class="mb-3" style="font-size: 16px; font-weight: bold; color: #007bff;">
+      <i class="fas fa-draw-polygon me-2"></i>Drawing Polygon Asset
+    </h6>
+    <ul class="mb-0" style="font-size: 14px; padding-left: 20px; margin: 0; line-height: 1.6;">
+      <li><i class="fas fa-mouse-pointer text-primary me-2"></i>Click on map to add corner points</li>
+      <li><i class="fas fa-link text-success me-2"></i>Click first point or press <kbd class="px-2 py-1 bg-light rounded">Enter</kbd> to complete</li>
+      <li><i class="fas fa-times text-danger me-2"></i>Press <kbd class="px-2 py-1 bg-light rounded">Esc</kbd> to cancel drawing</li>
     </ul>
+    <div class="mt-3 pt-3 border-top">
+      <div class="d-flex align-items-center text-muted small">
+        <div class="spinner-border spinner-border-sm me-2" role="status">
+          <span class="visually-hidden">Drawing...</span>
+        </div>
+        <span id="drawing-status">Click to start drawing...</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Hazard Selection Modal -->
+<div class="modal fade" id="hazardSelectionModal" tabindex="-1" aria-labelledby="hazardSelectionModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="hazardSelectionModalLabel">
+          <i class="fas fa-exclamation-triangle me-2"></i>Select Climate/Weather Hazards
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-4">
+    Your polygon asset has been created!
+    <span id="hazard-modal-asset-counts"></span>
+    Select the climate/weather hazards you want to analyze for this area:
+</p>
+
+        <form id="hazard-form-modal">
+          {% csrf_token %}
+
+          <div class="row">
+            <div class="col-md-6">
+              <div class="hazard-checkbox-container d-flex align-items-center mb-3" onclick="toggleModalCheckbox('hazard-flood')">
+                <input type="checkbox" class="hazard-checkbox" id="hazard-flood" name="hazards" value="Flood">
+                <div class="hazard-icon">
+                  <i class="fas fa-water"></i>
+                </div>
+                <div>
+                  <div class="hazard-name">Flood</div>
+                  <div class="hazard-description">Analyze flood depth for your facilities.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="hazard-checkbox-container d-flex align-items-center mb-3" onclick="toggleModalCheckbox('hazard-water-stress')">
+                <input type="checkbox" class="hazard-checkbox" id="hazard-water-stress" name="hazards" value="Water Stress">
+                <div class="hazard-icon">
+                  <i class="fas fa-tint-slash"></i>
+                </div>
+                <div>
+                  <div class="hazard-name">Water Stress</div>
+                  <div class="hazard-description">Assess water stress levels.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="hazard-checkbox-container d-flex align-items-center mb-3" onclick="toggleModalCheckbox('hazard-heat')">
+                <input type="checkbox" class="hazard-checkbox" id="hazard-heat" name="hazards" value="Heat">
+                <div class="hazard-icon">
+                  <i class="fas fa-temperature-high"></i>
+                </div>
+                <div>
+                  <div class="hazard-name">Heat</div>
+                  <div class="hazard-description">Evaluate heat exposure days.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="hazard-checkbox-container d-flex align-items-center mb-3" onclick="toggleModalCheckbox('hazard-sea-level')">
+                <input type="checkbox" class="hazard-checkbox" id="hazard-sea-level" name="hazards" value="Sea Level Rise">
+                <div class="hazard-icon">
+                  <i class="fas fa-water"></i>
+                </div>
+                <div>
+                  <div class="hazard-name">Sea Level Rise</div>
+                  <div class="hazard-description">Project sea level rise on coastal facilities.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="hazard-checkbox-container d-flex align-items-center mb-3" onclick="toggleModalCheckbox('hazard-cyclones')">
+                <input type="checkbox" class="hazard-checkbox" id="hazard-cyclones" name="hazards" value="Tropical Cyclones">
+                <div class="hazard-icon">
+                  <i class="fas fa-wind"></i>
+                </div>
+                <div>
+                  <div class="hazard-name">Tropical Cyclones</div>
+                  <div class="hazard-description">Analyze extreme windspeeds.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="hazard-checkbox-container d-flex align-items-center mb-3" onclick="toggleModalCheckbox('hazard-storm-surge')">
+                <input type="checkbox" class="hazard-checkbox" id="hazard-storm-surge" name="hazards" value="Storm Surge">
+                <div class="hazard-icon">
+                  <i class="fas fa-water"></i>
+                </div>
+                <div>
+                  <div class="hazard-name">Storm Surge</div>
+                  <div class="hazard-description">Assess flooding from storm surge events.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="hazard-checkbox-container d-flex align-items-center mb-3" onclick="toggleModalCheckbox('hazard-landslide')">
+                <input type="checkbox" class="hazard-checkbox" id="hazard-landslide" name="hazards" value="Rainfall Induced Landslide">
+                <div class="hazard-icon">
+                  <i class="fas fa-mountain"></i>
+                </div>
+                <div>
+                  <div class="hazard-name">Rainfall Induced Landslide</div>
+                  <div class="hazard-description">Assess landslide susceptibility from heavy rainfall.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-warning" id="proceed-to-exposure-btn" onclick="handleProceedToExposure(event)" disabled>
+          <i class="fas fa-chart-line me-2"></i>Generate Asset Exposure
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -85,6 +222,217 @@
   .facility-hover-popup .mapboxgl-popup-tip {
     border-top-color: rgba(0, 0, 0, 0.7);
     border-bottom-color: rgba(0, 0, 0, 0.7);
+  }
+
+  /* Step Header Styles */
+  .step-header {
+    background-color: #f8f9fa;
+    color: #495057;
+    font-weight: bold;
+    padding: 10px;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+  }
+
+  .step-header.active-step-header {
+    border: 2px solid #F1D500;
+    background-color: #fff8e1;
+    color: #495057;
+  }
+
+  .step-header.arrow::after {
+    content: "→";
+    margin-left: 10px;
+  }
+
+  /* Hazard Checkbox Styles */
+  .hazard-checkbox-container {
+    background-color: #F8F9FA;
+    border-radius: 8px;
+    padding: 16px;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+    cursor: pointer;
+  }
+
+  .hazard-checkbox-container.checked {
+    background-color: #FFF8C7;
+    border: 2px solid #F1D500;
+  }
+
+  .hazard-checkbox {
+    width: 20px;
+    height: 20px;
+    margin-right: 12px;
+  }
+
+  .hazard-checkbox:checked {
+    accent-color: #F1D500;
+  }
+
+  .hazard-icon {
+    width: 40px;
+    height: 40px;
+    background-color: #F1D500;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-right: 15px;
+  }
+
+  .hazard-name {
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .hazard-description {
+    font-size: 14px;
+    color: #6c757d;
+  }
+
+  /* Animations */
+  @keyframes pulse {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.5);
+      opacity: 0.5;
+    }
+    100% {
+      transform: scale(2);
+      opacity: 0;
+    }
+  }
+
+  @keyframes slideInLeft {
+    from {
+      transform: translateX(-100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideOutLeft {
+    from {
+      transform: translateX(0);
+      opacity: 1;
+    }
+    to {
+      transform: translateX(-100%);
+      opacity: 0;
+    }
+  }
+
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideOutRight {
+    from {
+      transform: translateX(0);
+      opacity: 1;
+    }
+    to {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* Enhanced drawing instructions */
+  #draw-instructions {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  /* Progress modal styling */
+  #polygonProgressModal .modal-content {
+    border: none;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  }
+
+  #polygonProgressModal .progress {
+    background-color: rgba(0,123,255,0.1);
+  }
+
+  /* Heatmap legend styling */
+  #heatmap-legend {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.2);
+  }
+
+  .legend-gradient {
+    background: linear-gradient(90deg, #2ecc71 0%, #f39c12 50%, #e74c3c 100%);
+  }
+
+  /* Grid spacing modal enhancements */
+  .bg-gradient-primary {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+  }
+
+  .card.bg-light {
+    border: 1px solid rgba(0,0,0,0.1);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  }
+
+  /* Performance indicator animations */
+  #processing-icon, #detail-icon, #accuracy-icon {
+    transition: all 0.3s ease;
+  }
+
+  #processing-icon:hover, #detail-icon:hover, #accuracy-icon:hover {
+    transform: scale(1.1);
+  }
+
+  /* High z-index popup styles for centroid and granular markers */
+  .centroid-hover-popup.mapboxgl-popup {
+    z-index: 10000 !important;
+  }
+
+  .centroid-hover-popup.mapboxgl-popup-content {
+    z-index: 10000 !important;
+    background: rgba(255, 255, 255, 0.95) !important;
+    border: 1px solid #28a745 !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+    backdrop-filter: blur(4px) !important;
+  }
+
+  .granular-hover-popup.mapboxgl-popup {
+    z-index: 9999 !important;
+  }
+
+  .granular-hover-popup.mapboxgl-popup-content {
+    z-index: 9999 !important;
+    background: rgba(255, 255, 255, 0.95) !important;
+    border: 1px solid #007bff !important;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.25) !important;
+    backdrop-filter: blur(4px) !important;
+  }
+
+  .centroid-hover-popup .mapboxgl-popup-tip,
+  .granular-hover-popup .mapboxgl-popup-tip {
+    border-top-color: rgba(255, 255, 255, 0.95) !important;
   }
 </style>
 
@@ -156,62 +504,163 @@
 
 <!-- Grid Spacing Modal -->
 <div class="modal fade" id="gridSpacingModal" tabindex="-1" aria-labelledby="gridSpacingModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
-      <div class="modal-header bg-primary text-white">
+      <div class="modal-header bg-gradient-primary text-white">
         <h5 class="modal-title" id="gridSpacingModalLabel">
-          <i class="fas fa-th"></i> Configure Granular Analysis
+          <i class="fas fa-th me-2"></i>Configure Granular Analysis
         </h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <div class="alert alert-info mb-3">
-          <i class="fas fa-info-circle"></i>
-          <strong>Granular Analysis Available!</strong>
-          <p class="mb-0 mt-2">
-            This area is ≥ 6 km². Select a grid spacing to perform detailed point-by-point hazard analysis across the entire polygon.
-          </p>
+        <!-- Success Alert -->
+        <div class="alert alert-success mb-4" role="alert">
+          <div class="d-flex align-items-center">
+            <div class="flex-shrink-0">
+              <i class="fas fa-check-circle fa-2x"></i>
+            </div>
+            <div class="flex-grow-1 ms-3">
+              <h6 class="alert-heading mb-1">Granular Analysis Available!</h6>
+              <p class="mb-0">This area qualifies for detailed point-by-point hazard analysis across the entire polygon.</p>
+            </div>
+          </div>
         </div>
 
-        <div class="mb-3">
-          <label class="form-label"><strong>Asset Name:</strong></label>
-          <p id="grid-asset-name" class="text-muted mb-0">Loading...</p>
+        <div class="row mb-4">
+          <div class="col-md-6">
+            <div class="card border-0 bg-light">
+              <div class="card-body">
+                <h6 class="card-title text-muted mb-2">
+                  <i class="fas fa-tag me-2"></i>Asset Details
+                </h6>
+                <div class="mb-2">
+                  <label class="form-label mb-1"><strong>Name:</strong></label>
+                  <p id="grid-asset-name" class="text-primary mb-0 fw-bold">Loading...</p>
+                </div>
+                <div>
+                  <label class="form-label mb-1"><strong>Area:</strong></label>
+                  <p id="grid-polygon-area" class="text-success mb-0 fw-bold">Calculating...</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card border-0 bg-light">
+              <div class="card-body">
+                <h6 class="card-title text-muted mb-2">
+                  <i class="fas fa-chart-area me-2"></i>Analysis Preview
+                </h6>
+                <div class="mb-2">
+                  <label class="form-label mb-1"><strong>Grid Spacing:</strong></label>
+                  <select class="form-select form-select-sm" id="grid-spacing-select" onchange="updateEstimatedPoints()">
+                    <option value="10">10 meters (Very Fine)</option>
+                    <option value="50">50 meters (Fine)</option>
+                    <option value="100" selected>100 meters (Default)</option>
+                    <option value="500">500 meters (Coarse)</option>
+                    <option value="1000">1000 meters (Very Coarse)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label mb-1"><strong>Sample Points:</strong></label>
+                  <div id="estimated-points" class="text-primary fw-bold">Calculating...</div>
+                  <div class="progress mt-2" style="height: 4px;">
+                    <div id="complexity-bar" class="progress-bar" role="progressbar" style="width: 0%;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="mb-3">
-          <label class="form-label"><strong>Polygon Area:</strong></label>
-          <p id="grid-polygon-area" class="text-muted mb-0">Calculating...</p>
+        <!-- Performance Indicators -->
+        <div class="card border-primary mb-4">
+          <div class="card-header bg-primary text-white">
+            <h6 class="mb-0"><i class="fas fa-tachometer-alt me-2"></i>Performance Analysis</h6>
+          </div>
+          <div class="card-body">
+            <div class="row text-center">
+              <div class="col-md-4">
+                <div class="mb-3">
+                  <i id="processing-icon" class="fas fa-clock fa-2x text-warning mb-2"></i>
+                  <h6 class="text-muted">Processing Time</h6>
+                  <p id="estimated-time" class="fw-bold text-warning mb-0">Calculating...</p>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="mb-3">
+                  <i id="detail-icon" class="fas fa-search fa-2x text-info mb-2"></i>
+                  <h6 class="text-muted">Detail Level</h6>
+                  <p id="detail-level" class="fw-bold text-info mb-0">Medium</p>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="mb-3">
+                  <i id="accuracy-icon" class="fas fa-bullseye fa-2x text-success mb-2"></i>
+                  <h6 class="text-muted">Analysis Accuracy</h6>
+                  <p id="accuracy-level" class="fw-bold text-success mb-0">High</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="mb-3">
-          <label for="grid-spacing-select" class="form-label"><strong>Select Grid Spacing:</strong></label>
-          <select class="form-select" id="grid-spacing-select" onchange="updateEstimatedPoints()">
-            <option value="10">10 meters (Very Fine)</option>
-            <option value="50">50 meters (Fine)</option>
-            <option value="100" selected>100 meters (Default)</option>
-            <option value="500">500 meters (Coarse)</option>
-            <option value="1000">1000 meters (Very Coarse)</option>
-          </select>
-          <small class="form-text text-muted">Finer spacing = more detailed analysis, but longer processing time.</small>
-        </div>
-
-        <div class="mb-3">
-          <label class="form-label"><strong>Estimated Sample Points:</strong></label>
-          <p id="estimated-points" class="text-primary fw-bold mb-0">Calculating...</p>
-          <small class="form-text text-muted">Approximate number of points that will be analyzed.</small>
-        </div>
-
-        <div class="alert alert-warning mb-0">
-          <i class="fas fa-clock"></i> <strong>Processing Time:</strong> <span id="estimated-time">2-5 seconds</span>
+        <!-- Recommendation -->
+        <div class="alert alert-info mb-0" role="alert">
+          <div class="d-flex align-items-start">
+            <div class="flex-shrink-0">
+              <i class="fas fa-lightbulb fa-lg"></i>
+            </div>
+            <div class="flex-grow-1 ms-3">
+              <h6 class="alert-heading mb-1">Recommendation</h6>
+              <p id="spacing-recommendation" class="mb-0">For this polygon size, <strong>100m spacing</strong> provides a good balance between detail and performance.</p>
+            </div>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="skipGranularAnalysis()">
-          <i class="fas fa-times"></i> Skip Analysis
+          <i class="fas fa-forward me-2"></i>Skip Analysis
         </button>
-        <button type="button" class="btn btn-primary" onclick="applyGranularAnalysis()">
-          <i class="fas fa-check"></i> Apply Grid Analysis
+        <button type="button" class="btn btn-success" onclick="applyGranularAnalysis()">
+          <i class="fas fa-play me-2"></i>Apply Grid Analysis
         </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Heatmap Legend (initially hidden) -->
+<div id="heatmap-legend" style="position: absolute; bottom: 20px; right: 10px; z-index: 1000; display: none; background: rgba(255, 255, 255, 0.95); padding: 15px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); min-width: 200px;">
+  <h6 class="mb-3" style="font-size: 14px; font-weight: bold;">
+    <i class="fas fa-fire me-2"></i>Hazard Exposure
+  </h6>
+  <div class="legend-gradient mb-2" style="height: 20px; border-radius: 4px; background: linear-gradient(to right, #2ecc71, #f39c12, #e74c3c); border: 1px solid #ddd;"></div>
+  <div class="d-flex justify-content-between" style="font-size: 12px;">
+    <span><i class="fas fa-shield-alt text-success"></i> Low</span>
+    <span><i class="fas fa-exclamation-triangle text-warning"></i> Medium</span>
+    <span><i class="fas fa-exclamation-circle text-danger"></i> High</span>
+  </div>
+  <div class="mt-2 pt-2 border-top">
+    <small class="text-muted">Interactive polygon asset management</small>
+  </div>
+</div>
+
+<!-- Polygon Asset Progress Modal -->
+<div class="modal fade" id="polygonProgressModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-body text-center py-4">
+        <div class="mb-3">
+          <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+            <span class="visually-hidden">Processing...</span>
+          </div>
+        </div>
+        <h5 class="mb-2">Processing Polygon Asset</h5>
+        <p id="progress-message" class="text-muted mb-3">Initializing analysis...</p>
+        <div class="progress mb-3" style="height: 6px;">
+          <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;"></div>
+        </div>
+        <small id="progress-detail" class="text-muted">Please wait while we process your asset...</small>
       </div>
     </div>
   </div>
@@ -221,6 +670,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
 <script>
+  console.log('climate_hazard_map.html script started');
 
   // Variables to hold map state
   let multiHazardMap;
@@ -232,6 +682,9 @@
   let geocoder;
   let currentCityBoundary = null;
   let cityBoundaryLayerId = null;
+  let polygonAssets = []; // Store polygon asset data
+  let heatmapLayers = []; // Store heatmap layer IDs
+  let centroidMarkers = []; // Store centroid markers
 
 
 
@@ -244,38 +697,80 @@
   baseBlueCircle.style.backgroundColor = 'blue';
 
   function initializeMultiHazardMap() {
+    console.log("initializeMultiHazardMap() called");
+
+    // Check if map container exists
+    const mapContainer = document.getElementById('climate-hazard-map');
+    if (!mapContainer) {
+      console.error('Map container #climate-hazard-map not found!');
+      return;
+    }
+    console.log('Map container found');
+
     if (multiHazardMap) {
+      console.log('Map already exists, resizing...');
       multiHazardMap.resize();
       return;
     }
 
-  // Initialize Mapbox
-  mapboxgl.accessToken = 'pk.eyJ1Ijoiam91bGUyMzMxIiwiYSI6ImNtZWpqcGRlZDA2aTkybXNmY3BhcnJjMzMifQ.l5raW7vd-PNzS1jYsbyC7g';
+    // Check if mapboxgl is available
+    if (typeof mapboxgl === 'undefined') {
+      console.error('mapboxgl is undefined! Mapbox library not loaded.');
+      return;
+    }
+    console.log('mapboxgl is available');
 
-    multiHazardMap = new mapboxgl.Map({
-        container: 'climate-hazard-map',
-        center: [121.7740, 12.8797],
-        zoom: 4.5,
-        style: 'mapbox://styles/mapbox/satellite-v9'
-    })
-    .addControl(new mapboxgl.NavigationControl())
-    .addControl(new mapboxgl.GeolocateControl())
-    .addControl(new mapboxgl.ScaleControl())
-    .addControl(new mapboxgl.FullscreenControl());
+    // Initialize Mapbox
+    mapboxgl.accessToken = 'pk.eyJ1Ijoiam91bGUyMzMxIiwiYSI6ImNtZWpqcGRlZDA2aTkybXNmY3BhcnJjMzMifQ.l5raW7vd-PNzS1jYsbyC7g';
+    console.log('Access token set, creating map...');
 
-    // Initialize Mapbox Geocoder
-    geocoder = new MapboxGeocoder({
-      accessToken: mapboxgl.accessToken,
-      mapboxgl: mapboxgl,
-      marker: false,
-      placeholder: 'Search for a city (e.g., Manila)',
-      countries: 'ph', // Limit to Philippines, remove this to search globally
-    });
+    try {
+        multiHazardMap = new mapboxgl.Map({
+            container: 'climate-hazard-map',
+            center: [121.7740, 12.8797],
+            zoom: 4.5,
+            style: 'mapbox://styles/mapbox/satellite-v9'
+        });
+        console.log('Map created successfully:', multiHazardMap);
 
-    multiHazardMap.addControl(geocoder, 'top-right');
+        // Load stored polygon assets after map is ready
+        loadStoredPolygonAssets();
+    } catch (error) {
+        console.error('Error creating map:', error);
+        return;
+    }
 
-    // Handle geocoder result
-    geocoder.on('result', handleGeocoderResult);
+    try {
+        multiHazardMap
+        .addControl(new mapboxgl.NavigationControl())
+        .addControl(new mapboxgl.GeolocateControl())
+        .addControl(new mapboxgl.ScaleControl())
+        .addControl(new mapboxgl.FullscreenControl());
+        console.log('Map controls added successfully');
+    } catch (error) {
+        console.error('Error adding map controls:', error);
+    }
+
+    // Initialize Mapbox Geocoder (only if it loaded successfully)
+    if (typeof MapboxGeocoder !== 'undefined') {
+        console.log('MapboxGeocoder is available, initializing geocoder...');
+        geocoder = new MapboxGeocoder({
+            accessToken: mapboxgl.accessToken,
+            mapboxgl: mapboxgl,
+            marker: false,
+            placeholder: 'Search for a city (e.g., Manila)',
+            countries: 'ph', // Limit to Philippines, remove this to search globally
+        });
+
+        multiHazardMap.addControl(geocoder, 'top-right');
+
+        // Handle geocoder result
+        geocoder.on('result', handleGeocoderResult);
+        console.log('Geocoder initialized successfully');
+    } else {
+        console.warn('MapboxGeocoder not available, map will work without city search');
+        // Map will work without geocoder, just no city search functionality
+    }
 
     // Initialize Mapbox Draw
     draw = new MapboxDraw({
@@ -317,6 +812,12 @@
 
       // Try to load facility data if it exists in session
       loadFacilityData();
+
+      // Initialize workflow progress tracking
+      setTimeout(() => {
+        updateProgressSteps();
+        updateProceedButtonVisibility();
+      }, 500);
     });
 
     // Handle polygon drawing completion
@@ -407,6 +908,7 @@
 
     const button = document.getElementById('toggle-draw-mode');
     const instructions = document.getElementById('draw-instructions');
+    const statusElement = document.getElementById('drawing-status');
 
     if (isDrawMode) {
       // Enable draw mode
@@ -416,10 +918,16 @@
       button.classList.add('btn-danger');
       button.innerHTML = '<i class="fas fa-times"></i> Cancel Drawing';
 
-      // Show drawing instructions
+      // Show drawing instructions with animation
       if (instructions) {
         instructions.style.display = 'block';
+        instructions.style.animation = 'slideInLeft 0.3s ease';
         console.log('Showing drawing instructions');
+      }
+
+      // Update status
+      if (statusElement) {
+        statusElement.textContent = 'Click on the map to start drawing...';
       }
 
       // Hide add facility panel if visible
@@ -428,6 +936,9 @@
         userMarker.remove();
         userMarker = null;
       }
+
+      // Add keyboard event listeners for drawing
+      document.addEventListener('keydown', handleDrawingKeys);
     } else {
       // Disable draw mode
       console.log('Disabling draw mode...');
@@ -436,14 +947,64 @@
       button.classList.add('btn-warning');
       button.innerHTML = '<i class="fas fa-draw-polygon"></i> Draw Polygon Asset';
 
-      // Hide drawing instructions
+      // Hide drawing instructions with animation
       if (instructions) {
-        instructions.style.display = 'none';
+        instructions.style.animation = 'slideOutLeft 0.3s ease';
+        setTimeout(() => {
+          instructions.style.display = 'none';
+        }, 300);
       }
 
       // Clear any drawn polygons
       draw.deleteAll();
       drawnPolygonData = null;
+
+      // Remove keyboard event listeners
+      document.removeEventListener('keydown', handleDrawingKeys);
+    }
+  }
+
+  // Handle keyboard events during drawing
+  function handleDrawingKeys(e) {
+    if (!isDrawMode) return;
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // Try to complete the polygon
+      const data = draw.getAll();
+      if (data.features.length > 0) {
+        const polygon = data.features[0];
+        if (polygon.geometry && polygon.geometry.coordinates &&
+            polygon.geometry.coordinates[0] &&
+            polygon.geometry.coordinates[0].length >= 3) {
+          // Complete the polygon
+          draw.changeMode('simple_select');
+          console.log('Polygon completed via Enter key');
+        }
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      // Cancel drawing
+      toggleDrawMode();
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      // Remove last point
+      const data = draw.getAll();
+      if (data.features.length > 0) {
+        const polygon = data.features[0];
+        if (polygon.geometry && polygon.geometry.coordinates &&
+            polygon.geometry.coordinates[0] &&
+            polygon.geometry.coordinates[0].length > 3) {
+          // Remove the last point (but keep at least 3)
+          const coords = polygon.geometry.coordinates[0];
+          coords.pop(); // Remove last point (duplicate of first)
+          coords.pop(); // Remove the actual last point
+          coords.push(coords[0]); // Add back the closing point
+
+          // Update the drawing
+          draw.add(polygon);
+        }
+      }
     }
   }
 
@@ -455,13 +1016,22 @@
       if (data.features.length === 0) return;
 
       const polygon = data.features[0];
+      const statusElement = document.getElementById('drawing-status');
 
       // Validate polygon has at least 3 points
       if (!polygon.geometry || !polygon.geometry.coordinates ||
           !polygon.geometry.coordinates[0] ||
           polygon.geometry.coordinates[0].length < 4) {
         console.log('Polygon not complete yet, waiting...');
+        if (statusElement) {
+          statusElement.textContent = 'Add more points to complete the polygon...';
+        }
         return;
+      }
+
+      // Update status to processing
+      if (statusElement) {
+        statusElement.textContent = 'Processing polygon geometry...';
       }
 
       // Calculate centroid using Turf.js
@@ -487,23 +1057,35 @@
       button.classList.add('btn-warning');
       button.innerHTML = '<i class="fas fa-draw-polygon"></i> Draw Polygon Asset';
 
-      // Hide drawing instructions
-      const instructions = document.getElementById('draw-instructions');
-      if (instructions) {
-        instructions.style.display = 'none';
+      // Update status with success
+      if (statusElement) {
+        statusElement.textContent = `Polygon complete! Area: ${areaKm2.toFixed(2)} km²`;
+        statusElement.classList.add('text-success');
       }
 
-      // Check if polygon area qualifies for granular analysis (≥ 6 km²)
-      if (areaKm2 >= 6) {
-        console.log(`Polygon area: ${areaKm2.toFixed(2)} km² - Showing grid spacing modal`);
-        // Show grid spacing modal - asset modal will be shown when user clicks "Apply" or "Skip"
-        showGridSpacingModal('New Polygon', polygon.geometry, areaKm2, 'draw');
-      } else {
-        console.log(`Polygon area: ${areaKm2.toFixed(2)} km² - Skipping granular analysis (< 6 km²)`);
-        // Show the polygon asset modal directly
-        currentPolygonSource = 'draw';
-        showPolygonAssetModal(lat, lng);
+      // Hide drawing instructions with animation
+      const instructions = document.getElementById('draw-instructions');
+      if (instructions) {
+        setTimeout(() => {
+          instructions.style.animation = 'slideOutLeft 0.3s ease';
+          setTimeout(() => {
+            instructions.style.display = 'none';
+            // Reset status for next use
+            if (statusElement) {
+              statusElement.textContent = 'Click to start drawing...';
+              statusElement.classList.remove('text-success');
+            }
+          }, 300);
+        }, 2000);
       }
+
+      // Remove keyboard event listeners
+      document.removeEventListener('keydown', handleDrawingKeys);
+
+      // Show granular settings modal first, then asset creation modal
+      console.log(`Polygon area: ${areaKm2.toFixed(2)} km² - Showing granular settings modal`);
+      currentPolygonSource = 'draw';
+      showGranularSettingsModal(lat, lng, areaKm2);
     }, 100);
   }
 
@@ -645,13 +1227,113 @@
     }
   }
 
+  // Generate grid points within a polygon for granular analysis
+  function generateGridPoints(polygonGeometry, gridSpacingMeters) {
+    try {
+      console.log('Generating grid points with spacing:', gridSpacingMeters, 'meters');
+
+      // Convert polygon geometry to Turf feature
+      const polygonFeature = turf.feature(polygonGeometry);
+
+      // Get polygon bounds
+      const bounds = turf.bbox(polygonFeature);
+      const [minLng, minLat, maxLng, maxLat] = bounds;
+
+      console.log('Polygon bounds:', { minLng, minLat, maxLng, maxLat });
+
+      // Convert grid spacing from meters to degrees (approximate)
+      // 1 degree ≈ 111,132 meters at the equator
+      const gridSpacingDegrees = gridSpacingMeters / 111132;
+
+      const gridPoints = [];
+      let pointId = 0;
+
+      // Generate grid points within the bounding box
+      for (let lat = minLat; lat <= maxLat; lat += gridSpacingDegrees) {
+        for (let lng = minLng; lng <= maxLng; lng += gridSpacingDegrees) {
+          const point = turf.point([lng, lat]);
+
+          // Check if the point is within the polygon
+          if (turf.booleanPointInPolygon(point, polygonFeature)) {
+            gridPoints.push({
+              id: pointId++,
+              latitude: lat,
+              longitude: lng,
+              grid_row: Math.round((lat - minLat) / gridSpacingDegrees),
+              grid_col: Math.round((lng - minLng) / gridSpacingDegrees),
+              grid_spacing: gridSpacingMeters
+            });
+          }
+        }
+      }
+
+      console.log(`Generated ${gridPoints.length} grid points within polygon`);
+      return gridPoints;
+
+    } catch (error) {
+      console.error('Error generating grid points:', error);
+      return [];
+    }
+  }
+
+  // Show granular settings modal
+  function showGranularSettingsModal(lat, lng, areaKm2) {
+    try {
+      console.log('Showing granular settings modal with coordinates:', { lat, lng, areaKm2 });
+
+      // Set the global variable used by updateEstimatedPoints
+      currentPolygonAreaKm2 = areaKm2;
+
+      // Update polygon info in the modal
+      const assetNameElement = document.getElementById('grid-asset-name');
+      const polygonAreaElement = document.getElementById('grid-polygon-area');
+
+      if (assetNameElement) {
+        assetNameElement.textContent = 'Drawn Polygon';
+      }
+
+      if (polygonAreaElement) {
+        polygonAreaElement.textContent = `${areaKm2.toFixed(2)} km²`;
+      }
+
+      // Initialize grid spacing
+      const gridSpacingSelect = document.getElementById('grid-spacing-select');
+      if (gridSpacingSelect) {
+        gridSpacingSelect.value = '100'; // Default to 100m
+        updateEstimatedPoints(); // Update the estimates
+      }
+
+      // Show modal
+      const modalElement = document.getElementById('gridSpacingModal');
+      if (modalElement) {
+        // Ensure any existing modal instance is disposed
+        const existingModal = bootstrap.Modal.getInstance(modalElement);
+        if (existingModal) {
+          existingModal.dispose();
+        }
+
+        const modal = new bootstrap.Modal(modalElement, {
+          backdrop: 'static',
+          keyboard: false
+        });
+        modal.show();
+        console.log('Granular settings modal shown');
+      } else {
+        console.error('Granular settings modal element not found');
+      }
+    } catch (error) {
+      console.error('Error showing granular settings modal:', error);
+      alert('Error: Could not open the granular settings modal. Please try again.');
+    }
+  }
+
   // Cancel polygon asset
   function cancelPolygonAsset() {
-    // Clear data based on source
+    // Clear data based on source (but keep drawn polygons for visual continuity)
     if (currentPolygonSource === 'draw') {
-      // Clear drawn polygons
-      draw.deleteAll();
+      // Keep drawn polygons on map, only clear the data reference
       drawnPolygonData = null;
+      // Don't call draw.deleteAll() - let user keep their drawing
     } else if (currentPolygonSource === 'city') {
       // Clear city boundary data
       window.cityPolygonData = null;
@@ -677,18 +1359,27 @@
       return;
     }
 
-    if (!drawnPolygonData) {
+    // Get polygon data based on source
+    let polygonData = null;
+    if (currentPolygonSource === 'draw') {
+      polygonData = drawnPolygonData;
+    } else if (currentPolygonSource === 'city') {
+      polygonData = window.cityPolygonData;
+    }
+
+    if (!polygonData) {
       alert('No polygon data found. Please draw a polygon first.');
       return;
     }
 
-    // Disable submit button to prevent double submission
-    const submitBtn = document.querySelector('#polygonAssetModal .btn-primary');
-    const originalText = submitBtn.innerHTML;
-    submitBtn.disabled = true;
-    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Adding Asset...';
+    // Hide asset modal and show progress modal
+    const assetModal = bootstrap.Modal.getInstance(document.getElementById('polygonAssetModal'));
+    if (assetModal) assetModal.hide();
 
-    // Create facility data with polygon geometry
+    // Show progress modal
+    showProgressModal();
+
+    // Create facility data with polygon geometry and granular points
     const facilityData = {
       name: assetName,
       archetype: assetArchetype,
@@ -696,47 +1387,816 @@
       lng: polygonData.centroid.lng,
       geometry: polygonData.geometry,
       areaKm2: polygonData.areaKm2,
-      gridSpacing: polygonData.gridSpacing || null
+      gridSpacing: polygonData.gridSpacing || null,
+      'granular-points': polygonData['granular-points'] || null
     };
 
-    // Send to server
-    fetch('/climate-hazards-analysis-v2/api/add-facility/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken')
-      },
-      body: JSON.stringify(facilityData)
-    })
-    .then(response => response.json())
-    .then(data => {
-      if (data.success) {
-        // Clear the drawing
-        draw.deleteAll();
+    // Create polygon asset with granular data
+    createPolygonAssetWithData(assetName, polygonData, assetArchetype);
 
-          // Add the new facility marker with polygon
-          addFacilityMarker({
+  }
+
+  // Create polygon asset with granular data and send to backend
+  async function createPolygonAssetWithData(assetName, polygonData, archetype) {
+    try {
+      console.log('Creating polygon asset with granular data:', assetName);
+      showProgressModal();
+      updateProgress(10, 'Preparing polygon asset data...');
+
+      // Prepare the polygon asset data for backend
+      const assetData = {
+        name: assetName,
+        archetype: archetype || 'default archetype',
+        lat: polygonData.centroid.lat,
+        lng: polygonData.centroid.lng,
+        geometry: polygonData.geometry,
+        areaKm2: polygonData.areaKm2,
+        gridSpacing: polygonData.gridSpacing || null,
+        enableGranular: polygonData.enableGranular || false,
+        'granular-points': polygonData['granular-points'] || null
+      };
+
+      updateProgress(30, 'Sending asset data to server...');
+
+      // Send data to backend using streamlined workflow endpoint (bypass CSRF manager)
+      // Use original fetch to avoid CSRF manager since view has @csrf_exempt
+      const originalFetch = window.fetch.bind(window);
+      const response = await originalFetch('/climate-hazards-analysis-v2/api/polygon/complete/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(assetData)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create polygon asset');
+      }
+
+      // Handle successful polygon creation (no automatic redirect)
+      if (result.success) {
+        updateProgress(70, 'Drawing polygon on map...');
+        // Store asset ID for later workflow
+        window.currentPolygonAssetId = result.asset_id;
+      } else {
+        updateProgress(70, 'Drawing polygon on map...');
+      }
+
+      // Draw the polygon and centroid on the map
+      if (multiHazardMap) {
+        try {
+          // Check if map is fully loaded and ready
+          if (!multiHazardMap.isStyleLoaded()) {
+            console.log('Map style not yet loaded, waiting...');
+            multiHazardMap.once('style.load', () => {
+              console.log('Map style loaded, now adding polygon features');
+              addPolygonFeaturesDelayed(assetName, polygonData.geometry, archetype, polygonData.centroid);
+
+              // Add layers after style loads and features are added
+              setTimeout(() => {
+                addPolygonLayers();
+              }, 100);
+            });
+            return; // Exit early, will retry after style loads
+          }
+
+          addPolygonFeaturesImmediate(assetName, polygonData.geometry, archetype, polygonData.centroid);
+          addPolygonLayers();
+
+        } catch (mapError) {
+          console.error('Error preparing map sources:', mapError);
+        }
+      }
+
+      updateProgress(100, 'Complete!');
+      hideProgressModal();
+
+      // Add enhanced facility markers including granular points
+      addEnhancedFacilityMarker({
+        Facility: assetName,
+        Archetype: archetype || 'default archetype',
+        Lat: polygonData.centroid.lat,
+        Long: polygonData.centroid.lng,
+        geometry: polygonData.geometry,
+        areaKm2: polygonData.areaKm2,
+        gridSpacing: polygonData.gridSpacing,
+        'granular-points': polygonData['granular-points'] || null,
+        AssetType: 'polygon'
+      });
+
+      // Show success message
+      showNotification(`Polygon asset "${assetName}" created successfully!${polygonData.enableGranular ? ` Granular analysis with ${polygonData['granular-points'].length} points configured.` : ''}`, 'success');
+
+      // Keep drawn polygon on map for visual continuity (Option 1)
+      // Don't remove drawn polygons after asset creation
+      if (currentPolygonSource === 'draw') {
+        // Only clear the data reference, keep the visual polygon
+        drawnPolygonData = null;
+      }
+
+      // Reset polygon source
+      currentPolygonSource = null;
+
+    } catch (error) {
+      console.error('Error creating polygon asset:', error);
+      hideProgressModal();
+      showNotification('Error: Failed to create polygon asset. ' + error.message, 'error');
+    }
+  }
+
+  // Helper function to add polygon features immediately
+  function addPolygonFeaturesImmediate(assetName, polygonGeometry, archetype, centroid) {
+    try {
+      console.log('Adding polygon features immediately...');
+
+      // Create the complete polygon feature collection
+      const newPolygonFeature = {
+        type: 'Feature',
+        geometry: polygonGeometry,
+        properties: {
+          id: Date.now(),
+          asset_name: assetName,
+          asset_type: 'polygon',
+          archetype: archetype || 'default archetype'
+        }
+      };
+
+      const newCentroidFeature = {
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [centroid.lng, centroid.lat]
+        },
+        properties: {
+          id: Date.now() + 1, // Different ID to avoid conflicts
+          asset_name: assetName,
+          asset_type: 'centroid'
+        }
+      };
+
+      // Add or update polygon source with proper error handling
+      let polygonSource = multiHazardMap.getSource('polygon-assets');
+      if (polygonSource) {
+        try {
+          const currentData = polygonSource.getData();
+          if (currentData && currentData.features) {
+            currentData.features.push(newPolygonFeature);
+            polygonSource.setData(currentData);
+          } else {
+            polygonSource.setData({
+              type: 'FeatureCollection',
+              features: [newPolygonFeature]
+            });
+          }
+        } catch (dataError) {
+          console.warn('Could not get current polygon source data, using empty collection:', dataError);
+          polygonSource.setData({
+            type: 'FeatureCollection',
+            features: [newPolygonFeature]
+          });
+        }
+      } else {
+        console.log('Creating new polygon-assets source');
+        multiHazardMap.addSource('polygon-assets', {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [newPolygonFeature]
+          }
+        });
+      }
+
+      // Add or update centroid source with proper error handling
+      let centroidSource = multiHazardMap.getSource('centroids');
+      if (centroidSource) {
+        try {
+          const currentCentroidData = centroidSource.getData();
+          if (currentCentroidData && currentCentroidData.features) {
+            currentCentroidData.features.push(newCentroidFeature);
+            centroidSource.setData(currentCentroidData);
+          } else {
+            centroidSource.setData({
+              type: 'FeatureCollection',
+              features: [newCentroidFeature]
+            });
+          }
+        } catch (dataError) {
+          console.warn('Could not get current centroid source data, using empty collection:', dataError);
+          centroidSource.setData({
+            type: 'FeatureCollection',
+            features: [newCentroidFeature]
+          });
+        }
+      } else {
+        console.log('Creating new centroids source');
+        multiHazardMap.addSource('centroids', {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: [newCentroidFeature]
+          }
+        });
+      }
+
+      console.log('Polygon and centroid features added successfully');
+
+    } catch (sourceError) {
+      console.error('Error adding map sources:', sourceError);
+    }
+  }
+
+  // Helper function to add features with delay
+  function addPolygonFeaturesDelayed(assetName, polygonGeometry, archetype, centroid) {
+    setTimeout(() => {
+      addPolygonFeaturesImmediate(assetName, polygonGeometry, archetype, centroid);
+    }, 500); // Wait 500ms for map to be ready
+  }
+
+  // Helper function to add polygon layers
+  function addPolygonLayers() {
+    try {
+      console.log('Adding polygon layers...');
+
+      // Add polygon layers if they don't exist
+      if (!multiHazardMap.getLayer('polygon-layer')) {
+        multiHazardMap.addLayer({
+          id: 'polygon-layer',
+          type: 'fill',
+          source: 'polygon-assets',
+          paint: {
+            'fill-color': '#3b82f6',
+            'fill-opacity': 0.3
+          }
+        });
+
+        multiHazardMap.addLayer({
+          id: 'polygon-outline',
+          type: 'line',
+          source: 'polygon-assets',
+          paint: {
+            'line-color': '#1d4ed8',
+            'line-width': 2
+          }
+        });
+
+        console.log('Polygon layers added');
+      }
+
+      // Add centroid layer if it doesn't exist
+      if (!multiHazardMap.getLayer('centroid-layer')) {
+        multiHazardMap.addLayer({
+          id: 'centroid-layer',
+          type: 'circle',
+          source: 'centroids',
+          paint: {
+            'circle-radius': 6,
+            'circle-color': '#dc2626',
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 2
+          }
+        });
+
+        console.log('Centroid layer added');
+      }
+    } catch (layerError) {
+      console.error('Error adding polygon layers:', layerError);
+    }
+  }
+
+  // Simple polygon asset creation function
+  async function createPolygonAsset(assetName, polygonGeometry, archetype) {
+    try {
+      console.log('Creating polygon asset:', assetName);
+      showProgressModal();
+      updateProgress(10, 'Preparing polygon asset data...');
+
+      // Calculate centroid for the polygon
+      let centroid = { lat: 0, lng: 0 };
+      if (polygonGeometry && polygonGeometry.coordinates) {
+        try {
+          const turfPolygon = turf.polygon(polygonGeometry.coordinates);
+          const turfCentroid = turf.centroid(turfPolygon);
+          const [lng, lat] = turfCentroid.geometry.coordinates;
+          centroid = { lat, lng };
+        } catch (centroidError) {
+          console.warn('Could not calculate centroid:', centroidError);
+        }
+      }
+
+      updateProgress(30, 'Creating polygon asset...');
+
+      // Prepare the polygon asset data as JSON
+      const assetData = {
+        asset_name: assetName,
+        asset_type: 'polygon',
+        polygon_geometry: polygonGeometry,
+        centroid: centroid,
+        archetype: archetype || 'default archetype',
+        created_at: new Date().toISOString()
+      };
+
+      console.log('Asset data to store:', assetData);
+
+      // Store the polygon asset data as JSON
+      let storedAssets = JSON.parse(localStorage.getItem('polygonAssets') || '[]');
+      storedAssets.push({
+        ...assetData,
+        id: Date.now() // Simple ID using timestamp
+      });
+      localStorage.setItem('polygonAssets', JSON.stringify(storedAssets));
+
+      updateProgress(70, 'Drawing polygon on map...');
+
+      // Draw the polygon and centroid on the map
+      if (multiHazardMap) {
+        try {
+          // Check if map is fully loaded and ready
+          if (!multiHazardMap.isStyleLoaded()) {
+            console.log('Map style not yet loaded, waiting...');
+            multiHazardMap.once('style.load', () => {
+              console.log('Map style loaded, now adding polygon features');
+              addPolygonFeaturesDelayed(assetName, polygonGeometry, archetype, centroid);
+
+              // Add layers after style loads and features are added
+              setTimeout(() => {
+                addPolygonLayers();
+              }, 100);
+            });
+            return; // Exit early, will retry after style loads
+          }
+
+          addPolygonFeaturesImmediate(assetName, polygonGeometry, archetype, centroid);
+          addPolygonLayers();
+
+        } catch (mapError) {
+          console.error('Error preparing map sources:', mapError);
+        }
+      }
+
+      updateProgress(100, 'Complete!');
+
+      setTimeout(() => {
+        hideProgressModal();
+        showNotification(`Successfully created polygon asset "${assetName}"!`, 'success');
+
+        // Optional: Show a popup with asset details
+        if (multiHazardMap) {
+          new mapboxgl.Popup()
+            .setLngLat([centroid.lng, centroid.lat])
+            .setHTML(`
+              <div style="padding: 10px;">
+                <h6 style="margin: 0 0 8px 0; font-weight: bold;">${assetName}</h6>
+                <p style="margin: 4px 0; font-size: 12px;">
+                  <strong>Type:</strong> ${archetype || 'default archetype'}<br>
+                  <strong>Created:</strong> ${new Date().toLocaleString()}
+                </p>
+              </div>
+            `)
+            .addTo(multiHazardMap);
+        }
+      }, 1000);
+
+      console.log('Polygon asset created successfully:', assetData);
+
+    } catch (error) {
+      console.error('Error creating polygon asset:', error);
+      hideProgressModal();
+      showNotification('Error creating polygon asset: ' + error.message, 'error');
+    }
+  }
+
+  // Load stored polygon assets from localStorage and display them on the map
+  function loadStoredPolygonAssets() {
+    try {
+      console.log('Loading stored polygon assets...');
+
+      const storedAssets = JSON.parse(localStorage.getItem('polygonAssets') || '[]');
+      console.log('Found', storedAssets.length, 'stored polygon assets');
+
+      if (storedAssets.length === 0 || !multiHazardMap) {
+        return;
+      }
+
+      // Prepare GeoJSON data for polygons and centroids
+      const polygonFeatures = [];
+      const centroidFeatures = [];
+
+      storedAssets.forEach(asset => {
+        // Add polygon feature
+        if (asset.polygon_geometry) {
+          polygonFeatures.push({
+            type: 'Feature',
+            geometry: asset.polygon_geometry,
+            properties: {
+              id: asset.id,
+              asset_name: asset.asset_name,
+              asset_type: 'polygon',
+              archetype: asset.archetype,
+              created_at: asset.created_at
+            }
+          });
+        }
+
+        // Add centroid feature
+        if (asset.centroid) {
+          centroidFeatures.push({
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: [asset.centroid.lng, asset.centroid.lat]
+            },
+            properties: {
+              id: asset.id,
+              asset_name: asset.asset_name,
+              asset_type: 'centroid',
+              archetype: asset.archetype,
+              created_at: asset.created_at
+            }
+          });
+        }
+      });
+
+      // Add polygon source and layers
+      if (polygonFeatures.length > 0) {
+        multiHazardMap.addSource('polygon-assets', {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: polygonFeatures
+          }
+        });
+
+        multiHazardMap.addLayer({
+          id: 'polygon-layer',
+          type: 'fill',
+          source: 'polygon-assets',
+          paint: {
+            'fill-color': '#3b82f6',
+            'fill-opacity': 0.3
+          }
+        });
+
+        multiHazardMap.addLayer({
+          id: 'polygon-outline',
+          type: 'line',
+          source: 'polygon-assets',
+          paint: {
+            'line-color': '#1d4ed8',
+            'line-width': 2
+          }
+        });
+      }
+
+      // Add centroid source and layer
+      if (centroidFeatures.length > 0) {
+        multiHazardMap.addSource('centroids', {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: centroidFeatures
+          }
+        });
+
+        multiHazardMap.addLayer({
+          id: 'centroid-layer',
+          type: 'circle',
+          source: 'centroids',
+          paint: {
+            'circle-radius': 6,
+            'circle-color': '#dc2626',
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 2
+          }
+        });
+
+        // Add click events for centroids
+        multiHazardMap.on('click', 'centroid-layer', (e) => {
+          const properties = e.features[0].properties;
+          const coordinates = e.features[0].geometry.coordinates;
+
+          new mapboxgl.Popup()
+            .setLngLat(coordinates)
+            .setHTML(`
+              <div style="padding: 10px;">
+                <h6 style="margin: 0 0 8px 0; font-weight: bold;">${properties.asset_name}</h6>
+                <p style="margin: 4px 0; font-size: 12px;">
+                  <strong>Type:</strong> ${properties.archetype}<br>
+                  <strong>Created:</strong> ${new Date(properties.created_at).toLocaleString()}
+                </p>
+                <button onclick="deletePolygonAsset(${properties.id})"
+                        style="margin-top: 8px; padding: 4px 8px; background: #dc2626; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">
+                  Delete Asset
+                </button>
+              </div>
+            `)
+            .addTo(multiHazardMap);
+        });
+
+        // Change cursor on hover
+        multiHazardMap.on('mouseenter', 'centroid-layer', () => {
+          multiHazardMap.getCanvas().style.cursor = 'pointer';
+        });
+
+        multiHazardMap.on('mouseleave', 'centroid-layer', () => {
+          multiHazardMap.getCanvas().style.cursor = '';
+        });
+      }
+
+      console.log('Successfully loaded', polygonFeatures.length, 'polygons and', centroidFeatures.length, 'centroids');
+
+      // Add enhanced facility markers including granular points for each stored asset
+      storedAssets.forEach(asset => {
+        if (asset.centroid && asset.name) {
+          addEnhancedFacilityMarker({
+            Facility: asset.name,
+            Archetype: asset.archetype || 'default archetype',
+            Lat: asset.centroid.lat,
+            Long: asset.centroid.lng,
+            geometry: asset.polygon_geometry,
+            areaKm2: asset.areaKm2,
+            gridSpacing: asset.gridSpacing,
+            'granular-points': asset['granular-points'] || null,
+            AssetType: 'polygon'
+          });
+        }
+      });
+
+    } catch (error) {
+      console.error('Error loading stored polygon assets:', error);
+    }
+  }
+
+  // Delete a polygon asset
+  function deletePolygonAsset(assetId) {
+    try {
+      console.log('Deleting polygon asset:', assetId);
+
+      // Get stored assets
+      let storedAssets = JSON.parse(localStorage.getItem('polygonAssets') || '[]');
+
+      // Remove the asset
+      storedAssets = storedAssets.filter(asset => asset.id !== assetId);
+
+      // Update localStorage
+      localStorage.setItem('polygonAssets', JSON.stringify(storedAssets));
+
+      // Remove from map
+      if (multiHazardMap) {
+        // Get current sources
+        const polygonSource = multiHazardMap.getSource('polygon-assets');
+        const centroidSource = multiHazardMap.getSource('centroids');
+
+        // Update polygon source
+        if (polygonSource) {
+          const polygonData = polygonSource.getData();
+          polygonData.features = polygonData.features.filter(f => f.properties.id !== assetId);
+          polygonSource.setData(polygonData);
+        }
+
+        // Update centroid source
+        if (centroidSource) {
+          const centroidData = centroidSource.getData();
+          centroidData.features = centroidData.features.filter(f => f.properties.id !== assetId);
+          centroidSource.setData(centroidData);
+        }
+      }
+
+      showNotification('Polygon asset deleted successfully!', 'success');
+
+      // Close any open popups
+      const popups = document.getElementsByClassName('mapboxgl-popup');
+      if (popups.length > 0) {
+        popups[0].remove();
+      }
+
+    } catch (error) {
+      console.error('Error deleting polygon asset:', error);
+      showNotification('Error deleting polygon asset: ' + error.message, 'error');
+    }
+  }
+
+
+  // Legacy facility workflow (for backward compatibility)
+  function executeRegularFacilityWorkflow(facilityData, polygonData) {
+    updateProgress(20, 'Validating asset data...');
+
+    // Simulate processing delay for better UX
+    setTimeout(() => {
+      updateProgress(40, 'Sending asset to server...');
+
+      // Send to server (no CSRF token required for this project)
+      fetch('/climate-hazards-analysis-v2/api/add-facility/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(facilityData)
+      })
+      .then(response => {
+        updateProgress(60, 'Processing server response...');
+        return response.json();
+      })
+      .then(data => {
+        if (data.success) {
+          updateProgress(80, 'Creating visual elements...');
+
+          // Clear the appropriate drawing data based on source (but keep drawn polygons)
+          if (currentPolygonSource === 'draw') {
+            // Keep drawn polygons on map for visual continuity
+            drawnPolygonData = null;
+            // Don't call draw.deleteAll() - let user keep their drawing
+          } else if (currentPolygonSource === 'city') {
+            // Keep city boundary visible for now, user can manually remove if needed
+          }
+
+          // Add the new facility marker with enhanced visualization
+          addEnhancedFacilityMarker({
             Facility: facilityData.name,
             Archetype: facilityData.archetype,
             Lat: facilityData.lat,
             Long: facilityData.lng,
-            geometry: facilityData.geometry
+            geometry: facilityData.geometry,
+            areaKm2: facilityData.areaKm2,
+            gridSpacing: facilityData.gridSpacing,
+            'granular-points': facilityData['granular-points'] || null,
+            AssetType: 'polygon'
           });
 
-          // Hide modal
-          const modal = bootstrap.Modal.getInstance(document.getElementById('polygonAssetModal'));
-          if (modal) modal.hide();
+          updateProgress(100, 'Asset added successfully!');
 
-        // Reset drawn polygon data
-        drawnPolygonData = null;
+          // Hide progress modal after success
+          setTimeout(() => {
+            hideProgressModal();
+
+            // Reset polygon source
+            currentPolygonSource = null;
+
+            // Set global variable that we have a drawn polygon asset
+            window.drawnPolygon = true;
+
+            // Show success message
+            showNotification(`Asset "${facilityData.name}" added successfully!`, 'success');
+
+            // Update progress steps
+            updateProgressSteps(1);
+
+            // Update proceed button visibility
+            updateProceedButtonVisibility();
+          }, 1000);
+        } else {
+          hideProgressModal();
+
+          // Show error and re-open the asset modal
+          alert('Error adding asset: ' + data.error);
+          setTimeout(() => {
+            showPolygonAssetModal(polygonData.centroid.lat, polygonData.centroid.lng);
+          }, 100);
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        hideProgressModal();
+        alert('Error adding asset');
+      });
+    }, 500);
+  }
+
+  function showProgressModal() {
+    try {
+      console.log('Showing progress modal...');
+      const modalElement = document.getElementById('polygonProgressModal');
+      if (modalElement) {
+        // Remove any existing modal instance
+        const existingModal = bootstrap.Modal.getInstance(modalElement);
+        if (existingModal) {
+          existingModal.dispose();
+        }
+
+        // Create new modal instance
+        const modal = new bootstrap.Modal(modalElement, {
+          backdrop: 'static',
+          keyboard: false
+        });
+        modal.show();
+        console.log('Progress modal shown successfully');
       } else {
-        alert('Error adding asset: ' + data.error);
+        console.error('Progress modal element not found');
       }
-    })
-    .catch(error => {
-      console.error('Error:', error);
-      alert('Error adding asset');
-    });
+    } catch (error) {
+      console.error('Error showing progress modal:', error);
+    }
+  }
+
+  function hideProgressModal() {
+    try {
+      console.log('Hiding progress modal...');
+      const modalElement = document.getElementById('polygonProgressModal');
+      if (modalElement) {
+        const modal = bootstrap.Modal.getInstance(modalElement);
+        if (modal) {
+          modal.hide();
+
+          // Remove any backdrop that might be stuck
+          setTimeout(() => {
+            cleanupModalBackdrops();
+            console.log('Progress modal hidden and cleanup completed');
+          }, 300);
+        } else {
+          console.warn('No progress modal instance found');
+          cleanupModalBackdrops();
+        }
+      } else {
+        console.error('Progress modal element not found');
+        cleanupModalBackdrops();
+      }
+    } catch (error) {
+      console.error('Error hiding progress modal:', error);
+      cleanupModalBackdrops();
+    }
+  }
+
+  // Function to clean up any stuck modal backdrops
+  function cleanupModalBackdrops() {
+    try {
+      // Remove all modal backdrops
+      const backdrops = document.querySelectorAll('.modal-backdrop');
+      backdrops.forEach(backdrop => backdrop.remove());
+
+      // Remove modal-open class from body
+      document.body.classList.remove('modal-open');
+      document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
+
+      // Hide any visible modals
+      const openModals = document.querySelectorAll('.modal.show');
+      openModals.forEach(modal => {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+      });
+
+      console.log('Modal cleanup completed');
+    } catch (error) {
+      console.error('Error during modal cleanup:', error);
+    }
+  }
+
+  // Emergency escape function - press ESC key 3 times quickly to clear stuck modals
+  let escapeKeyPressCount = 0;
+  let escapeKeyPressTimeout = null;
+
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+      escapeKeyPressCount++;
+
+      if (escapeKeyPressCount >= 3) {
+        console.log('Emergency escape triggered - clearing all modals');
+        cleanupModalBackdrops();
+        hideProgressModal();
+        escapeKeyPressCount = 0;
+
+        // Show notification to user
+        showNotification('Emergency escape activated - cleared stuck modals', 'warning');
+      }
+
+      // Reset counter after 2 seconds
+      clearTimeout(escapeKeyPressTimeout);
+      escapeKeyPressTimeout = setTimeout(() => {
+        escapeKeyPressCount = 0;
+      }, 2000);
+    }
+  });
+
+  // Clean up any stuck modals when the page loads
+  setTimeout(() => {
+    cleanupModalBackdrops();
+    console.log('Initial modal cleanup completed');
+  }, 1000);
+
+  function updateProgress(percentage, message) {
+    const progressBar = document.getElementById('progress-bar');
+    const progressMessage = document.getElementById('progress-message');
+    const progressDetail = document.getElementById('progress-detail');
+
+    if (progressBar) {
+      progressBar.style.width = percentage + '%';
+      progressBar.setAttribute('aria-valuenow', percentage);
+    }
+
+    if (progressMessage) {
+      progressMessage.textContent = message;
+    }
+
+    if (progressDetail) {
+      const details = [
+        'Validating asset geometry...',
+        'Calculating centroid coordinates...',
+        'Processing hazard data...',
+        'Creating map visualizations...'
+      ];
+      progressDetail.textContent = details[Math.floor((percentage / 100) * details.length)];
+    }
   }
 
   // Grid Spacing Modal Functions
@@ -771,24 +2231,172 @@
     const areaM2 = currentPolygonAreaKm2 * 1000000;
     const estimatedPoints = Math.floor(areaM2 / (gridSpacing * gridSpacing));
 
-    document.getElementById('estimated-points').textContent =
-      estimatedPoints.toLocaleString() + ' points';
-
-    // Update estimated processing time
-    let estimatedTime;
-    if (estimatedPoints < 500) {
-      estimatedTime = '< 1 second';
-    } else if (estimatedPoints < 2000) {
-      estimatedTime = '1-2 seconds';
-    } else if (estimatedPoints < 5000) {
-      estimatedTime = '2-5 seconds';
-    } else if (estimatedPoints < 10000) {
-      estimatedTime = '5-10 seconds';
-    } else {
-      estimatedTime = '10-20 seconds';
+    // Update points display with animation
+    const pointsElement = document.getElementById('estimated-points');
+    if (pointsElement) {
+      pointsElement.textContent = estimatedPoints.toLocaleString() + ' points';
+      pointsElement.style.animation = 'none';
+      setTimeout(() => {
+        pointsElement.style.animation = 'pulse 0.5s ease';
+      }, 10);
     }
 
-    document.getElementById('estimated-time').textContent = estimatedTime;
+    // Update complexity bar
+    const complexityBar = document.getElementById('complexity-bar');
+    if (complexityBar) {
+      let complexityPercentage = Math.min((estimatedPoints / 50000) * 100, 100);
+      complexityBar.style.width = complexityPercentage + '%';
+
+      // Change color based on complexity
+      if (complexityPercentage < 25) {
+        complexityBar.className = 'progress-bar bg-success';
+      } else if (complexityPercentage < 50) {
+        complexityBar.className = 'progress-bar bg-warning';
+      } else if (complexityPercentage < 75) {
+        complexityBar.className = 'progress-bar bg-info';
+      } else {
+        complexityBar.className = 'progress-bar bg-danger';
+      }
+    }
+
+    // Update performance indicators
+    updatePerformanceIndicators(estimatedPoints, gridSpacing);
+
+    // Update recommendation
+    updateRecommendation(gridSpacing, estimatedPoints);
+
+    // Update estimated processing time
+    let estimatedTime, timeColor, timeIcon;
+    if (estimatedPoints < 500) {
+      estimatedTime = '< 1 second';
+      timeColor = 'text-success';
+      timeIcon = 'fa-bolt';
+    } else if (estimatedPoints < 2000) {
+      estimatedTime = '1-2 seconds';
+      timeColor = 'text-success';
+      timeIcon = 'fa-check';
+    } else if (estimatedPoints < 5000) {
+      estimatedTime = '2-5 seconds';
+      timeColor = 'text-warning';
+      timeIcon = 'fa-clock';
+    } else if (estimatedPoints < 10000) {
+      estimatedTime = '5-10 seconds';
+      timeColor = 'text-warning';
+      timeIcon = 'fa-hourglass-half';
+    } else if (estimatedPoints < 25000) {
+      estimatedTime = '10-20 seconds';
+      timeColor = 'text-info';
+      timeIcon = 'fa-hourglass-half';
+    } else {
+      estimatedTime = '20+ seconds';
+      timeColor = 'text-danger';
+      timeIcon = 'fa-exclamation-triangle';
+    }
+
+    const timeElement = document.getElementById('estimated-time');
+    if (timeElement) {
+      timeElement.innerHTML = `<i class="fas ${timeIcon} me-1"></i>${estimatedTime}`;
+      timeElement.className = `fw-bold mb-0 ${timeColor}`;
+    }
+
+    const processingIcon = document.getElementById('processing-icon');
+    if (processingIcon) {
+      processingIcon.className = `fas ${timeIcon} fa-2x ${timeColor} mb-2`;
+    }
+  }
+
+  function updatePerformanceIndicators(points, spacing) {
+    // Update detail level
+    const detailLevel = document.getElementById('detail-level');
+    const detailIcon = document.getElementById('detail-icon');
+    if (detailLevel && detailIcon) {
+      let level, color, icon;
+      if (spacing <= 50) {
+        level = 'Very High';
+        color = 'text-primary';
+        icon = 'fa-search-plus';
+      } else if (spacing <= 100) {
+        level = 'High';
+        color = 'text-info';
+        icon = 'fa-search';
+      } else if (spacing <= 500) {
+        level = 'Medium';
+        color = 'text-warning';
+        icon = 'fa-eye';
+      } else {
+        level = 'Low';
+        color = 'text-secondary';
+        icon = 'fa-search-minus';
+      }
+      detailLevel.textContent = level;
+      detailLevel.className = `fw-bold mb-0 ${color}`;
+      detailIcon.className = `fas ${icon} fa-2x ${color} mb-2`;
+    }
+
+    // Update accuracy level
+    const accuracyLevel = document.getElementById('accuracy-level');
+    const accuracyIcon = document.getElementById('accuracy-icon');
+    if (accuracyLevel && accuracyIcon) {
+      let accuracy, color, icon;
+      if (points < 1000) {
+        accuracy = 'Standard';
+        color = 'text-warning';
+        icon = 'fa-bullseye';
+      } else if (points < 5000) {
+        accuracy = 'High';
+        color = 'text-success';
+        icon = 'fa-crosshairs';
+      } else if (points < 15000) {
+        accuracy = 'Very High';
+        color = 'text-info';
+        icon = 'fa-bullseye';
+      } else {
+        accuracy = 'Excellent';
+        color = 'text-primary';
+        icon = 'fa-dot-circle';
+      }
+      accuracyLevel.textContent = accuracy;
+      accuracyLevel.className = `fw-bold mb-0 ${color}`;
+      accuracyIcon.className = `fas ${icon} fa-2x ${color} mb-2`;
+    }
+  }
+
+  function updateRecommendation(spacing, points) {
+    const recommendationElement = document.getElementById('spacing-recommendation');
+    if (!recommendationElement) return;
+
+    let recommendation;
+    if (currentPolygonAreaKm2 < 10) {
+      if (spacing === 50) {
+        recommendation = `Perfect! <strong>50m spacing</strong> provides excellent detail for this smaller area.`;
+      } else if (spacing === 100) {
+        recommendation = `Good choice! <strong>100m spacing</strong> offers balanced detail and performance.`;
+      } else if (spacing > 100) {
+        recommendation = `Consider using <strong>50m or 100m spacing</strong> for better detail on this smaller area.`;
+      }
+    } else if (currentPolygonAreaKm2 < 50) {
+      if (spacing === 100) {
+        recommendation = `Optimal! <strong>100m spacing</strong> provides the best balance for this medium-sized area.`;
+      } else if (spacing === 50) {
+        recommendation = `<strong>50m spacing</strong> will give excellent detail but may take longer to process.`;
+      } else if (spacing === 500) {
+        recommendation = `For better accuracy, consider <strong>100m spacing</strong> instead.`;
+      } else {
+        recommendation = `<strong>${spacing}m spacing</strong> will provide adequate coverage for this area.`;
+      }
+    } else {
+      if (spacing === 100) {
+        recommendation = `<strong>100m spacing</strong> will provide very detailed analysis but may take longer to process.`;
+      } else if (spacing === 500) {
+        recommendation = `Good balance! <strong>500m spacing</strong> provides comprehensive coverage for this large area.`;
+      } else if (spacing === 1000) {
+        recommendation = `<strong>1000m spacing</strong> offers efficient processing for this very large area.`;
+      } else {
+        recommendation = `<strong>${spacing}m spacing</strong> may take considerable time for this large area.`;
+      }
+    }
+
+    recommendationElement.innerHTML = recommendation;
   }
 
   function applyGranularAnalysis() {
@@ -814,11 +2422,20 @@
       window.cityPolygonData.centroid = { lat, lng };
       window.cityPolygonData.areaKm2 = currentPolygonAreaKm2;
 
-      console.log('Grid spacing stored in cityPolygonData');
+      // Generate granular points and store them
+      const granularPoints = generateGridPoints(currentCityBoundary.geometry, gridSpacing);
+      window.cityPolygonData['granular-points'] = granularPoints;
+
+      console.log(`Grid spacing ${gridSpacing}m and ${granularPoints.length} granular points stored in cityPolygonData`);
     } else if (currentPolygonSource === 'draw' && drawnPolygonData) {
       drawnPolygonData.gridSpacing = gridSpacing;
       drawnPolygonData.enableGranular = true;
-      console.log('Grid spacing stored in drawnPolygonData');
+
+      // Generate granular points and store them
+      const granularPoints = generateGridPoints(drawnPolygonData.geometry, gridSpacing);
+      drawnPolygonData['granular-points'] = granularPoints;
+
+      console.log(`Grid spacing ${gridSpacing}m and ${granularPoints.length} granular points stored in drawnPolygonData`);
     } else {
       console.error('No polygon data found!');
       alert('Error: No polygon data found. Please try again.');
@@ -942,6 +2559,13 @@ window.facilityPolygons = [];
 
 // Function to add a marker for a facility
 function addFacilityMarker(facility) {
+  // Check if map is available
+  if (!multiHazardMap) {
+    console.warn('Map not available for adding marker, retrying in 1 second...');
+    setTimeout(() => addFacilityMarker(facility), 1000);
+    return;
+  }
+
   // Create marker element
   const el = baseBlueCircle.cloneNode(true);
 
@@ -970,13 +2594,13 @@ function addFacilityMarker(facility) {
       </ul>
     </div>
   `;
-  
+
   // Add hazard data if available
   if (facility.hasOwnProperty('Flood Depth (meters)')) {
     let floodClass = 'green';
     if (facility['Flood Depth (meters)'] === '0.5 to 1.5') floodClass = 'orange';
     if (facility['Flood Depth (meters)'] === 'Greater than 1.5') floodClass = 'red';
-    
+
     sidebarContent += `
       <h5><strong>Flood</strong></h5>
       <p>
@@ -985,7 +2609,7 @@ function addFacilityMarker(facility) {
       </p>
     `;
   }
-  
+
   // Create hover popup with just the facility name
   const popup = new mapboxgl.Popup({
     closeButton: false,
@@ -993,28 +2617,28 @@ function addFacilityMarker(facility) {
     offset: 25,
     className: 'facility-hover-popup'
   }).setHTML(`<strong>${facility.Facility}</strong>`);
-  
+
   // Create marker with hover popup
   const marker = new mapboxgl.Marker({ element: el })
     .setLngLat([facility.Long, facility.Lat])
     .setPopup(popup)
     .addTo(multiHazardMap);
-  
+
   // Add mouseenter event to show popup on hover
   marker.getElement().addEventListener('mouseenter', () => {
     marker.togglePopup();
   });
-  
+
   // Add mouseleave event to hide popup
   marker.getElement().addEventListener('mouseleave', () => {
     marker.togglePopup();
   });
-  
+
   // Add click handler to show detailed info in sidebar
   marker.getElement().addEventListener('click', () => {
     openSidebar(sidebarContent);
   });
-  
+
   // Track markers
   window.facilityMarkers.push(marker);
 
@@ -1058,19 +2682,390 @@ function addFacilityMarker(facility) {
       window.facilityPolygons.push(sourceId);
     }
   }
-  
+
   // Update proceed button visibility whenever markers are added
   if (typeof updateProceedButtonVisibility === 'function') {
     updateProceedButtonVisibility();
   }
-  
+
   return marker;
+}
+
+// Enhanced facility marker function for polygon assets
+function addEnhancedFacilityMarker(facility) {
+  // Add the standard marker first
+  addFacilityMarker(facility);
+
+  // Add enhanced features for polygon assets
+  if (facility.geometry || facility.AssetType === 'polygon') {
+    // Add special centroid marker
+    addCentroidMarker(facility);
+
+    // Add granular analysis points if available
+    if (facility['granular-points'] && facility['granular-points'].length > 0) {
+      addGranularAnalysisPoints(facility);
+    }
+
+    // NOTE: Heatmap visualization is now created only during step 6
+    // (Generate Asset Exposure), not during asset creation
+    // This removes the premature hazard analysis
+
+    // Store polygon asset data for later hazard analysis
+    polygonAssets.push({
+      id: facility.Facility,
+      facility: facility,
+      hasGranularAnalysis: facility['granular-points'] ? facility['granular-points'].length > 0 : false,
+      gridSpacing: facility.gridSpacing || facility.grid_spacing_meters
+    });
+  }
+}
+
+// Add centroid marker for polygon assets
+function addCentroidMarker(facility) {
+  // Create a special centroid marker
+  const centroidEl = document.createElement('div');
+  centroidEl.style.width = '24px';
+  centroidEl.style.height = '24px';
+  centroidEl.style.borderRadius = '50%';
+  centroidEl.style.border = '3px solid white';
+  centroidEl.style.backgroundColor = '#28a745';
+  centroidEl.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+  centroidEl.style.cursor = 'pointer';
+  centroidEl.style.zIndex = '1000';
+
+  // Add pulse animation
+  const pulseEl = document.createElement('div');
+  pulseEl.style.position = 'absolute';
+  pulseEl.style.width = '100%';
+  pulseEl.style.height = '100%';
+  pulseEl.style.borderRadius = '50%';
+  pulseEl.style.border = '2px solid #28a745';
+  pulseEl.style.backgroundColor = 'transparent';
+  pulseEl.style.animation = 'pulse 2s infinite';
+  pulseEl.style.top = '0';
+  pulseEl.style.left = '0';
+  centroidEl.appendChild(pulseEl);
+
+  // Create popup for centroid with high z-index (controlled via CSS)
+  const centroidPopup = new mapboxgl.Popup({
+    closeButton: false,
+    closeOnClick: false,
+    offset: 25,
+    className: 'centroid-hover-popup'
+  }).setHTML(`
+    <div style="text-align: center; font-weight: bold; padding: 8px; min-width: 160px;">
+      <div style="color: #28a745; margin-bottom: 4px;">
+        <i class="fas fa-map-marker-alt fa-lg"></i>
+      </div>
+      <strong style="font-size: 14px; color: #333;">${facility.Facility}</strong><br>
+      <div style="margin: 4px 0; color: #666;">
+        <small><strong>Asset Type:</strong> Polygon</small><br>
+        <small><strong>Centroid</strong></small>
+        ${facility.areaKm2 ? `<br><small><strong>Area:</strong> ${facility.areaKm2.toFixed(2)} km²</small>` : ''}
+        ${facility.gridSpacing ? `<br><small><strong>Grid Spacing:</strong> ${facility.gridSpacing}m</small>` : ''}
+      </div>
+      ${facility['granular-points'] && facility['granular-points'].length > 0 ?
+        `<div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #ddd;">
+          <small class="badge bg-info" style="font-size: 11px;">
+            <i class="fas fa-th"></i> ${facility['granular-points'].length} granular points
+          </small>
+        </div>` : ''
+      }
+    </div>
+  `);
+
+  // Create centroid marker
+  const centroidMarker = new mapboxgl.Marker({ element: centroidEl })
+    .setLngLat([facility.Long, facility.Lat])
+    .setPopup(centroidPopup)
+    .addTo(multiHazardMap);
+
+  // Add hover events
+  centroidMarker.getElement().addEventListener('mouseenter', () => {
+    centroidMarker.togglePopup();
+  });
+
+  centroidMarker.getElement().addEventListener('mouseleave', () => {
+    centroidMarker.togglePopup();
+  });
+
+  // Store centroid marker
+  centroidMarkers.push(centroidMarker);
+}
+
+// Add granular analysis points as blue markers on the map
+function addGranularAnalysisPoints(facility) {
+  // Check if map is available
+  if (!multiHazardMap) {
+    console.warn('Map not available for adding granular markers');
+    return;
+  }
+
+  if (!facility['granular-points'] || facility['granular-points'].length === 0) {
+    console.log('No granular points to display');
+    return;
+  }
+
+  console.log(`Adding ${facility['granular-points'].length} granular analysis points for ${facility.Facility}`);
+
+  // Create a smaller blue circle element for granular points
+  const granularEl = document.createElement('div');
+  granularEl.style.width = '12px';  // Smaller than centroid (24px)
+  granularEl.style.height = '12px'; // Smaller than centroid (24px)
+  granularEl.style.borderRadius = '50%';
+  granularEl.style.border = '2px solid white';
+  granularEl.style.backgroundColor = '#007bff'; // Blue color
+  granularEl.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)';
+  granularEl.style.cursor = 'pointer';
+  granularEl.style.zIndex = '999';  // Below centroid markers (1000)
+  // Removed transition to make markers static like centroid markers
+
+  // Add granular points to the map
+  facility['granular-points'].forEach((point, index) => {
+    const pointEl = granularEl.cloneNode(true);
+
+    // Create popup content for granular point with hover functionality
+    const popupContent = `
+      <div style="padding: 6px; min-width: 160px; text-align: left;">
+        <div style="color: #007bff; margin-bottom: 4px; font-size: 12px; font-weight: bold;">
+          <i class="fas fa-circle"></i> Granular Point ${index + 1}
+        </div>
+        <div style="font-size: 11px; line-height: 1.3; color: #333;">
+          <div style="margin: 2px 0;"><strong>Asset:</strong> ${facility.Facility}</div>
+          <div style="margin: 2px 0;"><strong>Latitude:</strong> ${point.latitude.toFixed(6)}</div>
+          <div style="margin: 2px 0;"><strong>Longitude:</strong> ${point.longitude.toFixed(6)}</div>
+          <div style="margin: 2px 0;"><strong>Point Number:</strong> ${index + 1}</div>
+        </div>
+      </div>
+    `;
+
+    // Create popup with high z-index (controlled via CSS) and hover behavior
+    const popup = new mapboxgl.Popup({
+      closeButton: false,
+      closeOnClick: false,
+      offset: 15,
+      className: 'granular-hover-popup'
+    }).setHTML(popupContent);
+
+    // Create marker
+    const granularMarker = new mapboxgl.Marker({ element: pointEl })
+      .setLngLat([point.longitude, point.latitude])
+      .setPopup(popup)
+      .addTo(multiHazardMap);
+
+    // Add hover events for granular points
+    pointEl.addEventListener('mouseenter', () => {
+      granularMarker.togglePopup();
+    });
+
+    pointEl.addEventListener('mouseleave', () => {
+      granularMarker.togglePopup();
+    });
+
+    // Store granular marker for potential cleanup
+    if (!window.granularMarkers) {
+      window.granularMarkers = [];
+    }
+    window.granularMarkers.push(granularMarker);
+  });
+
+  console.log(`Successfully added ${facility['granular-points'].length} granular point markers to map`);
+}
+
+// Create heatmap visualization for polygon assets
+function createHeatmapVisualization(facility) {
+  if (!facility.geometry) return;
+
+  // Generate sample points for visualization
+  const samplePoints = generateSamplePointsForVisualization(facility);
+
+  if (samplePoints.length === 0) return;
+
+  // Create source for heatmap points
+  const heatmapSourceId = `heatmap-${facility.Facility.replace(/\s+/g, '-')}`;
+  multiHazardMap.addSource(heatmapSourceId, {
+    type: 'geojson',
+    data: {
+      type: 'FeatureCollection',
+      features: samplePoints
+    }
+  });
+
+  // Add heatmap layer
+  const heatmapLayerId = `${heatmapSourceId}-layer`;
+  multiHazardMap.addLayer({
+    id: heatmapLayerId,
+    type: 'circle',
+    source: heatmapSourceId,
+    paint: {
+      'circle-radius': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        8, 2,
+        12, 4,
+        16, 6
+      ],
+      'circle-color': [
+        'interpolate',
+        ['linear'],
+        ['get', 'risk'],
+        0, '#2ecc71',  // Low risk - green
+        1, '#f39c12',  // Medium risk - orange
+        2, '#e74c3c'   // High risk - red
+      ],
+      'circle-opacity': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        8, 0.6,
+        12, 0.7,
+        16, 0.8
+      ],
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 1,
+      'circle-stroke-opacity': 0.8
+    }
+  });
+
+  // Store heatmap layer reference
+  heatmapLayers.push({
+    sourceId: heatmapSourceId,
+    layerId: heatmapLayerId,
+    facilityId: facility.Facility
+  });
+}
+
+// Generate sample points for heatmap visualization
+function generateSamplePointsForVisualization(facility) {
+  if (!facility.geometry || !facility.gridSpacing) return [];
+
+  const points = [];
+  const gridSpacing = facility.gridSpacing;
+  const bounds = getPolygonBounds(facility.geometry);
+
+  if (!bounds) return [];
+
+  const minLat = bounds.minLat;
+  const maxLat = bounds.maxLat;
+  const minLng = bounds.minLng;
+  const maxLng = bounds.maxLng;
+
+  // Convert grid spacing to degrees (approximate)
+  const latStep = gridSpacing / 111000; // ~111km per degree latitude
+  const lngStep = gridSpacing / (111000 * Math.cos(minLat * Math.PI / 180));
+
+  // Generate grid points
+  for (let lat = minLat; lat <= maxLat; lat += latStep) {
+    for (let lng = minLng; lng <= maxLng; lng += lngStep) {
+      // Check if point is inside polygon
+      if (isPointInPolygon([lng, lat], facility.geometry)) {
+        // Simulate risk value (in real implementation, this would come from hazard analysis)
+        const riskValue = Math.random() * 2; // 0-2 risk scale
+        const riskClass = riskValue < 0.7 ? 0 : riskValue < 1.3 ? 1 : 2;
+
+        points.push({
+          type: 'Feature',
+          properties: {
+            risk: riskClass,
+            riskValue: riskValue.toFixed(2)
+          },
+          geometry: {
+            type: 'Point',
+            coordinates: [lng, lat]
+          }
+        });
+      }
+    }
+  }
+
+  return points;
+}
+
+// Get polygon bounds
+function getPolygonBounds(geometry) {
+  if (!geometry || !geometry.coordinates || !geometry.coordinates[0]) return null;
+
+  const coords = geometry.coordinates[0];
+  let minLat = Infinity, maxLat = -Infinity;
+  let minLng = Infinity, maxLng = -Infinity;
+
+  coords.forEach(coord => {
+    const [lng, lat] = coord;
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+    minLng = Math.min(minLng, lng);
+    maxLng = Math.max(maxLng, lng);
+  });
+
+  return { minLat, maxLat, minLng, maxLng };
+}
+
+// Check if point is inside polygon (simplified ray casting)
+function isPointInPolygon(point, polygon) {
+  if (!polygon || !polygon.coordinates || !polygon.coordinates[0]) return false;
+
+  const [lng, lat] = point;
+  const coords = polygon.coordinates[0];
+  let inside = false;
+
+  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+    const [xi, yi] = coords[i];
+    const [xj, yj] = coords[j];
+
+    const intersect = ((yi > lat) !== (yj > lat))
+        && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+
+  return inside;
+}
+
+// Show heatmap legend
+function showHeatmapLegend() {
+  const legend = document.getElementById('heatmap-legend');
+  if (legend) {
+    legend.style.display = 'block';
+    legend.style.animation = 'slideInRight 0.3s ease';
+  }
+}
+
+// Hide heatmap legend
+function hideHeatmapLegend() {
+  const legend = document.getElementById('heatmap-legend');
+  if (legend) {
+    legend.style.animation = 'slideOutRight 0.3s ease';
+    setTimeout(() => {
+      legend.style.display = 'none';
+    }, 300);
+  }
 }
 
 // Clear all facility markers
 function clearFacilityMarkers() {
   window.facilityMarkers.forEach(marker => marker.remove());
   window.facilityMarkers = [];
+
+  // Clear centroid markers
+  centroidMarkers.forEach(marker => marker.remove());
+  centroidMarkers = [];
+
+  // Clear granular analysis point markers if they exist
+  if (window.granularMarkers) {
+    window.granularMarkers.forEach(marker => marker.remove());
+    window.granularMarkers = [];
+  }
+
+  // Check if map is available before removing layers/sources
+  if (!multiHazardMap) {
+    console.warn('Map not available for clearing markers, skipping polygon cleanup');
+    window.facilityPolygons = [];
+    heatmapLayers = [];
+    polygonAssets = [];
+    return;
+  }
+
+  // Clear facility polygons
   window.facilityPolygons.forEach(id => {
     if (multiHazardMap.getLayer(`${id}-fill`)) {
       multiHazardMap.removeLayer(`${id}-fill`);
@@ -1083,7 +3078,24 @@ function clearFacilityMarkers() {
     }
   });
   window.facilityPolygons = [];
-  
+
+  // Clear heatmap layers
+  heatmapLayers.forEach(heatmap => {
+    if (multiHazardMap.getLayer(heatmap.layerId)) {
+      multiHazardMap.removeLayer(heatmap.layerId);
+    }
+    if (multiHazardMap.getSource(heatmap.sourceId)) {
+      multiHazardMap.removeSource(heatmap.sourceId);
+    }
+  });
+  heatmapLayers = [];
+
+  // Clear polygon assets data
+  polygonAssets = [];
+
+  // Hide heatmap legend
+  hideHeatmapLegend();
+
   // Update proceed button visibility whenever markers are cleared
   if (typeof updateProceedButtonVisibility === 'function') {
     updateProceedButtonVisibility();
@@ -1091,8 +3103,33 @@ function clearFacilityMarkers() {
 }
 
 // Load facility data from session
+// Counter to prevent infinite retries
+let facilityDataRetryCount = 0;
+const MAX_FACILITY_DATA_RETRIES = 10;
+
 function loadFacilityData() {
-  console.log("Loading facility data...");
+  console.log("Loading facility data... Attempt:", facilityDataRetryCount + 1);
+
+  // Check if we're on the correct page (has map container)
+  if (!document.getElementById('climate-hazard-map')) {
+    console.error('Not on climate hazard map page, skipping facility data loading');
+    return;
+  }
+
+  // Check if map is available before loading facility data
+  if (!multiHazardMap) {
+    facilityDataRetryCount++;
+    if (facilityDataRetryCount >= MAX_FACILITY_DATA_RETRIES) {
+      console.error('Map not available after', MAX_FACILITY_DATA_RETRIES, 'attempts, giving up');
+      return;
+    }
+    console.warn('Map not available for loading facility data, retrying in 1 second... (Attempt', facilityDataRetryCount, 'of', MAX_FACILITY_DATA_RETRIES, ')');
+    setTimeout(loadFacilityData, 1000);
+    return;
+  }
+
+  // Reset retry count on success
+  facilityDataRetryCount = 0;
   
   // Show map loading indicator
   const loadingDiv = document.createElement('div');
@@ -1209,6 +3246,13 @@ function loadFacilityData() {
   function fitMapToMarkers() {
   const markers = window.facilityMarkers || [];
   if (markers.length === 0) return;
+
+  // Check if map is available
+  if (!multiHazardMap) {
+    console.warn('Map not available for fitBounds, retrying in 1 second...');
+    setTimeout(fitMapToMarkers, 1000);
+    return;
+  }
 
   const bounds = new mapboxgl.LngLatBounds();
   markers.forEach(marker => bounds.extend(marker.getLngLat()));
@@ -1446,14 +3490,488 @@ function loadFacilityData() {
     return cookieValue;
   }
 
-// Auto-init if the container exists on this page
-  if (document.readyState !== 'loading') {
-    if (document.getElementById('climate-hazard-map')) initializeMultiHazardMap();
-  } else {
-    document.addEventListener('DOMContentLoaded', () => {
-      if (document.getElementById('climate-hazard-map')) initializeMultiHazardMap();
-    });
+// Load Mapbox Geocoder plugin with multiple fallbacks
+console.log('Loading Mapbox Geocoder plugin...');
+const geocoderScript = document.createElement('script');
+
+// Try primary CDN first
+geocoderScript.src = 'https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.1/mapbox-gl-geocoder.min.js';
+
+let geocoderLoaded = false;
+
+geocoderScript.onload = function() {
+  console.log('Mapbox Geocoder loaded successfully from primary CDN');
+  geocoderLoaded = true;
+  initializeMapWhenReady();
+};
+
+geocoderScript.onerror = function() {
+  console.warn('Failed to load Mapbox Geocoder from primary CDN, trying fallback...');
+
+  // Try fallback CDN (jsDelivr)
+  const fallbackScript = document.createElement('script');
+  fallbackScript.src = 'https://cdn.jsdelivr.net/npm/@mapbox/mapbox-gl-geocoder@5.0.1/mapbox-gl-geocoder.min.js';
+
+  fallbackScript.onload = function() {
+    console.log('Mapbox Geocoder loaded successfully from fallback CDN');
+    geocoderLoaded = true;
+    initializeMapWhenReady();
+  };
+
+  fallbackScript.onerror = function() {
+    console.error('Failed to load Mapbox Geocoder from all sources - will work without geocoder');
+    // Still initialize the map even if geocoder fails completely
+    initializeMapWhenReady();
+  };
+
+  document.head.appendChild(fallbackScript);
+};
+
+document.head.appendChild(geocoderScript);
+
+// Set a timeout to initialize map if geocoder takes too long
+setTimeout(() => {
+  if (!geocoderLoaded) {
+    console.warn('Geocoder loading timeout, proceeding without geocoder');
+    initializeMapWhenReady();
   }
+}, 5000); // 5 second timeout
+
+// TEMPORARILY DISABLED: Fallback city search using Nominatim API
+// This function is kept for future use but currently disabled
+/*
+function searchCityNominatim(cityName, map) {
+    console.log(`Searching for city: ${cityName}`);
+
+    // Show loading indicator
+    showNotification(`Searching for ${cityName}...`, 'info');
+
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cityName)}&limit=1&countrycodes=ph`)
+        .then(response => response.json())
+        .then(data => {
+            if (data && data.length > 0) {
+                const result = data[0];
+                console.log('Found city:', result);
+
+                // Get coordinates
+                const [lng, lat] = [parseFloat(result.lon), parseFloat(result.lat)];
+
+                // Center map on the city
+                map.flyTo({
+                    center: [lng, lat],
+                    zoom: 10,
+                    essential: true
+                });
+
+                // Add a marker for the city
+                const marker = new mapboxgl.Marker({
+                    color: '#FF0000'
+                })
+                .setLngLat([lng, lat])
+                .addTo(map);
+
+                // Show success message
+                showNotification(`Found: ${result.display_name}`, 'success');
+            } else {
+                showNotification(`City "${cityName}" not found`, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error searching city:', error);
+            showNotification('Error searching for city', 'error');
+        });
+}
+*/
+
+function initializeMapWhenReady() {
+  console.log('initializeMapWhenReady() called');
+  if (document.getElementById('climate-hazard-map')) {
+    console.log('Map container found, calling initializeMultiHazardMap()');
+    initializeMultiHazardMap();
+  } else {
+    console.error('Map container not found in initializeMapWhenReady()');
+  }
+}
+
+// Enhanced API integration for granular analysis
+async function processGranularAnalysis(facilityData) {
+  try {
+    // Update progress: Starting granular analysis
+    updateProgress(10, 'Starting granular analysis...');
+
+    // Call the granular analysis API endpoint
+    const response = await fetch('/climate-hazards-analysis-v2/api/process-granular-analysis/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        facilityId: facilityData.id,
+        geometry: facilityData.geometry,
+        gridSpacing: facilityData.gridSpacing,
+        areaKm2: facilityData.areaKm2,
+        selectedHazards: getSelectedHazards() // Function to get selected hazards from form
+      })
+    });
+
+    updateProgress(30, 'Processing grid generation...');
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    updateProgress(60, 'Analyzing hazard data...');
+
+    if (result.success) {
+      // Poll for progress updates
+      await pollAnalysisProgress(result.taskId, facilityData);
+    } else {
+      throw new Error(result.error || 'Analysis failed');
+    }
+  } catch (error) {
+    console.error('Granular analysis error:', error);
+    hideProgressModal();
+    showNotification('Error processing granular analysis: ' + error.message, 'error');
+    throw error;
+  }
+}
+
+async function pollAnalysisProgress(taskId, facilityData) {
+  const maxAttempts = 60; // Maximum 5 minutes (60 * 5 seconds)
+  let attempts = 0;
+
+  const poll = async () => {
+    try {
+      const response = await fetch(`/climate-hazards-analysis-v2/api/analysis-progress/${taskId}/`);
+      const data = await response.json();
+
+      updateProgress(data.progress, data.message);
+
+      if (data.status === 'completed') {
+        updateProgress(90, 'Finalizing results...');
+
+        // Process the completed analysis
+        await handleCompletedAnalysis(data.result, facilityData);
+
+        updateProgress(100, 'Analysis complete!');
+
+        setTimeout(() => {
+          hideProgressModal();
+          showNotification('Granular analysis completed successfully!', 'success');
+        }, 1000);
+
+        return;
+      } else if (data.status === 'failed') {
+        throw new Error(data.error || 'Analysis failed');
+      } else if (attempts >= maxAttempts) {
+        throw new Error('Analysis timeout');
+      } else {
+        // Continue polling
+        attempts++;
+        setTimeout(poll, 5000); // Poll every 5 seconds
+      }
+    } catch (error) {
+      console.error('Polling error:', error);
+      hideProgressModal();
+      showNotification('Error during analysis: ' + error.message, 'error');
+    }
+  };
+
+  poll();
+}
+
+async function handleCompletedAnalysis(result, facilityData) {
+  // Update the facility data with analysis results
+  facilityData.granularAnalysis = result;
+  facilityData.hasGranularAnalysis = true;
+
+  // Create enhanced heatmap visualization with real data
+  updateHeatmapVisualization(facilityData, result.samplePoints);
+
+  // Update the sidebar/tooltip with granular analysis info
+  updateFacilityInfo(facilityData);
+
+  // Store the results for later export
+  storeAnalysisResults(facilityData.id, result);
+}
+
+function updateHeatmapVisualization(facilityData, samplePoints) {
+  if (!multiHazardMap || !samplePoints) return;
+
+  // Remove existing heatmap for this facility
+  removeHeatmapForFacility(facilityData.id);
+
+  // Create GeoJSON data for sample points
+  const geoJsonData = {
+    type: 'FeatureCollection',
+    features: samplePoints.map(point => ({
+      type: 'Feature',
+      properties: {
+        risk: point.overallRisk,
+        floodRisk: point.floodRisk,
+        heatRisk: point.heatRisk,
+        windRisk: point.windRisk,
+        // Add other hazard data as needed
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: [point.longitude, point.latitude]
+      }
+    }))
+  };
+
+  // Add new heatmap layer
+  const sourceId = `granular-heatmap-${facilityData.id}`;
+  multiHazardMap.addSource(sourceId, {
+    type: 'geojson',
+    data: geoJsonData
+  });
+
+  multiHazardMap.addLayer({
+    id: `${sourceId}-circles`,
+    type: 'circle',
+    source: sourceId,
+    paint: {
+      'circle-radius': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        10, 3,
+        15, 6,
+        20, 10
+      ],
+      'circle-color': [
+        'interpolate',
+        ['linear'],
+        ['get', 'risk'],
+        0, '#2ecc71',   // Low risk - green
+        1, '#f39c12',   // Medium risk - orange
+        2, '#e74c3c'    // High risk - red
+      ],
+      'circle-opacity': 0.7,
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 1
+    }
+  });
+
+  // Add interactive hover effects
+  multiHazardMap.on('mouseenter', `${sourceId}-circles`, (e) => {
+    multiHazardMap.getCanvas().style.cursor = 'pointer';
+
+    const coordinates = e.features[0].geometry.coordinates.slice();
+    const properties = e.features[0].properties;
+
+    // Create popup
+    const popup = new mapboxgl.Popup({
+      closeButton: false,
+      closeOnClick: false
+    });
+
+    popup.setLngLat(coordinates)
+      .setHTML(`
+        <div style="padding: 8px; font-size: 12px;">
+          <strong>Sample Point Analysis</strong><br>
+          Overall Risk: <span class="badge bg-${properties.risk === 0 ? 'success' : properties.risk === 1 ? 'warning' : 'danger'}">${['Low', 'Medium', 'High'][properties.risk]}</span><br>
+          <small>Flood: ${['Low', 'Medium', 'High'][properties.floodRisk]} |
+                 Heat: ${['Low', 'Medium', 'High'][properties.heatRisk]} |
+                 Wind: ${['Low', 'Medium', 'High'][properties.windRisk]}</small>
+        </div>
+      `)
+      .addTo(multiHazardMap);
+
+    // Store popup reference
+    e.features[0].properties.popup = popup;
+  });
+
+  multiHazardMap.on('mouseleave', `${sourceId}-circles`, (e) => {
+    multiHazardMap.getCanvas().style.cursor = '';
+
+    // Remove popup if it exists
+    if (e.features[0].properties.popup) {
+      e.features[0].properties.popup.remove();
+    }
+  });
+
+  // Store heatmap reference
+  heatmapLayers.push({
+    sourceId: sourceId,
+    layerId: `${sourceId}-circles`,
+    facilityId: facilityData.id
+  });
+}
+
+function removeHeatmapForFacility(facilityId) {
+  const existingHeatmap = heatmapLayers.find(h => h.facilityId === facilityId);
+  if (existingHeatmap) {
+    if (multiHazardMap.getLayer(existingHeatmap.layerId)) {
+      multiHazardMap.removeLayer(existingHeatmap.layerId);
+    }
+    if (multiHazardMap.getSource(existingHeatmap.sourceId)) {
+      multiHazardMap.removeSource(existingHeatmap.sourceId);
+    }
+
+    // Remove from heatmap layers array
+    heatmapLayers = heatmapLayers.filter(h => h.facilityId !== facilityId);
+  }
+}
+
+function updateFacilityInfo(facilityData) {
+  // Update facility markers with granular analysis info
+  const marker = window.facilityMarkers.find(m =>
+    m.getLngLat().lat === facilityData.lat &&
+    m.getLngLat().lng === facilityData.lng
+  );
+
+  if (marker && facilityData.granularAnalysis) {
+    // Update popup content to include granular analysis info
+    const popupContent = generateEnhancedPopupContent(facilityData);
+
+    // Update existing popup or create new one
+    if (marker.getPopup()) {
+      marker.getPopup().setHTML(popupContent);
+    }
+  }
+}
+
+function generateEnhancedPopupContent(facilityData) {
+  const analysis = facilityData.granularAnalysis;
+  let content = `
+    <div style="padding: 10px; min-width: 200px;">
+      <h6 style="margin: 0 0 10px 0; color: #007bff;">
+        <i class="fas fa-map-marker-alt me-2"></i>${facilityData.Facility}
+      </h6>
+      <div style="font-size: 12px; line-height: 1.4;">
+        <p style="margin: 5px 0;">
+          <strong>Archetype:</strong> ${facilityData.Archetype || 'Default'}
+        </p>
+  `;
+
+  if (analysis) {
+    content += `
+      <div style="background: #e8f5e8; padding: 8px; border-radius: 4px; margin: 8px 0;">
+        <p style="margin: 0; color: #155724;">
+          <i class="fas fa-th me-1"></i>
+          <strong>Granular Analysis</strong><br>
+          <small>${analysis.totalPoints} sample points (${analysis.gridSpacing}m grid)</small>
+        </p>
+      </div>
+      <p style="margin: 5px 0;">
+        <strong>Risk Distribution:</strong><br>
+        <span class="badge bg-success me-1">${analysis.lowRiskCount || 0}% Low</span>
+        <span class="badge bg-warning me-1">${analysis.mediumRiskCount || 0}% Medium</span>
+        <span class="badge bg-danger">${analysis.highRiskCount || 0}% High</span>
+      </p>
+    `;
+  }
+
+  content += `
+        <button class="btn btn-sm btn-primary mt-2" onclick="showDetailedAnalysis('${facilityData.id}')">
+          <i class="fas fa-chart-area me-1"></i>View Details
+        </button>
+      </div>
+    </div>
+  `;
+
+  return content;
+}
+
+function storeAnalysisResults(facilityId, results) {
+  // Store results in sessionStorage for later access
+  const storedResults = JSON.parse(sessionStorage.getItem('granularAnalysisResults') || '{}');
+  storedResults[facilityId] = results;
+  sessionStorage.setItem('granularAnalysisResults', JSON.stringify(storedResults));
+}
+
+function getStoredAnalysisResults(facilityId) {
+  const storedResults = JSON.parse(sessionStorage.getItem('granularAnalysisResults') || '{}');
+  return storedResults[facilityId];
+}
+
+function getSelectedHazards() {
+  // Get selected hazards from the hazard selection form
+  const selectedHazards = [];
+  const hazardCheckboxes = document.querySelectorAll('input[name="hazards"]:checked');
+
+  hazardCheckboxes.forEach(checkbox => {
+    selectedHazards.push(checkbox.value);
+  });
+
+  // If no hazards are selected, return empty array to force user selection
+  if (selectedHazards.length === 0) {
+    console.warn('No hazards selected - user must select at least one hazard');
+    return [];
+  }
+
+  console.log('Selected hazards from form:', selectedHazards);
+  return selectedHazards;
+}
+
+function showDetailedAnalysis(facilityId) {
+  const results = getStoredAnalysisResults(facilityId);
+  if (results) {
+    // Show detailed analysis modal or navigate to detailed view
+    console.log('Showing detailed analysis for facility:', facilityId, results);
+    // Implementation would open modal or navigate to detailed page
+  } else {
+    showNotification('Analysis results not available', 'warning');
+  }
+}
+
+// Enhanced export functions for granular data
+function exportGranularData(facilityId, format = 'csv') {
+  const results = getStoredAnalysisResults(facilityId);
+  if (!results) {
+    showNotification('No granular analysis data available to export', 'warning');
+    return;
+  }
+
+  showProgressModal();
+  updateProgress(20, 'Preparing export data...');
+
+  // Call export API endpoint
+  fetch(`/climate-hazards-analysis-v2/api/export-granular-data/${facilityId}/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      format: format,
+      includeSamplePoints: true,
+      includeStatistics: true,
+      includeClusters: true
+    })
+  })
+  .then(response => {
+    updateProgress(50, 'Generating export file...');
+    return response.blob();
+  })
+  .then(blob => {
+    updateProgress(80, 'Downloading file...');
+
+    // Create download link
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = `granular-analysis-${facilityId}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+
+    updateProgress(100, 'Export complete!');
+    setTimeout(() => {
+      hideProgressModal();
+      showNotification('Export completed successfully!', 'success');
+    }, 1000);
+  })
+  .catch(error => {
+    console.error('Export error:', error);
+    hideProgressModal();
+    showNotification('Error exporting data: ' + error.message, 'error');
+  });
+}
 
 // Expose map variables and functions to global scope for polygon handler
 function exposeMapVariables() {
@@ -1464,7 +3982,191 @@ function exposeMapVariables() {
   window.toggleDrawMode = toggleDrawMode;
   window.showPolygonAssetModal = showPolygonAssetModal;
   window.turf = turf;
+  window.processGranularAnalysis = processGranularAnalysis;
+  window.exportGranularData = exportGranularData;
+  window.showDetailedAnalysis = showDetailedAnalysis;
 }
-  
+
+// ============================================================================
+// 6-STEP WORKFLOW FUNCTIONS - REMOVED
+// ============================================================================
+
+// 6-Step Workflow functionality has been removed
+async function generateAssetExposureAnalysis(selectedHazards) {
+  console.warn('generateAssetExposureAnalysis called but 6-Step Workflow has been removed');
+  showNotification('The 6-Step Workflow functionality has been removed. Please use the streamlined polygon workflow instead.', 'warning');
+  return { success: false, error: '6-Step Workflow removed' };
+}
+
+// Original 6-Step Workflow code removed - causing await syntax errors
+
+
+/**
+ * Show hazard selection modal
+ */
+async function showHazardSelectionModal() {
+  // Update asset counts in the modal
+  await updateHazardModalAssetCounts();
+
+  const modal = new bootstrap.Modal(document.getElementById('hazardSelectionModal'));
+  modal.show();
+
+  // Update progress to show we're in step 2
+  updateProgressSteps();
+}
+
+// Duplicate function removed - 6-Step Workflow functionality removed
+
+/**
+ * Update progress steps based on current workflow state
+ */
+function updateProgressSteps(currentStep = null) {
+  // Determine current step based on workflow state
+  if (currentStep === null) {
+    if (window.facilityMarkers && window.facilityMarkers.length > 0) {
+      currentStep = 1; // Step 1: Upload Asset Data
+    }
+    if (window.drawnPolygon) {
+      currentStep = 1; // Still Step 1 since polygon is asset creation
+    }
+    if (window.selectedHazards && window.selectedHazards.length > 0) {
+      currentStep = 2; // Step 2: Select Hazards and Scenarios
+    }
+    if (window.exposureAnalysisComplete) {
+      currentStep = 6; // Step 6: Generate Asset Exposure
+    }
+  }
+
+  if (currentStep === null) return;
+
+  const stepItems = document.querySelectorAll('.step-item');
+
+  // Update all step items
+  stepItems.forEach((item, index) => {
+    const stepNumber = index + 1;
+    const circle = item.querySelector('.step-circle');
+    const label = item.querySelector('.step-label');
+
+    if (stepNumber < currentStep) {
+      // Completed steps
+      circle.style.backgroundColor = '#28a745';
+      circle.style.color = '#fff';
+      label.style.color = '#28a745';
+    } else if (stepNumber === currentStep) {
+      // Current step
+      circle.style.backgroundColor = '#F1D500';
+      circle.style.color = '#000';
+      label.style.color = '#000';
+    } else {
+      // Future steps
+      circle.style.backgroundColor = '#e9ecef';
+      circle.style.color = '#6c757d';
+      label.style.color = '#6c757d';
+    }
+  });
+
+  // Update headers - highlightHeaders removed (6-Step Workflow functionality removed)
+  // highlightHeaders(currentStep);
+}
+
+/**
+ * Update proceed button visibility and state
+ */
+function updateProceedButtonVisibility() {
+  // Check if we have a proceed button to show
+  const proceedBtn = document.getElementById('proceed-button');
+  if (proceedBtn) {
+    proceedBtn.style.display = 'block';
+    return;
+  }
+
+  // For the climate hazard map page, show "Proceed to Select Hazards" after polygon creation
+  if (window.drawnPolygon) {
+    // Create proceed button if it doesn't exist
+    if (!document.getElementById('proceed-select-hazards-btn')) {
+      const proceedBtn = document.createElement('button');
+      proceedBtn.id = 'proceed-select-hazards-btn';
+      proceedBtn.className = 'btn btn-warning btn-lg shadow';
+      proceedBtn.innerHTML = '<i class="fas fa-arrow-right me-2"></i><strong>Proceed to Select Hazards</strong>';
+      proceedBtn.onclick = autoSelectHazardsAndProceed;
+      proceedBtn.style.position = 'absolute';
+      proceedBtn.style.bottom = '20px';
+      proceedBtn.style.left = '50%';
+      proceedBtn.style.transform = 'translateX(-50%)';
+      proceedBtn.style.zIndex = '1000';
+
+      document.getElementById('climate-hazard-map').appendChild(proceedBtn);
+    } else {
+      document.getElementById('proceed-select-hazards-btn').style.display = 'block';
+    }
+  }
+}
+
+/**
+ * Show success notification
+ */
+function showSuccessNotification(message) {
+  // Create or update notification element
+  let notification = document.getElementById('success-notification');
+  if (!notification) {
+    notification = document.createElement('div');
+    notification.id = 'success-notification';
+    notification.className = 'alert alert-success position-fixed';
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 10000; min-width: 300px;';
+    document.body.appendChild(notification);
+  }
+
+  notification.innerHTML = `
+    <div class="d-flex align-items-center">
+      <i class="fas fa-check-circle me-2"></i>
+      <div>${message}</div>
+      <button type="button" class="btn-close ms-auto" onclick="this.parentElement.parentElement.remove()"></button>
+    </div>
+  `;
+
+  // Auto-hide after 5 seconds
+  setTimeout(() => {
+    if (notification.parentElement) {
+      notification.remove();
+    }
+  }, 5000);
+}
+
+/**
+ * Highlight step headers based on current step
+ * Step headers have been removed - 6-Step Workflow functionality removed
+ */
+// highlightHeaders function removed - 6-Step Workflow functionality removed
+
+function toggleModalCheckbox(hazardId) {
+  // Toggle checkbox in hazard selection modal
+  const checkbox = document.getElementById(hazardId);
+  if (checkbox) {
+    checkbox.checked = !checkbox.checked;
+  }
+}
+
+function proceedToAssetExposure() {
+  // Stub function for compatibility - workflow now uses standard form submission
+  console.log('proceedToAssetExposure called but workflow now uses standard form submission');
+  return false;
+}
+
+function handleProceedToExposure() {
+  // Stub function for compatibility - workflow now uses standard form submission
+  console.log('handleProceedToExposure called but workflow now uses standard form submission');
+  return false;
+}
+
+  // Step highlighting removed - 6-Step Workflow functionality removed
+
+// Expose essential workflow functions to global scope
+// Only include functions that actually exist to prevent errors
+window.toggleModalCheckbox = toggleModalCheckbox;
+window.showHazardSelectionModal = showHazardSelectionModal;
+window.proceedToAssetExposure = proceedToAssetExposure;
+window.handleProceedToExposure = handleProceedToExposure;
+window.updateProgressSteps = updateProgressSteps;
+window.updateProceedButtonVisibility = updateProceedButtonVisibility;
 
 </script>

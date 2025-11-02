@@ -7,25 +7,72 @@
 
 {% block content %}
 <style>
-    /* === Step Header Styles === */
-    .step-header {
-        background-color: #f8f9fa;
-        color: #495057;
-        font-weight: bold;
-        padding: 10px;
-        border: 2px solid transparent;
+    /* === Circle-based Step Styles === */
+    .step-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        position: relative;
+        z-index: 2;
+        cursor: pointer;
         transition: all 0.3s ease;
     }
 
-    .step-header.active-step-header {
-        border: 2px solid #F1D500;
-        background-color: #fff8e1;
-        color: #495057;
+    .step-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background-color: #e9ecef;
+        color: #6c757d;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-weight: bold;
+        font-size: 18px;
+        border: 3px solid #e9ecef;
+        transition: all 0.3s ease;
+        margin-bottom: 8px;
     }
 
-    .step-header.arrow::after {
-        content: "→";
-        margin-left: 10px;
+    .step-circle.active-step {
+        background-color: #F1D500;
+        color: #000;
+        border-color: #F1D500;
+        box-shadow: 0 0 0 4px rgba(241, 213, 0, 0.2);
+    }
+
+    .step-circle.completed-step {
+        background-color: #28a745;
+        color: #fff;
+        border-color: #28a745;
+    }
+
+    .step-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #6c757d;
+        text-align: center;
+        max-width: 100px;
+        transition: all 0.3s ease;
+    }
+
+    .step-label.active-label {
+        color: #000;
+        font-weight: 600;
+    }
+
+    .step-label.completed-label {
+        color: #28a745;
+        font-weight: 600;
+    }
+
+    .step-item:hover .step-circle:not(.active-step):not(.completed-step) {
+        background-color: #dee2e6;
+        border-color: #dee2e6;
+    }
+
+    .step-item:hover .step-label:not(.active-label):not(.completed-label) {
+        color: #495057;
     }
 
     /* Checkbox styles */
@@ -117,6 +164,51 @@
             <div id="loading-text" class="loading-text">Generating asset exposure data...</div>
         </div>
     </div>
+
+    <!-- Step by Step Procedure UI -->
+    <div class="row mt-4 mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body p-4">
+                    <div class="d-flex justify-content-between align-items-center position-relative">
+                        <!-- Progress Line -->
+                        <div style="position: absolute; top: 25px; left: 50px; right: 50px; height: 2px; background-color: #e9ecef; z-index: 1;"></div>
+
+                        <!-- Step 1 -->
+                        <div class="step-item" data-step="1">
+                            <div class="step-circle completed-step">1</div>
+                            <div class="step-label completed-label">Upload Assets</div>
+                        </div>
+
+                        <!-- Step 2 -->
+                        <div class="step-item" data-step="2">
+                            <div class="step-circle active-step">2</div>
+                            <div class="step-label active-label">Select Hazards</div>
+                        </div>
+
+                        <!-- Step 3 -->
+                        <div class="step-item" data-step="3">
+                            <div class="step-circle">3</div>
+                            <div class="step-label">View Results</div>
+                        </div>
+
+                        <!-- Step 4 -->
+                        <div class="step-item" data-step="4">
+                            <div class="step-circle">4</div>
+                            <div class="step-label">Adjust Sensitivity</div>
+                        </div>
+
+                        <!-- Step 5 -->
+                        <div class="step-item" data-step="5">
+                            <div class="step-circle">5</div>
+                            <div class="step-label">Final Results</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="row">
         <div class="col-6 d-flex flex-column">
             <!-- Rounded Icon Container with Margin -->
@@ -129,17 +221,7 @@
         </div>
     </div>
     
-   <!-- Step by Step Procedure UI -->
-<div class="row mt-4 mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body p-4">
-                {% include "climate_hazards_analysis_v2/steps_table.html" %}
-            </div>
-        </div>
-    </div>
-</div>
-    
+      
     <!-- Alert Messages -->
     {% if error %}
     <div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -162,9 +244,19 @@
                     <strong>Select Climate/Weather Hazards</strong>
                 </div>
                 <div class="card-body">
-                    <p class="mb-4">You have <strong>{{ facility_count }} assets</strong> loaded. Select the climate/weather hazards you want to analyze:</p>
+                    <p class="mb-4">
+    You have
+    <strong>{{ facility_count }}{% if polygon_assets_count > 0 %} regular assets{% endif %}</strong>
+    {% if polygon_assets_count > 0 %}
+        and <strong>{{ polygon_assets_count }} polygon asset{{ polygon_assets_count|pluralize }}</strong>
+        {% if granular_points_count > 0 %}
+            with <strong>{{ granular_points_count }} total granular point{{ granular_points_count|pluralize }}</strong>
+        {% endif %}
+    {% endif %}
+    loaded. Select the climate/weather hazards you want to analyze:
+</p>
                     
-                    <form id="hazard-form" method="POST" action="{% url 'climate_hazards_analysis_v2:select_hazards' %}" onsubmit="showLoading()">
+                    <form id="hazard-form" method="POST" action="{% url 'climate_hazards_analysis_v2:select_hazards' %}" onsubmit="return handleFormSubmit(event)">
                         {% csrf_token %}
                         
                         <div class="row">
@@ -248,24 +340,7 @@
         }
     }
 
-    function highlightHeaders(currentStep) {
-        const overlay = document.getElementById('overlay-header');
-        const override = document.getElementById('override-header');
-        const sensitivity = document.getElementById('sensitivity-header');
-        const impact = document.getElementById('impact-header');
-
-        [overlay, override, sensitivity, impact].forEach(el => el.classList.remove('active-step-header'));
-
-        if (currentStep >= 1) {
-            overlay.classList.add('active-step-header');
-        } if (currentStep >= 3) {
-            override.classList.add('active-step-header');
-        } if (currentStep >= 4) {
-            sensitivity.classList.add('active-step-header');
-        } if (currentStep >= 6) {
-            impact.classList.add('active-step-header');
-        }
-    }
+    // highlightHeaders function removed - 6-Step Workflow functionality removed
 
     function highlightSteps(currentStep, completedSteps = []) {
         const steps = document.querySelectorAll('.step-item');
@@ -321,62 +396,124 @@
             completedSteps = [];
         }
 
-        highlightHeaders(currentStep);
+        // highlightHeaders(currentStep); // Removed - 6-Step Workflow functionality removed
         highlightSteps(currentStep, completedSteps);
     });
 
-    // Function to show loading overlay with simulated progress
-    function showLoading() {
-        // Get the number of selected hazards to estimate processing time
-        const selectedHazards = document.querySelectorAll('input[name="hazards"]:checked').length;
-        if (selectedHazards === 0) {
+    // ===== COMPREHENSIVE WORKFLOW ERROR HANDLING =====
+
+    // Form submission handler
+    function handleFormSubmit(event) {
+        console.log('🎯 [WORKFLOW] Starting asset exposure analysis workflow');
+
+        // Get selected hazards first
+        const selectedHazards = Array.from(document.querySelectorAll('input[name="hazards"]:checked'))
+            .map(cb => cb.value);
+
+        console.log('📊 [DEBUG] Initially selected hazards:', selectedHazards);
+
+        // Auto-select all hazards ONLY if user hasn't selected any
+        if (selectedHazards.length === 0) {
+            console.log('🔧 [WORKFLOW] No hazards selected by user, auto-selecting all hazards');
+            autoSelectAllHazardsSync();
+        } else {
+            console.log('✅ [WORKFLOW] User has selected', selectedHazards.length, 'hazards - respecting selection');
+        }
+
+        // Get final selected hazards (after potential auto-selection)
+        const finalSelectedHazards = Array.from(document.querySelectorAll('input[name="hazards"]:checked'))
+            .map(cb => cb.value);
+
+        console.log('📊 [DEBUG] Final selected hazards:', finalSelectedHazards);
+
+        if (finalSelectedHazards.length === 0) {
             alert('Please select at least one hazard type to continue.');
+            event.preventDefault();
             return false;
         }
-        
-        // Disable the submit button to prevent double submission
-        document.getElementById('generate-btn').disabled = true;
-        
-        // Show the loading overlay
+
+        // Show loading overlay before form submission
+        showLoadingOverlay();
+
+        // Allow normal form submission to proceed
+        console.log('🔄 [WORKFLOW] Submitting form to store hazards and redirect to results');
+        return true; // Allow form submission
+    }
+
+    // Synchronous version of auto-select all hazards
+    function autoSelectAllHazardsSync() {
+        console.log('⚡ [WORKFLOW] Auto-selecting all hazards');
+
+        const hazardCheckboxes = document.querySelectorAll('input[name="hazards"]');
+        hazardCheckboxes.forEach(checkbox => {
+            checkbox.checked = true;
+            const container = checkbox.closest('.hazard-checkbox-container');
+            if (container) {
+                container.classList.add('checked');
+            }
+        });
+
+        console.log(`✅ [WORKFLOW] Selected ${hazardCheckboxes.length} hazards`);
+    }
+
+    // Legacy function removed - using normal form submission
+    // 6-Step Workflow functions removed - using standard form submission
+
+    // Loading overlay functions
+    function showLoadingOverlay() {
+        const selectedHazards = document.querySelectorAll('input[name="hazards"]:checked').length;
+
+        // Disable submit button
+        const generateBtn = document.getElementById('generate-btn');
+        if (generateBtn) generateBtn.disabled = true;
+
+        // Show loading overlay
         const loadingOverlay = document.getElementById('loading-overlay');
-        loadingOverlay.style.display = 'flex';
-        
-        // Set up progress bar simulation
-        const progressBar = document.getElementById('progress-bar');
-        const loadingText = document.getElementById('loading-text');
-        
-        // Start with 0%
+        if (loadingOverlay) {
+            loadingOverlay.style.display = 'flex';
+
+            // Set up progress bar
+            const progressBar = document.getElementById('progress-bar');
+            const loadingText = document.getElementById('loading-text');
+
+            if (progressBar && loadingText) {
+                simulateProgress(progressBar, loadingText, selectedHazards);
+            }
+        }
+    }
+
+    function hideLoadingOverlay() {
+        const loadingOverlay = document.getElementById('loading-overlay');
+        if (loadingOverlay) loadingOverlay.style.display = 'none';
+
+        const generateBtn = document.getElementById('generate-btn');
+        if (generateBtn) generateBtn.disabled = false;
+    }
+
+    function simulateProgress(progressBar, loadingText, selectedHazards) {
         let progress = 0;
-        
-        // Calculate total estimated time based on number of selected hazards
-        // For each hazard, we estimate ~10 seconds of processing time
-        const totalSteps = 100;
-        const stepTime = selectedHazards * 100; // milliseconds per step (adjust based on your actual processing time)
-        
-        // Update progress bar periodically
+        const stepTime = selectedHazards * 50;
+
         const progressInterval = setInterval(() => {
             if (progress >= 99) {
                 clearInterval(progressInterval);
                 return;
             }
-            
-            // Calculate next progress step (slow down as it gets closer to 100%)
+
             if (progress < 30) {
-                progress += 2; // Faster at start
+                progress += 2;
             } else if (progress < 60) {
-                progress += 1; // Medium speed
+                progress += 1;
             } else if (progress < 90) {
-                progress += 0.5; // Slower
+                progress += 0.5;
             } else {
-                progress += 0.1; // Very slow approaching 100%
+                progress += 0.1;
             }
-            
-            // Update progress bar
+
             progressBar.style.width = `${progress}%`;
             progressBar.setAttribute('aria-valuenow', progress);
             progressBar.textContent = `${Math.round(progress)}%`;
-            
-            // Update loading text based on progress
+
             if (progress < 25) {
                 loadingText.textContent = "Preparing hazard data...";
             } else if (progress < 50) {
@@ -387,9 +524,14 @@
                 loadingText.textContent = "Finalizing results...";
             }
         }, stepTime);
-        
-        // Allow the form to submit after showing the loading overlay
-        return true;
     }
+
+    // Original loading function for compatibility
+    function showLoading() {
+        showLoadingOverlay();
+        return false; // Prevent form submission
+    }
+
+    // Legacy functions removed - using normal form submission
 </script>
 {% endblock %}

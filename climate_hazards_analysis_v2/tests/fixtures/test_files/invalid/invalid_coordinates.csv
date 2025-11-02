@@ -1,0 +1,4 @@
+Facility,Lat,Long,Archetype
+Invalid Latitude,95.0,-74.0060,Office
+Invalid Longitude,40.7128,200.0,Warehouse
+Invalid Both,-100.0,250.0,Retail

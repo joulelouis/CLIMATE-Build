@@ -1,0 +1,850 @@
+{% extends "base.html" %}
+{% load static %}
+{% load float_filters %}
+{% load my_filters %}
+{% load common_filters %}
+
+{% block title %}
+Enhanced Hazard Exposure Map - Granular Analysis
+{% endblock %}
+
+{% block extra_head %}
+<!-- CSRF Protection Meta Tags -->
+<meta name="csrf-token" content="{{ csrf_token }}">
+<meta name="csrf-header-name" content="X-CSRFToken">
+
+<!-- MapLibre GL CSS -->
+<link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+
+<!-- Enhanced Styles -->
+<style>
+    .enhanced-hazard-map-container {
+        display: flex;
+        gap: 20px;
+        height: calc(100vh - 200px);
+        min-height: 700px;
+        margin-top: 20px;
+    }
+
+    .control-panel {
+        width: 380px;
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 12px;
+        padding: 20px;
+        overflow-y: auto;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .map-container {
+        flex: 1;
+        position: relative;
+        border: 2px solid #dee2e6;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+    }
+
+    .section-card {
+        background: white;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+
+    .section-title {
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .hazard-grid {
+        display: grid;
+        gap: 10px;
+    }
+
+    .hazard-item {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        background: white;
+        transition: all 0.2s ease;
+    }
+
+    .hazard-item:hover {
+        background: #f8f9fa;
+        border-color: #007bff;
+    }
+
+    .hazard-checkbox {
+        margin-right: 10px;
+        transform: scale(1.2);
+    }
+
+    .hazard-label {
+        flex: 1;
+        font-size: 14px;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .hazard-indicator {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 2px solid #ffffff;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
+    .scenario-selector {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+
+    .scenario-btn {
+        flex: 1;
+        padding: 8px 12px;
+        border: 1px solid #dee2e6;
+        background: white;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 14px;
+    }
+
+    .scenario-btn:hover {
+        background: #f8f9fa;
+    }
+
+    .scenario-btn.active {
+        background: #007bff;
+        color: white;
+        border-color: #007bff;
+    }
+
+    .visualization-mode {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+
+    .mode-btn {
+        flex: 1;
+        padding: 8px 12px;
+        border: 1px solid #dee2e6;
+        background: white;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 14px;
+    }
+
+    .mode-btn.active {
+        background: #28a745;
+        color: white;
+        border-color: #28a745;
+    }
+
+    .legend-container {
+        background: white;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 15px;
+    }
+
+    .legend-title {
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 10px;
+    }
+
+    .legend-item {
+        margin-bottom: 15px;
+    }
+
+    .legend-gradient {
+        height: 20px;
+        border-radius: 4px;
+        margin: 8px 0;
+        display: flex;
+        overflow: hidden;
+    }
+
+    .legend-stop {
+        flex: 1;
+        height: 100%;
+    }
+
+    .legend-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        color: #6c757d;
+    }
+
+    .stats-panel {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+
+    .stat-item {
+        text-align: center;
+        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 6px;
+    }
+
+    .stat-value {
+        font-size: 18px;
+        font-weight: 600;
+        color: #007bff;
+    }
+
+    .stat-label {
+        font-size: 12px;
+        color: #6c757d;
+        margin-top: 2px;
+    }
+
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .popup-content {
+        font-size: 13px;
+        line-height: 1.4;
+    }
+
+    .popup-title {
+        font-weight: 600;
+        margin-bottom: 5px;
+    }
+
+    .popup-subtitle {
+        color: #6c757d;
+        font-size: 12px;
+        margin-bottom: 8px;
+    }
+
+    .popup-hazard {
+        margin: 5px 0;
+        padding: 3px 0;
+        border-top: 1px solid #e9ecef;
+        padding-top: 5px;
+    }
+
+    .controls-header {
+        background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+        color: white;
+        padding: 15px;
+        margin: -20px -20px 20px -20px;
+        border-radius: 12px 12px 0 0;
+    }
+
+    .controls-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0;
+    }
+
+    .controls-subtitle {
+        font-size: 14px;
+        opacity: 0.9;
+        margin: 5px 0 0 0;
+    }
+
+    .refresh-btn {
+        width: 100%;
+        padding: 10px;
+        background: #28a745;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background 0.2s ease;
+    }
+
+    .refresh-btn:hover {
+        background: #218838;
+    }
+
+    .map-controls {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .map-control-btn {
+        width: 40px;
+        height: 40px;
+        background: white;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        transition: all 0.2s ease;
+    }
+
+    .map-control-btn:hover {
+        background: #f8f9fa;
+        border-color: #007bff;
+    }
+
+    .data-info {
+        background: #e3f2fd;
+        border: 1px solid #bbdefb;
+        border-radius: 6px;
+        padding: 12px;
+        margin-bottom: 15px;
+    }
+
+    .data-info-title {
+        font-weight: 600;
+        color: #1565c0;
+        margin-bottom: 5px;
+    }
+
+    .data-info-text {
+        font-size: 13px;
+        color: #1976d2;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Enhanced Hazard Exposure Map Header -->
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="text-center mb-4">
+                <h2 class="text-primary">
+                    <i class="fas fa-map-marked-alt me-2"></i>
+                    Enhanced Hazard Exposure Map
+                </h2>
+                <p class="text-muted">
+                    Interactive visualization of climate hazard exposure for granular analysis points
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Map Layout -->
+    <div class="enhanced-hazard-map-container">
+        <!-- Control Panel -->
+        <div class="control-panel">
+            <div class="controls-header">
+                <h3 class="controls-title">Map Controls</h3>
+                <p class="controls-subtitle">Customize hazard visualization</p>
+            </div>
+
+            <!-- Data Information -->
+            <div class="data-info">
+                <div class="data-info-title">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Data Status
+                </div>
+                <div class="data-info-text" id="data-status">
+                    Loading granular analysis data...
+                </div>
+            </div>
+
+            <!-- Scenario Selection -->
+            <div class="section-card">
+                <div class="section-title">
+                    <i class="fas fa-calendar-alt"></i>
+                    Scenario Selection
+                </div>
+                <div class="scenario-selector">
+                    <button class="scenario-btn active" data-scenario="current">Current</button>
+                    <button class="scenario-btn" data-scenario="moderate">Moderate</button>
+                    <button class="scenario-btn" data-scenario="worst">Worst</button>
+                </div>
+            </div>
+
+            <!-- Visualization Mode -->
+            <div class="section-card">
+                <div class="section-title">
+                    <i class="fas fa-eye"></i>
+                    Visualization Mode
+                </div>
+                <div class="visualization-mode">
+                    <button class="mode-btn active" data-mode="points">
+                        <i class="fas fa-map-pin"></i> Points
+                    </button>
+                    <button class="mode-btn" data-mode="heatmap">
+                        <i class="fas fa-th"></i> Heatmap
+                    </button>
+                </div>
+            </div>
+
+            <!-- Hazard Selection -->
+            <div class="section-card">
+                <div class="section-title">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Hazard Types
+                </div>
+                <div class="hazard-grid">
+                    <div class="hazard-item">
+                        <input type="checkbox" class="hazard-checkbox" id="hazard-flood" data-hazard="flood" checked>
+                        <label for="hazard-flood" class="hazard-label">Flood</label>
+                        <div class="hazard-indicator" style="background: #0066cc;"></div>
+                    </div>
+                    <div class="hazard-item">
+                        <input type="checkbox" class="hazard-checkbox" id="hazard-water-stress" data-hazard="waterStress">
+                        <label for="hazard-water-stress" class="hazard-label">Water Stress</label>
+                        <div class="hazard-indicator" style="background: #336633;"></div>
+                    </div>
+                    <div class="hazard-item">
+                        <input type="checkbox" class="hazard-checkbox" id="hazard-sea-level" data-hazard="seaLevelRise">
+                        <label for="hazard-sea-level" class="hazard-label">Sea Level Rise</label>
+                        <div class="hazard-indicator" style="background: #cc0000;"></div>
+                    </div>
+                    <div class="hazard-item">
+                        <input type="checkbox" class="hazard-checkbox" id="hazard-cyclone" data-hazard="tropicalCyclone">
+                        <label for="hazard-cyclone" class="hazard-label">Tropical Cyclone</label>
+                        <div class="hazard-indicator" style="background: #ff6600;"></div>
+                    </div>
+                    <div class="hazard-item">
+                        <input type="checkbox" class="hazard-checkbox" id="hazard-heat" data-hazard="heat">
+                        <label for="hazard-heat" class="hazard-label">Heat Exposure</label>
+                        <div class="hazard-indicator" style="background: #cc0000;"></div>
+                    </div>
+                    <div class="hazard-item">
+                        <input type="checkbox" class="hazard-checkbox" id="hazard-storm-surge" data-hazard="stormSurge">
+                        <label for="hazard-storm-surge" class="hazard-label">Storm Surge</label>
+                        <div class="hazard-indicator" style="background: #0066cc;"></div>
+                    </div>
+                    <div class="hazard-item">
+                        <input type="checkbox" class="hazard-checkbox" id="hazard-landslide" data-hazard="landslide">
+                        <label for="hazard-landslide" class="hazard-label">Landslide</label>
+                        <div class="hazard-indicator" style="background: #7f00ff;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statistics Panel -->
+            <div class="section-card">
+                <div class="section-title">
+                    <i class="fas fa-chart-bar"></i>
+                    Analysis Statistics
+                </div>
+                <div class="stats-panel">
+                    <div class="stat-item">
+                        <div class="stat-value" id="total-points">-</div>
+                        <div class="stat-label">Total Points</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="active-hazards">-</div>
+                        <div class="stat-label">Active Hazards</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="data-extent">-</div>
+                        <div class="stat-label">Area (km²)</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="last-updated">-</div>
+                        <div class="stat-label">Last Updated</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Legend -->
+            <div class="legend-container">
+                <div class="legend-title">
+                    <i class="fas fa-palette me-1"></i>
+                    Hazard Intensity Legend
+                </div>
+                <div id="legend-content">
+                    <p class="text-muted">Select hazards to display legend</p>
+                </div>
+            </div>
+
+            <!-- Refresh Button -->
+            <button class="refresh-btn" id="refresh-data">
+                <i class="fas fa-sync-alt me-2"></i>
+                Refresh Data
+            </button>
+        </div>
+
+        <!-- Map Container -->
+        <div class="map-container">
+            <div id="hazard-map" style="width: 100%; height: 100%;"></div>
+
+            <!-- Map Controls -->
+            <div class="map-controls">
+                <button class="map-control-btn" id="zoom-in" title="Zoom In">
+                    <i class="fas fa-plus"></i>
+                </button>
+                <button class="map-control-btn" id="zoom-out" title="Zoom Out">
+                    <i class="fas fa-minus"></i>
+                </button>
+                <button class="map-control-btn" id="reset-view" title="Reset View">
+                    <i class="fas fa-compress"></i>
+                </button>
+                <button class="map-control-btn" id="fullscreen" title="Fullscreen">
+                    <i class="fas fa-expand"></i>
+                </button>
+            </div>
+
+            <!-- Loading Overlay -->
+            <div class="loading-overlay" id="loading-overlay">
+                <div class="text-center">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-3 mb-0">Loading hazard exposure data...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- JavaScript Dependencies -->
+<script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+<script src="{% static 'js/csrf-manager.js' %}"></script>
+<script src="{% static 'climate_hazards_analysis_v2/js/granular-data-service.js' %}"></script>
+<script src="{% static 'climate_hazards_analysis_v2/js/hazard-layer-manager.js' %}"></script>
+
+<!-- Enhanced Hazard Map Script -->
+<script>
+class EnhancedHazardMap {
+    constructor() {
+        this.map = null;
+        this.layerManager = null;
+        this.currentScenario = 'current';
+        this.visualizationMode = 'points';
+        this.activeHazards = new Set(['flood']); // Default hazard
+
+        this.init();
+    }
+
+    async init() {
+        try {
+            await this.initializeMap();
+            this.setupEventListeners();
+            await this.loadData();
+            this.hideLoading();
+        } catch (error) {
+            console.error('Error initializing enhanced hazard map:', error);
+            this.showErrorMessage('Failed to initialize hazard map');
+        }
+    }
+
+    async initializeMap() {
+        // Initialize MapLibre GL map
+        this.map = new maplibregl.Map({
+            container: 'hazard-map',
+            style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+            center: [121.074, 14.267], // Center of the granular points
+            zoom: 14,
+            attributionControl: false
+        });
+
+        // Add navigation controls
+        this.map.addControl(new maplibregl.NavigationControl(), 'top-left');
+
+        // Wait for map to load
+        await new Promise((resolve) => {
+            this.map.on('load', resolve);
+        });
+
+        // Initialize layer manager
+        this.layerManager = new HazardLayerManager(this.map);
+    }
+
+    setupEventListeners() {
+        // Scenario selection
+        document.querySelectorAll('.scenario-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                this.setScenario(e.target.dataset.scenario);
+            });
+        });
+
+        // Visualization mode
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                this.setVisualizationMode(e.target.dataset.mode);
+            });
+        });
+
+        // Hazard selection
+        document.querySelectorAll('.hazard-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', (e) => {
+                const hazard = e.target.dataset.hazard;
+                const isChecked = e.target.checked;
+                this.toggleHazard(hazard, isChecked);
+            });
+        });
+
+        // Map controls
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            this.map.zoomIn();
+        });
+
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            this.map.zoomOut();
+        });
+
+        document.getElementById('reset-view').addEventListener('click', () => {
+            this.resetView();
+        });
+
+        document.getElementById('fullscreen').addEventListener('click', () => {
+            this.toggleFullscreen();
+        });
+
+        // Refresh data
+        document.getElementById('refresh-data').addEventListener('click', () => {
+            this.refreshData();
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.fullscreenElement) {
+                document.exitFullscreen();
+            }
+        });
+    }
+
+    async loadData() {
+        try {
+            await this.layerManager.loadGranularData();
+            this.updateDataStatus('Data loaded successfully', 'success');
+            this.updateStatistics();
+        } catch (error) {
+            console.error('Error loading data:', error);
+            this.updateDataStatus('Failed to load data', 'error');
+            throw error;
+        }
+    }
+
+    setScenario(scenario) {
+        this.currentScenario = scenario;
+
+        // Update UI
+        document.querySelectorAll('.scenario-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.scenario === scenario);
+        });
+
+        // Update layer manager
+        if (this.layerManager) {
+            this.layerManager.setScenario(scenario);
+        }
+
+        this.updateLegend();
+    }
+
+    setVisualizationMode(mode) {
+        this.visualizationMode = mode;
+
+        // Update UI
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === mode);
+        });
+
+        // Update layer manager
+        if (this.layerManager) {
+            this.layerManager.setVisualizationMode(mode);
+        }
+    }
+
+    toggleHazard(hazard, isVisible) {
+        if (isVisible) {
+            this.activeHazards.add(hazard);
+        } else {
+            this.activeHazards.delete(hazard);
+        }
+
+        // Update layer manager
+        if (this.layerManager) {
+            this.layerManager.toggleHazard(hazard, isVisible);
+        }
+
+        this.updateLegend();
+        this.updateStatistics();
+    }
+
+    updateDataStatus(message, type = 'info') {
+        const statusElement = document.getElementById('data-status');
+        statusElement.textContent = message;
+
+        // Update color based on type
+        const dataInfo = statusElement.closest('.data-info');
+        dataInfo.className = 'data-info';
+
+        if (type === 'success') {
+            dataInfo.style.background = '#e8f5e8';
+            dataInfo.style.borderColor = '#c3e6c3';
+        } else if (type === 'error') {
+            dataInfo.style.background = '#ffeaea';
+            dataInfo.style.borderColor = '#ffd6d6';
+        } else {
+            dataInfo.style.background = '#e3f2fd';
+            dataInfo.style.borderColor = '#bbdefb';
+        }
+    }
+
+    updateStatistics() {
+        if (!window.granularDataService || !window.granularDataService.isLoaded) {
+            return;
+        }
+
+        const data = window.granularDataService.processedData;
+
+        // Update total points
+        document.getElementById('total-points').textContent = data.granularPoints.length;
+
+        // Update active hazards
+        document.getElementById('active-hazards').textContent = this.activeHazards.size;
+
+        // Calculate area (simplified)
+        const bounds = this.calculateBounds(data.granularPoints);
+        const area = this.calculateArea(bounds);
+        document.getElementById('data-extent').textContent = area.toFixed(1);
+
+        // Update last updated time
+        const now = new Date();
+        document.getElementById('last-updated').textContent =
+            now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    calculateBounds(points) {
+        if (points.length === 0) return null;
+
+        const lats = points.map(p => p.latitude);
+        const lngs = points.map(p => p.longitude);
+
+        return {
+            minLat: Math.min(...lats),
+            maxLat: Math.max(...lats),
+            minLng: Math.min(...lngs),
+            maxLng: Math.max(...lngs)
+        };
+    }
+
+    calculateArea(bounds) {
+        if (!bounds) return 0;
+
+        // Simple rectangular area calculation in km²
+        const latDiff = bounds.maxLat - bounds.minLat;
+        const lngDiff = bounds.maxLng - bounds.minLng;
+
+        // Convert degrees to approximate kilometers
+        const latKm = latDiff * 111.32;
+        const lngKm = lngDiff * 111.32 * Math.cos(bounds.minLat * Math.PI / 180);
+
+        return latKm * lngKm;
+    }
+
+    updateLegend() {
+        const legendContent = document.getElementById('legend-content');
+
+        if (this.activeHazards.size === 0 || !this.layerManager) {
+            legendContent.innerHTML = '<p class="text-muted">Select hazards to display legend</p>';
+            return;
+        }
+
+        legendContent.innerHTML = this.layerManager.getLegendHTML();
+    }
+
+    resetView() {
+        if (this.layerManager) {
+            this.layerManager.fitMapToPoints();
+        }
+    }
+
+    toggleFullscreen() {
+        const mapContainer = document.querySelector('.map-container');
+
+        if (!document.fullscreenElement) {
+            mapContainer.requestFullscreen().then(() => {
+                this.map.resize();
+            });
+        } else {
+            document.exitFullscreen().then(() => {
+                this.map.resize();
+            });
+        }
+    }
+
+    async refreshData() {
+        this.showLoading();
+        this.updateDataStatus('Refreshing data...');
+
+        try {
+            // Clear cache
+            if (window.granularDataService) {
+                window.granularDataService.clearCache();
+            }
+
+            // Reload data
+            await this.loadData();
+            this.hideLoading();
+        } catch (error) {
+            console.error('Error refreshing data:', error);
+            this.updateDataStatus('Failed to refresh data', 'error');
+            this.hideLoading();
+        }
+    }
+
+    showLoading() {
+        document.getElementById('loading-overlay').style.display = 'flex';
+    }
+
+    hideLoading() {
+        document.getElementById('loading-overlay').style.display = 'none';
+    }
+
+    showErrorMessage(message) {
+        this.updateDataStatus(message, 'error');
+        this.hideLoading();
+    }
+
+    destroy() {
+        if (this.layerManager) {
+            this.layerManager.destroy();
+        }
+        if (this.map) {
+            this.map.remove();
+        }
+    }
+}
+
+// Initialize the enhanced hazard map when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    window.enhancedHazardMap = new EnhancedHazardMap();
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    if (window.enhancedHazardMap) {
+        window.enhancedHazardMap.destroy();
+    }
+});
+</script>
+{% endblock %}

@@ -20,25 +20,72 @@
      style="display: none;"></div>
 
 <style>
-    /* === Step Header Styles === */
-    .step-header {
-        background-color: #f8f9fa;
-        color: #495057;
-        font-weight: bold;
-        padding: 10px;
-        border: 2px solid transparent;
+    /* === Circle-based Step Styles === */
+    .step-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        position: relative;
+        z-index: 2;
+        cursor: pointer;
         transition: all 0.3s ease;
     }
 
-    .step-header.active-step-header {
-        border: 2px solid #F1D500;
-        background-color: #fff8e1;
-        color: #495057;
+    .step-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background-color: #e9ecef;
+        color: #6c757d;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-weight: bold;
+        font-size: 18px;
+        border: 3px solid #e9ecef;
+        transition: all 0.3s ease;
+        margin-bottom: 8px;
     }
 
-    .step-header.arrow::after {
-        content: "→";
-        margin-left: 10px;
+    .step-circle.active-step {
+        background-color: #F1D500;
+        color: #000;
+        border-color: #F1D500;
+        box-shadow: 0 0 0 4px rgba(241, 213, 0, 0.2);
+    }
+
+    .step-circle.completed-step {
+        background-color: #28a745;
+        color: #fff;
+        border-color: #28a745;
+    }
+
+    .step-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #6c757d;
+        text-align: center;
+        max-width: 100px;
+        transition: all 0.3s ease;
+    }
+
+    .step-label.active-label {
+        color: #000;
+        font-weight: 600;
+    }
+
+    .step-label.completed-label {
+        color: #28a745;
+        font-weight: 600;
+    }
+
+    .step-item:hover .step-circle:not(.active-step):not(.completed-step) {
+        background-color: #dee2e6;
+        border-color: #dee2e6;
+    }
+
+    .step-item:hover .step-label:not(.active-label):not(.completed-label) {
+        color: #495057;
     }
 
     /* Loading overlay styles */
@@ -143,16 +190,49 @@
     </div>
 
     <!-- Step by Step Procedure UI -->
-<div class="row mt-4 mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body p-4">
-                {% include "climate_hazards_analysis_v2/steps_table.html" %}
+    <div class="row mt-4 mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body p-4">
+                    <div class="d-flex justify-content-between align-items-center position-relative">
+                        <!-- Progress Line -->
+                        <div style="position: absolute; top: 25px; left: 50px; right: 50px; height: 2px; background-color: #e9ecef; z-index: 1;"></div>
+
+                        <!-- Step 1 -->
+                        <div class="step-item" data-step="1">
+                            <div class="step-circle active-step">1</div>
+                            <div class="step-label active-label">Upload Assets</div>
+                        </div>
+
+                        <!-- Step 2 -->
+                        <div class="step-item" data-step="2">
+                            <div class="step-circle">2</div>
+                            <div class="step-label">Select Hazards</div>
+                        </div>
+
+                        <!-- Step 3 -->
+                        <div class="step-item" data-step="3">
+                            <div class="step-circle">3</div>
+                            <div class="step-label">View Results</div>
+                        </div>
+
+                        <!-- Step 4 -->
+                        <div class="step-item" data-step="4">
+                            <div class="step-circle">4</div>
+                            <div class="step-label">Adjust Sensitivity</div>
+                        </div>
+
+                        <!-- Step 5 -->
+                        <div class="step-item" data-step="5">
+                            <div class="step-circle">5</div>
+                            <div class="step-label">Final Results</div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-</div>
-    
+
     <!-- Alert Messages -->
     {% if error %}
     <div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -217,11 +297,17 @@
                     <!-- Card Footer Inside the Card -->
                     <div class="card-footer text-center card-footer-no-border">
                         <div class="footer-button-wrapper d-flex justify-content-center gap-2">
-                            <!-- Preview Button now triggers modal -->
-                            <button type="button" class="btn btn-warning preview-button flex-fill"
-                                    data-bs-toggle="modal" data-bs-target="#filePreviewModal" onclick="previewFile()">
-                                <strong>Preview File Upload</strong>
-                            </button>
+                            <!-- Preview Buttons -->
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-warning preview-button flex-fill"
+                                        data-bs-toggle="modal" data-bs-target="#filePreviewModal" onclick="previewFile()">
+                                    <strong>Preview File Upload</strong>
+                                </button>
+                                <button type="button" class="btn btn-info enhanced-preview-button flex-fill"
+                                        onclick="showEnhancedPreview()">
+                                    <strong><i class="fas fa-layer-group me-2"></i>Enhanced Preview</strong>
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Clear Site Data Button - HIDDEN -->
@@ -310,6 +396,129 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Enhanced Preview Modal for Polygon Assets and Granular Points -->
+<div class="modal fade" id="enhancedPreviewModal" tabindex="-1" aria-labelledby="enhancedPreviewModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="enhancedPreviewModalLabel">
+          <i class="fas fa-layer-group me-2"></i>Enhanced Data Preview
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Loading indicator for enhanced preview -->
+        <div id="enhanced-preview-loading" class="text-center" style="display: none;">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading enhanced preview...</span>
+          </div>
+          <p class="mt-2">Loading enhanced preview...</p>
+        </div>
+
+        <!-- Enhanced preview content -->
+        <div id="enhanced-preview-content" style="display: none;">
+          <!-- Summary Section -->
+          <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+              <h6 class="mb-0">
+                <i class="fas fa-chart-bar me-2"></i>Data Summary
+              </h6>
+            </div>
+            <div class="card-body">
+              <div class="row text-center">
+                <div class="col-md-3">
+                  <div class="stat-item">
+                    <h4 id="summary-total-facilities" class="text-primary mb-0">0</h4>
+                    <small class="text-muted">Regular Facilities</small>
+                  </div>
+                </div>
+                <div class="col-md-3">
+                  <div class="stat-item">
+                    <h4 id="summary-total-polygons" class="text-success mb-0">0</h4>
+                    <small class="text-muted">Polygon Assets</small>
+                  </div>
+                </div>
+                <div class="col-md-3">
+                  <div class="stat-item">
+                    <h4 id="summary-total-granular" class="text-info mb-0">0</h4>
+                    <small class="text-muted">Granular Points</small>
+                  </div>
+                </div>
+                <div class="col-md-3">
+                  <div class="stat-item">
+                    <h4 id="summary-total-all" class="text-warning mb-0">0</h4>
+                    <small class="text-muted">Total Points</small>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Regular Facilities Section -->
+          <div class="card mb-4" id="regular-facilities-section">
+            <div class="card-header bg-secondary text-white">
+              <h6 class="mb-0">
+                <i class="fas fa-map-marker-alt me-2"></i>Regular Facilities (Point Assets)
+              </h6>
+            </div>
+            <div class="card-body">
+              <div class="table-responsive">
+                <table id="regular-facilities-table" class="table table-striped table-hover">
+                  <thead class="table-light">
+                    <tr>
+                      <th>Facility Name</th>
+                      <th>Latitude</th>
+                      <th>Longitude</th>
+                      <th>Archetype</th>
+                    </tr>
+                  </thead>
+                  <tbody id="regular-facilities-body">
+                    <!-- Regular facilities will be populated here -->
+                  </tbody>
+                </table>
+              </div>
+              <div id="no-regular-facilities" class="text-center text-muted py-3" style="display: none;">
+                <i class="fas fa-inbox fa-2x mb-2"></i>
+                <p>No regular facilities found</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Polygon Assets Section -->
+          <div class="card mb-4" id="polygon-assets-section">
+            <div class="card-header bg-success text-white">
+              <h6 class="mb-0">
+                <i class="fas fa-draw-polygon me-2"></i>Polygon Assets
+              </h6>
+            </div>
+            <div class="card-body">
+              <div id="polygon-assets-container">
+                <!-- Polygon assets will be populated here -->
+              </div>
+              <div id="no-polygon-assets" class="text-center text-muted py-3" style="display: none;">
+                <i class="fas fa-shapes fa-2x mb-2"></i>
+                <p>No polygon assets found</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Error message -->
+        <div id="enhanced-preview-error" class="alert alert-danger" style="display: none;">
+          <i class="fas fa-exclamation-triangle me-2"></i>
+          <strong>Error:</strong> <span id="error-message"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" onclick="refreshEnhancedPreview()">
+          <i class="fas fa-sync me-2"></i>Refresh
+        </button>
       </div>
     </div>
   </div>
@@ -433,25 +642,7 @@
         window.location.href = "{% url 'climate_hazards_analysis_v2:select_hazards' %}";
     }
 
-    function highlightHeaders(currentStep) {
-        const overlay = document.getElementById('overlay-header');
-        const override = document.getElementById('override-header');
-        const sensitivity = document.getElementById('sensitivity-header');
-        const impact = document.getElementById('impact-header');
-
-        [overlay, override, sensitivity, impact].forEach(el => el.classList.remove('active-step-header'));
-
-        if (currentStep >= 1) {
-            overlay.classList.add('active-step-header');
-        } if (currentStep >= 3) {
-            override.classList.add('active-step-header');
-        } if (currentStep >= 4) {
-            sensitivity.classList.add('active-step-header');
-        } if (currentStep >= 6) {
-            impact.classList.add('active-step-header');
-        } 
-
-    }
+    // highlightHeaders function removed - 6-Step Workflow functionality removed
 
     function clearSiteData() {
         // Prevent multiple concurrent calls
@@ -736,8 +927,235 @@
             completedSteps = [];
         }
 
-        highlightHeaders(currentStep);
+        // highlightHeaders(currentStep); // Removed - 6-Step Workflow functionality removed
         highlightSteps(currentStep, completedSteps);
     });
+
+    // Enhanced Preview Functions
+    function showEnhancedPreview() {
+        console.log('Opening enhanced preview modal...');
+
+        // Show loading indicator
+        document.getElementById('enhanced-preview-loading').style.display = 'block';
+        document.getElementById('enhanced-preview-content').style.display = 'none';
+        document.getElementById('enhanced-preview-error').style.display = 'none';
+
+        // Show the modal
+        const modal = new bootstrap.Modal(document.getElementById('enhancedPreviewModal'));
+        modal.show();
+
+        // Fetch enhanced data
+        fetchEnhancedPreviewData();
+    }
+
+    async function fetchEnhancedPreviewData() {
+        try {
+            const response = await fetch("{% url 'climate_hazards_analysis_v2:preview_enhanced_facilities' %}");
+            const result = await response.json();
+
+            if (result.success) {
+                displayEnhancedPreview(result.data);
+            } else {
+                showEnhancedPreviewError(result.error || 'Failed to load preview data');
+            }
+        } catch (error) {
+            console.error('Error fetching enhanced preview:', error);
+            showEnhancedPreviewError('Network error while loading preview data');
+        }
+    }
+
+    function displayEnhancedPreview(data) {
+        console.log('Displaying enhanced preview data:', data);
+
+        // Update summary statistics
+        updateSummaryStats(data.summary);
+
+        // Display regular facilities
+        displayRegularFacilities(data.regular_facilities);
+
+        // Display polygon assets with granular points
+        displayPolygonAssets(data.polygon_assets);
+
+        // Hide loading and show content
+        document.getElementById('enhanced-preview-loading').style.display = 'none';
+        document.getElementById('enhanced-preview-content').style.display = 'block';
+    }
+
+    function updateSummaryStats(summary) {
+        document.getElementById('summary-total-facilities').textContent = summary.total_facilities;
+        document.getElementById('summary-total-polygons').textContent = summary.total_polygons;
+        document.getElementById('summary-total-granular').textContent = summary.total_granular_points;
+        document.getElementById('summary-total-all').textContent = summary.total_facilities + summary.total_granular_points;
+    }
+
+    function displayRegularFacilities(facilities) {
+        const tbody = document.getElementById('regular-facilities-body');
+        const noFacilitiesMsg = document.getElementById('no-regular-facilities');
+
+        // Clear existing content
+        tbody.innerHTML = '';
+
+        if (facilities.length === 0) {
+            noFacilitiesMsg.style.display = 'block';
+            tbody.parentElement.style.display = 'none';
+        } else {
+            noFacilitiesMsg.style.display = 'none';
+            tbody.parentElement.style.display = 'block';
+
+            facilities.forEach(facility => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${facility.Facility || 'N/A'}</td>
+                    <td>${facility.Lat || facility.Latitude || 'N/A'}</td>
+                    <td>${facility.Long || facility.Longitude || 'N/A'}</td>
+                    <td>${facility.Archetype || 'N/A'}</td>
+                `;
+            });
+        }
+    }
+
+    function displayPolygonAssets(polygonAssets) {
+        const container = document.getElementById('polygon-assets-container');
+        const noAssetsMsg = document.getElementById('no-polygon-assets');
+
+        // Clear existing content
+        container.innerHTML = '';
+
+        if (polygonAssets.length === 0) {
+            noAssetsMsg.style.display = 'block';
+        } else {
+            noAssetsMsg.style.display = 'none';
+
+            polygonAssets.forEach(asset => {
+                const assetCard = createPolygonAssetCard(asset);
+                container.appendChild(assetCard);
+            });
+        }
+    }
+
+    function createPolygonAssetCard(asset) {
+        const card = document.createElement('div');
+        card.className = 'card mb-3 border-success';
+
+        // Determine analysis status badge
+        const statusBadge = getAnalysisStatusBadge(asset.granular_analysis_status);
+
+        // Format area
+        const area = asset.area_km2 ? `${asset.area_km2.toFixed(2)} km²` : 'N/A';
+
+        // Format grid spacing
+        const gridSpacing = asset.granular_grid_spacing ? `${asset.granular_grid_spacing}m` : 'N/A';
+
+        card.innerHTML = `
+            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">
+                    <i class="fas fa-draw-polygon me-2"></i>
+                    ${asset.name}
+                </h6>
+                ${statusBadge}
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <small class="text-muted">Centroid</small>
+                        <p class="mb-1"><strong>Lat:</strong> ${asset.centroid.lat.toFixed(6)}</p>
+                        <p class="mb-1"><strong>Lng:</strong> ${asset.centroid.lng.toFixed(6)}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <small class="text-muted">Details</small>
+                        <p class="mb-1"><strong>Area:</strong> ${area}</p>
+                        <p class="mb-1"><strong>Archetype:</strong> ${asset.archetype}</p>
+                    </div>
+                </div>
+
+                ${asset.has_granular_analysis ? `
+                <div class="alert alert-info mb-3">
+                    <h6 class="alert-heading">
+                        <i class="fas fa-th me-2"></i>Granular Analysis Configuration
+                    </h6>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <strong>Grid Spacing:</strong> ${gridSpacing}
+                        </div>
+                        <div class="col-md-4">
+                            <strong>Analysis Points:</strong> ${asset.granular_points_count}
+                        </div>
+                        <div class="col-md-4">
+                            <strong>Status:</strong> ${asset.granular_analysis_status}
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+
+                ${asset.granular_points && asset.granular_points.length > 0 ? `
+                <div class="granular-points-section">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0">
+                            <i class="fas fa-map-pin me-2"></i>Granular Analysis Points (${asset.granular_points.length})
+                        </h6>
+                        <button class="btn btn-sm btn-outline-primary" onclick="toggleGranularPoints('asset-${asset.id}')">
+                            <i class="fas fa-eye me-1"></i>Show/Hide Points
+                        </button>
+                    </div>
+
+                    <div id="asset-${asset.id}-points" class="table-responsive" style="display: none;">
+                        <table class="table table-sm table-striped">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Point #</th>
+                                    <th>Latitude</th>
+                                    <th>Longitude</th>
+                                    <th>Grid Position</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${asset.granular_points.map((point, index) => `
+                                    <tr>
+                                        <td>${index + 1}</td>
+                                        <td>${point.latitude.toFixed(6)}</td>
+                                        <td>${point.longitude.toFixed(6)}</td>
+                                        <td>(${point.grid_row}, ${point.grid_col})</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+        `;
+
+        return card;
+    }
+
+    function getAnalysisStatusBadge(status) {
+        const badges = {
+            'none': '<span class="badge bg-secondary">No Analysis</span>',
+            'pending': '<span class="badge bg-warning">Pending</span>',
+            'processing': '<span class="badge bg-info">Processing</span>',
+            'completed': '<span class="badge bg-success">Completed</span>',
+            'failed': '<span class="badge bg-danger">Failed</span>'
+        };
+
+        return badges[status] || badges['none'];
+    }
+
+    function toggleGranularPoints(assetId) {
+        const pointsDiv = document.getElementById(assetId + '-points');
+        if (pointsDiv) {
+            pointsDiv.style.display = pointsDiv.style.display === 'none' ? 'block' : 'none';
+        }
+    }
+
+    function showEnhancedPreviewError(message) {
+        document.getElementById('enhanced-preview-loading').style.display = 'none';
+        document.getElementById('enhanced-preview-content').style.display = 'none';
+        document.getElementById('enhanced-preview-error').style.display = 'block';
+        document.getElementById('error-message').textContent = message;
+    }
+
+    function refreshEnhancedPreview() {
+        showEnhancedPreview();
+    }
 </script>
 {% endblock %}

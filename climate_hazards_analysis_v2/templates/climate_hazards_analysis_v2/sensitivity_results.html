@@ -118,25 +118,72 @@ View Sensitivity Results
         background-color: #f8d7da;
     }
 
-    /* === Step Header Styles === */
-    .step-header {
-        background-color: #f8f9fa;
-        color: #495057;
-        font-weight: bold;
-        padding: 10px;
-        border: 2px solid transparent;
+    /* === Circle-based Step Styles === */
+    .step-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        position: relative;
+        z-index: 2;
+        cursor: pointer;
         transition: all 0.3s ease;
     }
 
-    .step-header.active-step-header {
-        border: 2px solid #F1D500;
-        background-color: #fff8e1;
-        color: #495057;
+    .step-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background-color: #e9ecef;
+        color: #6c757d;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-weight: bold;
+        font-size: 18px;
+        border: 3px solid #e9ecef;
+        transition: all 0.3s ease;
+        margin-bottom: 8px;
     }
 
-    .step-header.arrow::after {
-        content: "→";
-        margin-left: 10px;
+    .step-circle.active-step {
+        background-color: #F1D500;
+        color: #000;
+        border-color: #F1D500;
+        box-shadow: 0 0 0 4px rgba(241, 213, 0, 0.2);
+    }
+
+    .step-circle.completed-step {
+        background-color: #28a745;
+        color: #fff;
+        border-color: #28a745;
+    }
+
+    .step-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #6c757d;
+        text-align: center;
+        max-width: 100px;
+        transition: all 0.3s ease;
+    }
+
+    .step-label.active-label {
+        color: #000;
+        font-weight: 600;
+    }
+
+    .step-label.completed-label {
+        color: #28a745;
+        font-weight: 600;
+    }
+
+    .step-item:hover .step-circle:not(.active-step):not(.completed-step) {
+        background-color: #dee2e6;
+        border-color: #dee2e6;
+    }
+
+    .step-item:hover .step-label:not(.active-label):not(.completed-label) {
+        color: #495057;
     }
 
     /* === DataTables Integration === */
@@ -246,12 +293,45 @@ View Sensitivity Results
         </div>
     </div>
 
-    <!-- Step Progress -->
-    <div class="row mt-4 mb-4">
+    <!-- Workflow Step Headers -->
+    <div class="row mb-4">
         <div class="col-12">
-            <div class="card">
-                <div class="card-body p-4">
-                    {% include "climate_hazards_analysis_v2/steps_table.html" %}
+            <div class="card custom-card">
+                <div class="card-body p-3">
+                    <div class="d-flex justify-content-between align-items-center position-relative">
+                        <!-- Progress Line -->
+                        <div style="position: absolute; top: 25px; left: 50px; right: 50px; height: 2px; background-color: #e9ecef; z-index: 1;"></div>
+
+                        <!-- Step 1 -->
+                        <div class="step-item" data-step="1">
+                            <div class="step-circle completed-step">1</div>
+                            <div class="step-label completed-label">Upload Assets</div>
+                        </div>
+
+                        <!-- Step 2 -->
+                        <div class="step-item" data-step="2">
+                            <div class="step-circle completed-step">2</div>
+                            <div class="step-label completed-label">Select Hazards</div>
+                        </div>
+
+                        <!-- Step 3 -->
+                        <div class="step-item" data-step="3">
+                            <div class="step-circle completed-step">3</div>
+                            <div class="step-label completed-label">View Results</div>
+                        </div>
+
+                        <!-- Step 4 -->
+                        <div class="step-item" data-step="4">
+                            <div class="step-circle completed-step">4</div>
+                            <div class="step-label completed-label">Adjust Sensitivity</div>
+                        </div>
+
+                        <!-- Step 5 -->
+                        <div class="step-item" data-step="5">
+                            <div class="step-circle active-step">5</div>
+                            <div class="step-label active-label">Final Results</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1378,24 +1458,7 @@ function updateSensitivitySearchMatchCount(searchTerm) {
 }
 
 // Group header highlighting
-function highlightHeaders(currentStep) {
-    const overlay = document.getElementById('overlay-header');
-    const override = document.getElementById('override-header');
-    const sensitivity = document.getElementById('sensitivity-header');
-    const impact = document.getElementById('impact-header');
-
-    [overlay, override, sensitivity, impact].forEach(el => el.classList.remove('active-step-header'));
-
-    if (currentStep >= 1) {
-        overlay.classList.add('active-step-header');
-    } if (currentStep >= 3) {
-        override.classList.add('active-step-header');
-    } if (currentStep >= 4) {
-        sensitivity.classList.add('active-step-header');
-    } if (currentStep >= 6) {
-        impact.classList.add('active-step-header');
-    }
-}
+// highlightHeaders function removed - 6-Step Workflow functionality removed
 
 // Step highlighting (enhanced to support multiple completed steps)
 function highlightSteps(currentStep, completedSteps = []) {
@@ -1441,7 +1504,7 @@ document.addEventListener('DOMContentLoaded', function() {
         completedSteps = [1]; // Upload step completed
     }
 
-    highlightHeaders(currentStep);
+    // highlightHeaders(currentStep); // Removed - 6-Step Workflow functionality removed
     highlightSteps(currentStep, completedSteps);
 });
 

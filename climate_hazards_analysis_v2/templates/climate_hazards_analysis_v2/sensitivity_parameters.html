@@ -5,25 +5,72 @@ Adjust Sensitivity Thresholds
 {% endblock %}
 {% block content %}
 <style>
-    /* === Step Header Styles === */
-    .step-header {
-        background-color: #f8f9fa;
-        color: #495057;
-        font-weight: bold;
-        padding: 10px;
-        border: 2px solid transparent;
+    /* === Circle-based Step Styles === */
+    .step-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        position: relative;
+        z-index: 2;
+        cursor: pointer;
         transition: all 0.3s ease;
     }
 
-    .step-header.active-step-header {
-        border: 2px solid #F1D500;
-        background-color: #fff8e1;
-        color: #495057;
+    .step-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background-color: #e9ecef;
+        color: #6c757d;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-weight: bold;
+        font-size: 18px;
+        border: 3px solid #e9ecef;
+        transition: all 0.3s ease;
+        margin-bottom: 8px;
     }
 
-    .step-header.arrow::after {
-        content: "→";
-        margin-left: 10px;
+    .step-circle.active-step {
+        background-color: #F1D500;
+        color: #000;
+        border-color: #F1D500;
+        box-shadow: 0 0 0 4px rgba(241, 213, 0, 0.2);
+    }
+
+    .step-circle.completed-step {
+        background-color: #28a745;
+        color: #fff;
+        border-color: #28a745;
+    }
+
+    .step-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #6c757d;
+        text-align: center;
+        max-width: 100px;
+        transition: all 0.3s ease;
+    }
+
+    .step-label.active-label {
+        color: #000;
+        font-weight: 600;
+    }
+
+    .step-label.completed-label {
+        color: #28a745;
+        font-weight: 600;
+    }
+
+    .step-item:hover .step-circle:not(.active-step):not(.completed-step) {
+        background-color: #dee2e6;
+        border-color: #dee2e6;
+    }
+
+    .step-item:hover .step-label:not(.active-label):not(.completed-label) {
+        color: #495057;
     }
 
     /* Parameter card styles */
@@ -371,16 +418,49 @@ Adjust Sensitivity Thresholds
         </div>
     </div>
 
-    <!-- Step by Step Procedure UI -->
-<div class="row mt-4 mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body p-4">
-                {% include "climate_hazards_analysis_v2/steps_table.html" %}
+    <!-- Workflow Step Headers -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card custom-card">
+                <div class="card-body p-3">
+                    <div class="d-flex justify-content-between align-items-center position-relative">
+                        <!-- Progress Line -->
+                        <div style="position: absolute; top: 25px; left: 50px; right: 50px; height: 2px; background-color: #e9ecef; z-index: 1;"></div>
+
+                        <!-- Step 1 -->
+                        <div class="step-item" data-step="1">
+                            <div class="step-circle completed-step">1</div>
+                            <div class="step-label completed-label">Upload Assets</div>
+                        </div>
+
+                        <!-- Step 2 -->
+                        <div class="step-item" data-step="2">
+                            <div class="step-circle completed-step">2</div>
+                            <div class="step-label completed-label">Select Hazards</div>
+                        </div>
+
+                        <!-- Step 3 -->
+                        <div class="step-item" data-step="3">
+                            <div class="step-circle completed-step">3</div>
+                            <div class="step-label completed-label">View Results</div>
+                        </div>
+
+                        <!-- Step 4 -->
+                        <div class="step-item" data-step="4">
+                            <div class="step-circle active-step">4</div>
+                            <div class="step-label active-label">Adjust Sensitivity</div>
+                        </div>
+
+                        <!-- Step 5 -->
+                        <div class="step-item" data-step="5">
+                            <div class="step-circle">5</div>
+                            <div class="step-label">Final Results</div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
     <!-- Alert Messages -->
     {% if error %}
@@ -799,7 +879,12 @@ Adjust Sensitivity Thresholds
             // Update all display values and slider tracks
             updateAllDisplayValues();
 
-            console.log('After updateAllDisplayValues() - TC Low slider:', document.getElementById('tropicalCycloneLow').value);
+            const tcLowSlider = document.getElementById('tropicalCycloneLow');
+            if (tcLowSlider) {
+                console.log('After updateAllDisplayValues() - TC Low slider:', tcLowSlider.value);
+            } else {
+                console.log('After updateAllDisplayValues() - TC Low slider not found');
+            }
 
             // Toggle hazards to update visibility
             toggleHazard('flood');
@@ -833,10 +918,13 @@ Adjust Sensitivity Thresholds
         const max = parseFloat(lowEl.max);
         const lowPct = ((low - min) / (max - min)) * 100;
         const highPct = ((high - min) / (max - min)) * 100;
-        document.getElementById(prefix + 'Track').style.background =
-            prefix === 'landslide'
-                ? `linear-gradient(to right, red 0%, red ${lowPct}%, orange ${lowPct}%, orange ${highPct}%, green ${highPct}%, green 100%)`
-                : `linear-gradient(to right, green 0%, green ${lowPct}%, orange ${lowPct}%, orange ${highPct}%, red ${highPct}%, red 100%)`;
+        const trackEl = document.getElementById(prefix + 'Track');
+        if (trackEl) {
+            trackEl.style.background =
+                prefix === 'landslide'
+                    ? `linear-gradient(to right, red 0%, red ${lowPct}%, orange ${lowPct}%, orange ${highPct}%, green ${highPct}%, green 100%)`
+                    : `linear-gradient(to right, green 0%, green ${lowPct}%, orange ${lowPct}%, orange ${highPct}%, red ${highPct}%, red 100%)`;
+        }
     }
 
     // Update slider values when numeric inputs change
@@ -879,6 +967,17 @@ Adjust Sensitivity Thresholds
         } catch (error) {
             console.error('Error in updateAllDisplayValues:', error);
         }
+
+        // Save current state to archetype parameters if an archetype is selected
+        if (currentSelectedArchetype && isAccordionEnabled) {
+            try {
+                const currentParams = getCurrentParameters();
+                archetypeParameters[currentSelectedArchetype] = currentParams;
+                console.log(`💾 Saved current state for ${currentSelectedArchetype} in updateAllDisplayValues`);
+            } catch (saveError) {
+                console.error('Error saving current state in updateAllDisplayValues:', saveError);
+            }
+        }
     }
 
     // Function to select an archetype
@@ -897,7 +996,6 @@ Adjust Sensitivity Thresholds
             showSelectionFeedback(archetypeName);
 
             // Save current parameters if an archetype was previously selected
-<<<<<<< HEAD
             if (currentSelectedArchetype && currentSelectedArchetype !== archetypeName) {
                 console.log('💾 Saving parameters for previous archetype:', currentSelectedArchetype);
                 archetypeParameters[currentSelectedArchetype] = getCurrentParameters();
@@ -907,12 +1005,6 @@ Adjust Sensitivity Thresholds
                 // Save default parameters on first selection
                 console.log('💾 Saving default parameters');
                 defaultParameters = getCurrentParameters();
-=======
-            if (currentSelectedArchetype) {
-                const savedParams = getCurrentParameters();
-                archetypeParameters[currentSelectedArchetype] = savedParams;
-                console.log(`Saved parameters for ${currentSelectedArchetype}:`, savedParams);
->>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
             }
 
             // Update UI - Remove selection from all items first
@@ -1256,6 +1348,17 @@ Adjust Sensitivity Thresholds
             }
 
             updateAccordionState();
+
+            // Save current checkbox state to archetype parameters immediately
+            if (currentSelectedArchetype && isAccordionEnabled) {
+                try {
+                    const currentParams = getCurrentParameters();
+                    archetypeParameters[currentSelectedArchetype] = currentParams;
+                    console.log(`💾 Saved checkbox state for ${currentSelectedArchetype}:`, currentParams);
+                } catch (saveError) {
+                    console.error('Error saving checkbox state:', saveError);
+                }
+            }
         } catch (error) {
             console.error(`Error in toggleHazard for ${prefix}:`, error);
         }
@@ -1380,24 +1483,26 @@ Adjust Sensitivity Thresholds
                 console.log('📦 No archetype parameters found in Django session, starting with empty object');
             }
 
-<<<<<<< HEAD
             // Try to restore from sessionStorage (client-side persistence)
+            // Note: Django session data takes priority over sessionStorage
             try {
                 const sessionSelectedArchetype = sessionStorage.getItem('selectedArchetype');
                 const sessionArchetypeParams = sessionStorage.getItem('archetypeParameters');
-=======
-            // Capture default parameters - create a deep copy
-            defaultParameters = JSON.parse(JSON.stringify(getCurrentParameters()));
-            console.log('Default parameters captured at page load:', defaultParameters);
-            updateAllDisplayValues();
->>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
 
                 if (sessionSelectedArchetype && sessionArchetypeParams) {
                     const parsedParams = JSON.parse(sessionArchetypeParams);
                     if (parsedParams && typeof parsedParams === 'object') {
-                        archetypeParameters = { ...archetypeParameters, ...parsedParams };
-                        currentSelectedArchetype = sessionSelectedArchetype;
-                        console.log('🔄 Restored archetype selection from session storage:', currentSelectedArchetype);
+                        // Only use sessionStorage data if Django session doesn't have the archetype
+                        Object.keys(parsedParams).forEach(archetypeName => {
+                            if (!djangoArchetypeParams[archetypeName]) {
+                                archetypeParameters[archetypeName] = parsedParams[archetypeName];
+                            }
+                        });
+                        // Only use sessionStorage selected archetype if not in Django session
+                        if (!djangoArchetypeParams || Object.keys(djangoArchetypeParams).length === 0) {
+                            currentSelectedArchetype = sessionSelectedArchetype;
+                        }
+                        console.log('🔄 Partially restored archetype selection from session storage (Django data takes priority)');
                     }
                 }
             } catch (sessionError) {
@@ -1488,7 +1593,7 @@ Adjust Sensitivity Thresholds
                 currentStep = 2;
                 completedSteps = [1];
             }
-            highlightHeaders(currentStep);
+            // highlightHeaders(currentStep); // Removed - 6-Step Workflow functionality removed
             highlightSteps(currentStep, completedSteps);
         } catch (error) {
             console.error('Error during initialization:', error);
@@ -1584,24 +1689,7 @@ Adjust Sensitivity Thresholds
         }
     });
 
-    function highlightHeaders(currentStep) {
-        const overlay = document.getElementById('overlay-header');
-        const override = document.getElementById('override-header');
-        const sensitivity = document.getElementById('sensitivity-header');
-        const impact = document.getElementById('impact-header');
-
-        [overlay, override, sensitivity, impact].forEach(el => el.classList.remove('active-step-header'));
-
-        if (currentStep >= 1) {
-            overlay.classList.add('active-step-header');
-        } if (currentStep >= 3) {
-            override.classList.add('active-step-header');
-        } if (currentStep >= 4) {
-            sensitivity.classList.add('active-step-header');
-        } if (currentStep >= 6) {
-            impact.classList.add('active-step-header');
-        }
-    }
+    // highlightHeaders function removed - 6-Step Workflow functionality removed
 
     function highlightSteps(currentStep, completedSteps = []) {
         const steps = document.querySelectorAll('.step-item');

@@ -1,0 +1,495 @@
+{% extends "base.html" %}
+{% load static %}
+{% load float_filters %}
+{% load my_filters %}
+{% load common_filters %}
+
+{% block title %}
+Climate Hazard Analysis Results
+{% endblock %}
+
+{% block content %}
+<!-- Add CSRF token for AJAX requests -->
+{% csrf_token %}
+
+<style>
+    /* === Step Header Styles === */
+    .step-header {
+        background-color: #f8f9fa;
+        color: #495057;
+        font-weight: bold;
+        padding: 10px;
+        border: 2px solid transparent;
+        transition: all 0.3s ease;
+    }
+
+    .step-header.active-step-header {
+        border: 2px solid #F1D500;
+        background-color: #fff8e1;
+        color: #495057;
+    }
+
+    /* === Hierarchical Table Styles === */
+    .hierarchical-table {
+        background-color: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        border: none;
+        width: 100%;
+        border-collapse: collapse;
+        border-spacing: 0;
+    }
+
+    .hierarchical-table th {
+        background-color: #F8F8F8;
+        color: #495057;
+        font-weight: 600;
+        text-align: center;
+        border: 1px solid #dee2e6;
+        padding: 12px 8px;
+        vertical-align: middle;
+        font-size: 14px;
+    }
+
+    /* Parent row (Centroid) styling */
+    .parent-row {
+        background-color: #f8f9fa;
+        font-weight: 600;
+        border-bottom: 2px solid #dee2e6;
+    }
+
+    .parent-row:hover {
+        background-color: #e9ecef;
+        transition: background-color 0.3s ease;
+    }
+
+    .parent-row td {
+        padding: 12px 8px;
+        border-bottom: 1px solid #dee2e6;
+        vertical-align: middle;
+    }
+
+    /* Child row (Granular Point) styling */
+    .child-row {
+        background-color: #ffffff;
+        font-size: 13px;
+        border-bottom: 1px solid #f1f3f4;
+    }
+
+    .child-row:hover {
+        background-color: #f8f9ff;
+        transition: background-color 0.3s ease;
+    }
+
+    .child-row td {
+        padding: 8px 8px 8px 35px; /* Indentation for hierarchy */
+        border-bottom: 1px solid #f1f3f4;
+        color: #555;
+        font-style: italic;
+    }
+
+    /* Expand/Collapse Button */
+    .expand-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 4px 8px;
+        margin-right: 8px;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+        color: #495057;
+    }
+
+    .expand-btn:hover {
+        background-color: #e9ecef;
+    }
+
+    .expand-btn.expanded {
+        transform: rotate(90deg);
+    }
+
+    /* Asset name styling */
+    .asset-name {
+        font-weight: 600;
+        color: #2c3e50;
+    }
+
+    .point-name {
+        color: #6c757d;
+        font-size: 12px;
+    }
+
+    /* Hazard value styling */
+    .hazard-value {
+        text-align: center;
+        font-weight: 500;
+    }
+
+    /* Risk level badges */
+    .risk-badge {
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .risk-low { background-color: #d4edda; color: #155724; }
+    .risk-medium { background-color: #fff3cd; color: #856404; }
+    .risk-high { background-color: #f8d7da; color: #721c24; }
+    .risk-very-high { background-color: #f5c6cb; color: #491217; }
+
+    /* Asset Archetype Badge */
+    .archetype-badge {
+        background-color: #F1D500;
+        color: #000;
+        font-weight: 600;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+    }
+
+    /* Statistics display */
+    .stats-mini {
+        font-size: 11px;
+        color: #6c757d;
+        margin-top: 4px;
+    }
+
+    .stats-mini span {
+        margin-right: 12px;
+    }
+
+    /* Responsive design */
+    @media (max-width: 768px) {
+        .hierarchical-table {
+            font-size: 12px;
+        }
+
+        .hierarchical-table th,
+        .parent-row td,
+        .child-row td {
+            padding: 8px 4px;
+        }
+
+        .child-row td {
+            padding-left: 20px;
+        }
+
+        .archetype-badge {
+            font-size: 10px;
+            padding: 2px 4px;
+        }
+
+        .risk-badge {
+            font-size: 9px;
+            padding: 1px 3px;
+        }
+    }
+
+    /* Container for table with horizontal scroll on mobile */
+    .table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+</style>
+
+<div class="container-fluid mt-4">
+    <!-- Results Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h3>Climate Hazard Analysis Results</h3>
+                    <p class="text-muted mb-0">
+                        Analysis of {{ data|length }} assets
+                        {% if polygon_assets_count %}
+                            ({{ polygon_assets_count }} polygon assets with granular analysis)
+                        {% endif %}
+                    </p>
+                </div>
+                <div>
+                    <button class="btn btn-outline-secondary btn-sm me-2" onclick="expandAll()">
+                        <i class="fas fa-expand-alt"></i> Expand All
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="collapseAll()">
+                        <i class="fas fa-compress-alt"></i> Collapse All
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hierarchical Table -->
+    <div class="row">
+        <div class="col-12">
+            <div class="table-container">
+                <table class="hierarchical-table" id="hazard-results-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 250px;">Asset Information</th>
+                            <th style="width: 120px;">Coordinates</th>
+                            {% for hazard in selected_hazards %}
+                                <th style="width: 150px;">{{ hazard }}</th>
+                            {% endfor %}
+                            <th style="width: 100px;">Overall Risk</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in data %}
+                            {% if row.is_parent_facility %}
+                                <!-- Parent Row (Centroid) -->
+                                <tr class="parent-row" data-facility="{{ row.Facility }}">
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            {% if row.has_granular_analysis %}
+                                                <button class="expand-btn" onclick="toggleChildren('{{ row.Facility }}')">
+                                                    <i class="fas fa-chevron-right"></i>
+                                                </button>
+                                            {% else %}
+                                                <span style="width: 28px; display: inline-block;"></span>
+                                            {% endif %}
+                                            <div>
+                                                <div class="asset-name">{{ row.Facility }}</div>
+                                                {% if row.Asset Archetype and row.Asset Archetype != "N/A" %}
+                                                    <span class="archetype-badge">{{ row.Asset Archetype }}</span>
+                                                {% endif %}
+                                                {% if row.has_granular_analysis %}
+                                                    <div class="stats-mini">
+                                                        <span><i class="fas fa-map-marker-alt"></i> {{ row.sample_point_count }} points</span>
+                                                        {% if row.granular_analysis.grid_spacing %}
+                                                            <span><i class="fas fa-th"></i> {{ row.granular_analysis.grid_spacing }}m grid</span>
+                                                        {% endif %}
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="text-center">
+                                        <small>
+                                            {{ row.Lat|floatformat:4 }}, {{ row.Long|floatformat:4 }}
+                                        </small>
+                                    </td>
+                                    {% for hazard in selected_hazards %}
+                                        <td class="hazard-value">
+                                            {% if row.has_granular_analysis and row.granular_analysis.statistics %}
+                                                {% with hazard_stats=row.granular_analysis.statistics|get_item:hazard %}
+                                                    {% if hazard_stats %}
+                                                        <div>
+                                                            <strong>{{ hazard_stats.mean|floatformat:2|default:"N/A" }}</strong>
+                                                            <div class="stats-mini">
+                                                                <span>min: {{ hazard_stats.min|floatformat:2 }}</span>
+                                                                <span>max: {{ hazard_stats.max|floatformat:2 }}</span>
+                                                            </div>
+                                                        </div>
+                                                    {% else %}
+                                                        N/A
+                                                    {% endif %}
+                                                {% endwith %}
+                                            {% else %}
+                                                {% with hazard_key=hazard|add:" Value" %}
+                                                    {% with hazard_value=row|get_item:hazard_key %}
+                                                        {% if hazard_value and hazard_value != "N/A" %}
+                                                            <strong>{{ hazard_value|floatformat:2 }}</strong>
+                                                        {% else %}
+                                                            N/A
+                                                        {% endif %}
+                                                    {% endwith %}
+                                                {% endwith %}
+                                            {% endif %}
+                                        </td>
+                                    {% endfor %}
+                                    <td class="text-center">
+                                        {% if row.has_granular_analysis and row.granular_analysis.dominant_risk %}
+                                            <span class="risk-badge risk-{{ row.granular_analysis.dominant_risk|lower|replace:' ','-' }}">
+                                                {{ row.granular_analysis.dominant_risk }}
+                                            </span>
+                                        {% else %}
+                                            <span class="risk-badge risk-medium">Medium</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+
+                                {% if row.has_granular_analysis and row.granular_analysis.analyzed_points %}
+                                    <!-- Child Rows (Granular Points) -->
+                                    {% for point in row.granular_analysis.analyzed_points %}
+                                        <tr class="child-row" data-parent="{{ row.Facility }}" style="display: none;">
+                                            <td>
+                                                <div class="point-name">
+                                                    Point {{ forloop.counter }}
+                                                </div>
+                                            </td>
+                                            <td class="text-center">
+                                                <small>
+                                                    {{ point.lat|floatformat:6 }}, {{ point.lng|floatformat:6 }}
+                                                </small>
+                                            </td>
+                                            {% for hazard in selected_hazards %}
+                                                <td class="hazard-value">
+                                                    {% with value_key=hazard|add:"_value" %}
+                                                        {% with value=point|get_item:value_key|default_if_none:"N/A" %}
+                                                            {% if value == "N/A" %}
+                                                                N/A
+                                                            {% else %}
+                                                                {% with risk_key=hazard|add:"_risk" %}
+                                                                    {% with risk_level=point|get_item:risk_key %}
+                                                                        <span class="risk-badge risk-{{ risk_level|lower|replace:' ','-' }}">
+                                                                            {{ value|floatformat:2 }}
+                                                                        </span>
+                                                                    {% endwith %}
+                                                                {% endwith %}
+                                                            {% endif %}
+                                                        {% endwith %}
+                                                    {% endwith %}
+                                                </td>
+                                            {% endfor %}
+                                            <td class="text-center">
+                                                <span class="risk-badge risk-medium" data-risks="{% for hazard in selected_hazards %}{% with risk_key=hazard|add:'_risk' %}{% with risk_level=point|get_item:risk_key %}{{ risk_level|default:'Medium' }}{% endwith %}{% endwith %}{% if not forloop.last %},{% endif %}{% endfor %}">
+                                                    Calculating...
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% endif %}
+                            {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Statistics -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Analysis Summary</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <strong>Total Assets:</strong> {{ data|length }}
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Polygon Assets:</strong> {{ polygon_assets_count }}
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Granular Points:</strong> {{ granular_points_count }}
+                        </div>
+                        <div class="col-md-3">
+                            <strong>Hazards Analyzed:</strong> {{ selected_hazards|length }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Expand/Collapse functionality
+function toggleChildren(facilityName) {
+    const childRows = document.querySelectorAll(`tr.child-row[data-parent="${facilityName}"]`);
+    const expandBtn = document.querySelector(`tr.parent-row[data-facility="${facilityName}"] .expand-btn`);
+    const icon = expandBtn.querySelector('i');
+
+    const isVisible = childRows[0] && childRows[0].style.display !== 'none';
+
+    childRows.forEach(row => {
+        row.style.display = isVisible ? 'none' : 'table-row';
+    });
+
+    if (isVisible) {
+        icon.classList.remove('fa-chevron-down');
+        icon.classList.add('fa-chevron-right');
+        expandBtn.classList.remove('expanded');
+    } else {
+        icon.classList.remove('fa-chevron-right');
+        icon.classList.add('fa-chevron-down');
+        expandBtn.classList.add('expanded');
+        // Recalculate risk levels when children become visible
+        setTimeout(calculateOverallRisk, 100);
+    }
+}
+
+function expandAll() {
+    document.querySelectorAll('.child-row').forEach(row => {
+        row.style.display = 'table-row';
+    });
+    document.querySelectorAll('.expand-btn').forEach(btn => {
+        const icon = btn.querySelector('i');
+        icon.classList.remove('fa-chevron-right');
+        icon.classList.add('fa-chevron-down');
+        btn.classList.add('expanded');
+    });
+    // Recalculate risk levels when all children are visible
+    setTimeout(calculateOverallRisk, 100);
+}
+
+function collapseAll() {
+    document.querySelectorAll('.child-row').forEach(row => {
+        row.style.display = 'none';
+    });
+    document.querySelectorAll('.expand-btn').forEach(btn => {
+        const icon = btn.querySelector('i');
+        icon.classList.remove('fa-chevron-down');
+        icon.classList.add('fa-chevron-right');
+        btn.classList.remove('expanded');
+    });
+}
+
+// Calculate overall risk for granular points
+function calculateOverallRisk() {
+    document.querySelectorAll('.child-row .risk-badge[data-risks]').forEach(badge => {
+        const risks = badge.dataset.risks.split(',');
+        const riskScores = risks.map(risk => {
+            switch(risk.trim()) {
+                case 'Very High': return 4;
+                case 'High': return 3;
+                case 'Medium': return 2;
+                case 'Low': return 1;
+                default: return 2;
+            }
+        });
+
+        const avgScore = riskScores.reduce((a, b) => a + b, 0) / riskScores.length;
+        let riskLevel = 'Medium';
+        let riskClass = 'risk-medium';
+
+        if (avgScore >= 3.5) {
+            riskLevel = 'Very High';
+            riskClass = 'risk-very-high';
+        } else if (avgScore >= 2.5) {
+            riskLevel = 'High';
+            riskClass = 'risk-high';
+        } else if (avgScore >= 1.5) {
+            riskLevel = 'Medium';
+            riskClass = 'risk-medium';
+        } else {
+            riskLevel = 'Low';
+            riskClass = 'risk-low';
+        }
+
+        badge.className = `risk-badge ${riskClass}`;
+        badge.textContent = riskLevel;
+    });
+}
+
+// Initialize: expand first facility if it has granular analysis
+document.addEventListener('DOMContentLoaded', function() {
+    // Calculate overall risk levels
+    calculateOverallRisk();
+
+    const firstParentRow = document.querySelector('.parent-row[data-facility]');
+    if (firstParentRow) {
+        const facilityName = firstParentRow.dataset.facility;
+        const hasChildren = document.querySelectorAll(`tr.child-row[data-parent="${facilityName}"]`).length > 0;
+        if (hasChildren) {
+            toggleChildren(facilityName);
+        }
+    }
+});
+</script>
+{% endblock %}

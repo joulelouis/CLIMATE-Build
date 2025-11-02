@@ -12,72 +12,25 @@ Climate Hazard Analysis Results
 {% csrf_token %}
 
 <style>
-    /* === Circle-based Step Styles === */
-    .step-item {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        position: relative;
-        z-index: 2;
-        cursor: pointer;
-        transition: all 0.3s ease;
-    }
-
-    .step-circle {
-        width: 50px;
-        height: 50px;
-        border-radius: 50%;
-        background-color: #e9ecef;
-        color: #6c757d;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        font-weight: bold;
-        font-size: 18px;
-        border: 3px solid #e9ecef;
-        transition: all 0.3s ease;
-        margin-bottom: 8px;
-    }
-
-    .step-circle.active-step {
-        background-color: #F1D500;
-        color: #000;
-        border-color: #F1D500;
-        box-shadow: 0 0 0 4px rgba(241, 213, 0, 0.2);
-    }
-
-    .step-circle.completed-step {
-        background-color: #28a745;
-        color: #fff;
-        border-color: #28a745;
-    }
-
-    .step-label {
-        font-size: 14px;
-        font-weight: 500;
-        color: #6c757d;
-        text-align: center;
-        max-width: 100px;
-        transition: all 0.3s ease;
-    }
-
-    .step-label.active-label {
-        color: #000;
-        font-weight: 600;
-    }
-
-    .step-label.completed-label {
-        color: #28a745;
-        font-weight: 600;
-    }
-
-    .step-item:hover .step-circle:not(.active-step):not(.completed-step) {
-        background-color: #dee2e6;
-        border-color: #dee2e6;
-    }
-
-    .step-item:hover .step-label:not(.active-label):not(.completed-label) {
+    /* === Step Header Styles === */
+    .step-header {
+        background-color: #f8f9fa;
         color: #495057;
+        font-weight: bold;
+        padding: 10px;
+        border: 2px solid transparent;
+        transition: all 0.3s ease;
+    }
+
+    .step-header.active-step-header {
+        border: 2px solid #F1D500;
+        background-color: #fff8e1;
+        color: #495057;
+    }
+
+    .step-header.arrow::after {
+        content: "→";
+        margin-left: 10px;
     }
 
     /* Custom Table Styling */
@@ -134,86 +87,14 @@ Climate Hazard Analysis Results
         color: #666;
     }
 
-    /* Enhanced Hierarchical Row Styling for Unified Workflow */
-    .hierarchical-row {
-        transition: all 0.2s ease;
-    }
-
-    .hierarchical-row.level-0 {
-        font-weight: 500;
-    }
-
-    .hierarchical-row.level-1 {
-        background-color: #f8f9fa !important;
-        font-size: 0.9em;
-        padding-left: 20px;
-    }
-
-    .hierarchical-row.polygon-parent {
-        background-color: #fff3cd !important;
-        border-left: 4px solid #F1D500;
-    }
-
-    .hierarchical-row.polygon-child {
-        background-color: #f0f8ff !important;
-        border-left: 4px solid #007bff;
-        font-style: italic;
-    }
-
-    .hierarchical-row.polygon-child:hover {
-        background-color: #e3f2fd !important;
-    }
-
     .expand-collapse-btn {
         cursor: pointer;
         transition: transform 0.2s;
-        margin-right: 8px;
-        border: 1px solid #dee2e6;
-        background: #f8f9fa;
-        border-radius: 4px;
-        padding: 2px 6px;
-        font-size: 12px;
-    }
-
-    .expand-collapse-btn:hover {
-        background: #e9ecef;
     }
 
     .expand-collapse-btn.expanded .expand-icon {
         transform: rotate(90deg);
         display: inline-block;
-    }
-
-    .asset-type-badge {
-        font-size: 0.75em;
-        padding: 2px 6px;
-        border-radius: 10px;
-        margin-left: 8px;
-    }
-
-    .asset-type-badge.polygon {
-        background-color: #F1D500;
-        color: #000;
-    }
-
-    .asset-type-badge.granular {
-        background-color: #007bff;
-        color: #fff;
-    }
-
-    .children-count {
-        font-size: 0.8em;
-        color: #6c757d;
-        margin-left: 4px;
-    }
-
-    .mixed-assets-indicator {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        color: #155724;
-        padding: 8px 12px;
-        border-radius: 6px;
-        margin-bottom: 16px;
     }
 
     .custom-table td {
@@ -513,48 +394,15 @@ Climate Hazard Analysis Results
     </div>
 
     <!-- Step by Step Procedure UI -->
-    <div class="row mt-4 mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-body p-4">
-                    <div class="d-flex justify-content-between align-items-center position-relative">
-                        <!-- Progress Line -->
-                        <div style="position: absolute; top: 25px; left: 50px; right: 50px; height: 2px; background-color: #e9ecef; z-index: 1;"></div>
-
-                        <!-- Step 1 -->
-                        <div class="step-item" data-step="1">
-                            <div class="step-circle completed-step">1</div>
-                            <div class="step-label completed-label">Upload Assets</div>
-                        </div>
-
-                        <!-- Step 2 -->
-                        <div class="step-item" data-step="2">
-                            <div class="step-circle completed-step">2</div>
-                            <div class="step-label completed-label">Select Hazards</div>
-                        </div>
-
-                        <!-- Step 3 -->
-                        <div class="step-item" data-step="3">
-                            <div class="step-circle active-step">3</div>
-                            <div class="step-label active-label">View Results</div>
-                        </div>
-
-                        <!-- Step 4 -->
-                        <div class="step-item" data-step="4">
-                            <div class="step-circle">4</div>
-                            <div class="step-label">Adjust Sensitivity</div>
-                        </div>
-
-                        <!-- Step 5 -->
-                        <div class="step-item" data-step="5">
-                            <div class="step-circle">5</div>
-                            <div class="step-label">Final Results</div>
-                        </div>
-                    </div>
-                </div>
+<div class="row mt-4 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body p-4">
+                {% include "climate_hazards_analysis_v2/steps_table.html" %}
             </div>
         </div>
     </div>
+</div>
 
 <!-- Alert Messages -->
 {% if error %}
@@ -673,14 +521,9 @@ Climate Hazard Analysis Results
                                     
                                     <tbody>
     {% for row in data %}
-        <tr class="custom-table-row
-                   {% if row.is_sample_point %}sample-point-row{% endif %}
-                   {% if row.is_parent_facility %}parent-facility-row{% endif %}
-                   {% if row.row_type %}hierarchical-row {{ row.row_type }} level-{{ row.level }}{% endif %}"
+        <tr class="custom-table-row {% if row.is_sample_point %}sample-point-row{% endif %} {% if row.is_parent_facility %}parent-facility-row{% endif %}"
             {% if row.is_sample_point %}data-parent-facility="{{ row.parent_facility }}" style="display: none;"{% endif %}
-            {% if row.is_parent_facility and row.has_granular_analysis %}data-facility-name="{{ row.Facility }}"{% endif %}
-            {% if row.row_type == 'polygon_parent' %}data-facility-name="{{ row.Facility }}"{% endif %}
-            {% if row.row_type == 'polygon_child' %}data-parent-id="{{ row.parent_id }}" data-parent-facility="{{ row.parent_facility|default:row.parent_id }}" style="display: none;"{% endif %}>
+            {% if row.is_parent_facility and row.has_granular_analysis %}data-facility-name="{{ row.Facility }}"{% endif %}>
             {% for key in columns %}
                 {% with value=row|get_item:key %}
                 {% if key != "Facility" and key != "Asset Archetype" %}
@@ -689,22 +532,27 @@ Climate Hazard Analysis Results
                   <td {% if row.is_sample_point %}class="sample-point-cell"{% endif %}>
                   {% endif %}
 
-                    {# Facility name with hierarchical support and expand/collapse #}
+                    {# Facility name with granular analysis indicator and expand/collapse #}
                     {% if key == "Facility" %}
-                        {# Hierarchical expand/collapse for polygon assets #}
-                        {% if row.row_type == 'polygon_parent' %}
-                            <button class="expand-collapse-btn"
-                                    onclick="toggleHierarchicalChildren(this.closest('tr'))"
-                                    title="Show/Hide Granular Points">
+                        {% if row.has_granular_analysis %}
+                            <button class="btn btn-sm btn-outline-secondary expand-collapse-btn"
+                                    onclick="toggleSamplePoints('{{ row.Facility }}')"
+                                    title="Show/Hide Sample Points"
+                                    style="border: none; padding: 2px 6px;">
                                 <span class="expand-icon">▶</span>
                             </button>
                         {% endif %}
-
-                        
                         {{ value }}
+                        {% if row.has_granular_analysis %}
+                            <span class="badge bg-secondary ms-1" style="font-size: 0.7em;">{{ row.sample_point_count }} points</span>
+                            <button class="btn btn-sm btn-info ms-2"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#granularModal{{ forloop.parentloop.counter }}"
+                                    title="View Granular Analysis Summary">
+                                📊
+                            </button>
+                        {% endif %}
 
-                        
-                        
                     {# Asset Archetype styling - Yellow badge similar to sensitivity analysis #}
                     {% elif key == "Asset Archetype" and value != "N/A" %}
                         <span class="badge" style="background-color: #F1D500; color: #000; font-weight: 600;">{{ value }}</span>
@@ -1318,12 +1166,12 @@ Climate Hazard Analysis Results
             </a>
         </div>
         <div class="d-flex gap-2">
-            <!-- View Hazard Exposure Map button - works with both regular and granular workflows -->
-            <a href="{% url 'climate_hazards_analysis_v2:hazard_exposure_map' %}" class="btn btn-primary btn-lg">
-                <i class="fas fa-map-marked-alt me-2"></i>
-                <strong>View Hazard Exposure Map</strong>
+            {% if "Heat" in selected_hazards %}
+            <a href="{% url 'climate_hazards_analysis_v2:heat_exposure_map' %}" class="btn btn-danger btn-lg">
+                <i class="fas fa-temperature-high me-2"></i>
+                <strong>View Heat Exposure Map</strong>
             </a>
-
+            {% endif %}
             <a href="#" class="btn btn-warning btn-lg" onclick="proceedToSensitivityParameters()">
                 <strong>Proceed to Adjust Sensitivity Thresholds</strong>
                 <i class="fas fa-arrow-right ms-2"></i>
@@ -2347,38 +2195,26 @@ function storeTableRows() {
             rowData.push($(this).html()); // Store HTML to preserve styling
         });
 
-        // Enhanced row detection for both legacy and hierarchical systems
-        const isSamplePoint = $row.hasClass('sample-point-row') || $row.hasClass('polygon-child');
-        const isParent = $row.hasClass('parent-facility-row') || $row.hasClass('polygon-parent');
-        const isHierarchicalChild = $row.hasClass('hierarchical-row') && $row.hasClass('polygon-child');
-        const isHierarchicalParent = $row.hasClass('hierarchical-row') && $row.hasClass('polygon-parent');
-
         const rowObj = {
             element: $(this)[0].outerHTML,
             data: rowData,
             searchText: $(this).text().toLowerCase(),
-            isSamplePoint: isSamplePoint,
-            isParent: isParent,
-            isHierarchicalChild: isHierarchicalChild,
-            isHierarchicalParent: isHierarchicalParent,
-            facilityName: $row.data('facility-name') || $row.data('parent-facility'),
-            parentId: $row.data('parent-id')
+            isSamplePoint: $row.hasClass('sample-point-row'),
+            isParent: $row.hasClass('parent-facility-row'),
+            facilityName: $row.data('facility-name') || $row.data('parent-facility')
         };
 
         tableState.allRows.push(rowObj);
 
-        // Enhanced parent-child relationship handling
-        if (isSamplePoint || isHierarchicalChild) {
-            // Handle both legacy sample points and hierarchical children
-            const parentFacility = $row.data('parent-facility') || $row.data('parent-id');
-            if (parentFacility) {
-                if (!tableState.samplePointsByFacility[parentFacility]) {
-                    tableState.samplePointsByFacility[parentFacility] = [];
-                }
-                tableState.samplePointsByFacility[parentFacility].push(rowObj);
+        // Separate parent rows from sample points
+        if (rowObj.isSamplePoint) {
+            const parentFacility = $row.data('parent-facility');
+            if (!tableState.samplePointsByFacility[parentFacility]) {
+                tableState.samplePointsByFacility[parentFacility] = [];
             }
-        } else if (isParent || isHierarchicalParent || (!isSamplePoint && !isHierarchicalChild)) {
-            // This is a parent facility row (or regular row without children)
+            tableState.samplePointsByFacility[parentFacility].push(rowObj);
+        } else if (rowObj.isParent || !rowObj.isSamplePoint) {
+            // This is a parent facility row (or regular row without sample points)
             tableState.allParentRows.push(rowObj);
         }
     });
@@ -2387,8 +2223,6 @@ function storeTableRows() {
     tableState.filteredParentRows = [...tableState.allParentRows];
     console.log('Stored', tableState.allRows.length, 'total rows (' +
                 tableState.allParentRows.length, 'parent facilities)');
-    console.log('Hierarchical rows - Parents:', document.querySelectorAll('.hierarchical-row.polygon-parent').length,
-                'Children:', document.querySelectorAll('.hierarchical-row.polygon-child').length);
 }
 
 // SORTING FUNCTIONALITY
@@ -2489,50 +2323,13 @@ function renderTable() {
         // Add parent row
         $tbody.append(parentRow.element);
 
-        // Enhanced child row handling for both legacy and hierarchical systems
+        // Add sample point rows for this facility (if any)
         const facilityName = parentRow.facilityName;
-
-        // Handle legacy sample points
         if (facilityName && tableState.samplePointsByFacility[facilityName]) {
             const samplePoints = tableState.samplePointsByFacility[facilityName];
             samplePoints.forEach(function(sampleRow) {
                 $tbody.append(sampleRow.element);
             });
-        }
-
-        // Handle hierarchical children for polygon assets
-        if (parentRow.isHierarchicalParent || parentRow.isParent) {
-            // Look for hierarchical children using multiple methods
-            let childRows = [];
-
-            // Method 1: Find by data-parent-id
-            const parentFacilityName = parentRow.facilityName || parentRow.parentId;
-            if (parentFacilityName) {
-                childRows = tableState.allRows.filter(function(row) {
-                    return row.isHierarchicalChild &&
-                           (row.parentId === parentFacilityName ||
-                            row.facilityName === parentFacilityName ||
-                            row.parentFacility === parentFacilityName);
-                });
-            }
-
-            // Method 2: Direct DOM query as fallback
-            if (childRows.length === 0 && parentFacilityName) {
-                const $childRows = $(`.hierarchical-row.polygon-child[data-parent-id="${parentFacilityName}"]`);
-                childRows = Array.from($childRows).map(function(childElement) {
-                    return {
-                        element: childElement.outerHTML,
-                        isHierarchicalChild: true
-                    };
-                });
-            }
-
-            // Add found child rows to the table
-            childRows.forEach(function(childRow) {
-                $tbody.append(childRow.element);
-            });
-
-            console.log(`Added ${childRows.length} hierarchical children for parent: ${parentFacilityName}`);
         }
     });
 
@@ -2835,11 +2632,57 @@ function performReset() {
     });
 }
 
-// Proceed to sensitivity parameters function removed - 6-Step Workflow functionality removed
+// Proceed to sensitivity parameters function
+function proceedToSensitivityParameters() {
+    window.location.href = "{% url 'climate_hazards_analysis_v2:sensitivity_parameters' %}";
+}
 
-// highlightHeaders function removed - 6-Step Workflow functionality removed
+function highlightHeaders(currentStep) {
+    const overlay = document.getElementById('overlay-header');
+    const override = document.getElementById('override-header');
+    const sensitivity = document.getElementById('sensitivity-header');
+    const impact = document.getElementById('impact-header');
 
-// highlightSteps function removed - 6-Step Workflow functionality removed
+    [overlay, override, sensitivity, impact].forEach(el => el.classList.remove('active-step-header'));
+
+    if (currentStep >= 1) {
+        overlay.classList.add('active-step-header');
+    } if (currentStep >= 3) {
+        override.classList.add('active-step-header');
+    } if (currentStep >= 4) {
+        sensitivity.classList.add('active-step-header');
+    } if (currentStep >= 6) {
+        impact.classList.add('active-step-header');
+    }
+}
+
+function highlightSteps(currentStep, completedSteps = []) {
+    const steps = document.querySelectorAll('.step-item');
+    steps.forEach((step, index) => {
+        const circle = step.querySelector('.step-circle');
+        const label = step.querySelector('.step-label');
+        if (!circle || !label) return;
+
+        const stepNumber = index + 1;
+
+        if (stepNumber === currentStep) {
+            // Current step - yellow highlight
+            circle.style.backgroundColor = '#F1D500';
+            circle.style.color = '#000';
+            label.style.color = '#000';
+        } else if (completedSteps.includes(stepNumber)) {
+            // Completed step - green highlight
+            circle.style.backgroundColor = '#28a745';
+            circle.style.color = '#fff';
+            label.style.color = '#28a745';
+        } else {
+            // Default/unvisited step
+            circle.style.backgroundColor = '#e9ecef';
+            circle.style.color = '#6c757d';
+            label.style.color = '#6c757d';
+        }
+    });
+}
 
 function setupOverrideModal() {
     const select = document.getElementById('facility-select');
@@ -2855,7 +2698,25 @@ function setupOverrideModal() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // 6-Step Workflow variables and functions removed
+    const path = window.location.pathname;
+    let currentStep = 1;
+    let completedSteps = [];
+
+    if (path.includes('sensitivity-results')) {
+        currentStep = 5;
+        completedSteps = [1, 2, 3, 4];
+    } else if (path.includes('sensitivity-parameters')) {
+        currentStep = 4;
+        completedSteps = [1, 2, 3];
+    } else if (path.includes('results')) {
+        currentStep = 3;
+        completedSteps = [1, 2];
+    } else if (path.includes('select-hazards')) {
+        currentStep = 2;
+        completedSteps = [1];
+    }
+    highlightHeaders(currentStep);
+    highlightSteps(currentStep, completedSteps);
     setupOverrideModal();
 
     // Heat Exposure Map functionality moved to dedicated page: /climate-hazards-analysis-v2/heat-exposure-map/
@@ -3366,295 +3227,6 @@ function displayHeatStatistics(data) {
     statsContent.style.display = 'block';
 }
 
-// ===== UNIFIED HIERARCHICAL FUNCTIONALITY =====
-
-// Initialize hierarchical table functionality
-$(document).ready(function() {
-    // Check if we have mixed assets and initialize hierarchical features
-    const hasMixedAssets = {{ has_mixed_assets|default:'false'|yesno:'true,false' }};
-    const requiresHierarchicalDisplay = {{ requires_hierarchical_display|default:'false'|yesno:'true,false' }};
-
-    if (hasMixedAssets || requiresHierarchicalDisplay) {
-        console.log('Initializing hierarchical table for mixed assets');
-        initializeHierarchicalTable();
-    }
-});
-
-function initializeHierarchicalTable() {
-    // Add event listeners for hierarchical rows
-    document.querySelectorAll('.hierarchical-row.polygon-parent').forEach(row => {
-        const expandBtn = row.querySelector('.expand-collapse-btn');
-        if (expandBtn) {
-            // Remove existing listeners to prevent duplicates
-            expandBtn.replaceWith(expandBtn.cloneNode(true));
-            const newBtn = row.querySelector('.expand-collapse-btn');
-            newBtn.addEventListener('click', function() {
-                toggleHierarchicalChildren(row);
-            });
-        }
-    });
-
-    // Initially collapse all child rows
-    document.querySelectorAll('.hierarchical-row.polygon-child').forEach(row => {
-        row.style.display = 'none';
-    });
-
-    // Re-store table rows after hierarchical initialization
-    setTimeout(function() {
-        storeTableRows();
-        console.log('Hierarchical table re-initialized with updated row storage');
-    }, 200);
-
-    console.log('Hierarchical table initialized');
-}
-
-function toggleHierarchicalChildren(parentRow) {
-    const facilityName = parentRow.dataset.facilityName || parentRow.querySelector('td[data-column="Facility"]').textContent;
-    const expandBtn = parentRow.querySelector('.expand-collapse-btn');
-    const expandIcon = expandBtn.querySelector('.expand-icon');
-
-    console.log('=== TOGGLE HIERARCHICAL CHILDREN DEBUG ===');
-    console.log('ToggleHierarchicalChildren called for facility:', facilityName);
-    console.log('Parent row dataset:', parentRow.dataset);
-
-    // Debug all parent rows
-    console.log('Available parent rows:');
-    document.querySelectorAll('.hierarchical-row.polygon-parent').forEach((parent, index) => {
-        console.log(`  Parent ${index}:`, {
-            dataset: parent.dataset,
-            facility_text: parent.querySelector('td[data-column="Facility"]').textContent,
-            data_facility_name: parent.dataset.facilityName
-        });
-    });
-
-    console.log('Available child rows with polygon-child class:');
-    document.querySelectorAll('.hierarchical-row.polygon-child').forEach((child, index) => {
-        console.log(`  Child ${index}:`, {
-            parent_id: child.dataset.parentId,
-            parent_facility: child.dataset.parentFacility,
-            facility_text: child.querySelector('td[data-column="Facility"]').textContent,
-            display: child.style.display,
-            html: child.outerHTML.substring(0, 200) + '...'
-        });
-    });
-
-    // Enhanced child row finding - try multiple selectors
-    let childRows = Array.from(document.querySelectorAll(`.hierarchical-row.polygon-child[data-parent-id="${facilityName}"]`));
-    console.log('Found children with data-parent-id:', childRows.length);
-
-    // Fallback: try data-parent-facility attribute
-    if (childRows.length === 0) {
-        childRows = Array.from(document.querySelectorAll(`.hierarchical-row.polygon-child[data-parent-facility="${facilityName}"]`));
-        console.log('Found children with data-parent-facility:', childRows.length);
-    }
-
-    // Fallback: try finding children in current table body
-    if (childRows.length === 0) {
-        const $tbody = $('#hazard-data-table tbody');
-        childRows = Array.from($tbody.find(`.hierarchical-row.polygon-child[data-parent-id="${facilityName}"],
-                                                .hierarchical-row.polygon-child[data-parent-facility="${facilityName}"]`));
-        console.log('Found children with tbody query:', childRows.length);
-    }
-
-    // Final fallback: find all polygon child rows and match by text content
-    if (childRows.length === 0) {
-        const allChildRows = Array.from(document.querySelectorAll('.hierarchical-row.polygon-child'));
-        childRows = allChildRows.filter(child => {
-            const parentFacility = child.dataset.parentFacility || child.dataset.parentId;
-            return parentFacility === facilityName;
-        });
-        console.log('Found children with final fallback:', childRows.length);
-    }
-
-    if (childRows.length === 0) {
-        console.warn('No child rows found for parent:', facilityName, 'tried multiple selectors');
-        return;
-    }
-
-    // Toggle visibility
-    const isExpanded = expandBtn.classList.contains('expanded');
-
-    if (isExpanded) {
-        // Collapse children
-        childRows.forEach(row => {
-            row.style.display = 'none';
-        });
-        expandBtn.classList.remove('expanded');
-        expandIcon.textContent = '▶';
-    } else {
-        // Expand children
-        childRows.forEach(row => {
-            row.style.display = '';
-        });
-        expandBtn.classList.add('expanded');
-        expandIcon.textContent = '▼';
-    }
-
-    console.log(`${isExpanded ? 'Collapsed' : 'Expanded'} ${childRows.length} child rows for ${facilityName}`);
-
-    // Update column visibility after toggling to ensure proper display
-    setTimeout(function() {
-        updateColumnVisibilityOnRows();
-    }, 100);
-}
-
-// Enhanced toggle function for backward compatibility
-function toggleSamplePoints(facilityName) {
-    console.log('Legacy toggleSamplePoints called for:', facilityName);
-
-    // Try hierarchical approach first
-    const parentRow = document.querySelector(`.hierarchical-row.polygon-parent[data-facility-name="${facilityName}"]`);
-    if (parentRow) {
-        toggleHierarchicalChildren(parentRow);
-        return;
-    }
-
-    // Fallback to legacy sample point functionality
-    const sampleRows = document.querySelectorAll(`tr.sample-point-row[data-parent-facility="${facilityName}"]`);
-    const facilityRow = document.querySelector(`tr.parent-facility-row[data-facility-name="${facilityName}"]`);
-    const expandBtn = facilityRow ? facilityRow.querySelector('.expand-collapse-btn') : null;
-
-    if (sampleRows.length === 0) {
-        console.log('No sample point rows found for:', facilityName);
-        return;
-    }
-
-    const isVisible = sampleRows[0].style.display !== 'none';
-
-    sampleRows.forEach(row => {
-        row.style.display = isVisible ? 'none' : '';
-    });
-
-    if (expandBtn) {
-        const expandIcon = expandBtn.querySelector('.expand-icon');
-        if (isVisible) {
-            expandBtn.classList.remove('expanded');
-            expandIcon.textContent = '▶';
-        } else {
-            expandBtn.classList.add('expanded');
-            expandIcon.textContent = '▼';
-        }
-    }
-}
-
-// Function to reinitialize hierarchical table after data updates
-function reinitializeHierarchicalTable() {
-    console.log('Reinitializing hierarchical table after data update');
-
-    // Remove existing event listeners
-    document.querySelectorAll('.hierarchical-row.polygon-parent').forEach(row => {
-        const expandBtn = row.querySelector('.expand-collapse-btn');
-        if (expandBtn) {
-            expandBtn.replaceWith(expandBtn.cloneNode(true));
-        }
-    });
-
-    // Reinitialize
-    initializeHierarchicalTable();
-}
-
-// Add mixed assets indicator if needed
-function addMixedAssetsIndicator() {
-    const hasMixedAssets = {{ has_mixed_assets|default:'false'|yesno:'true,false' }};
-    const facilityCount = {{ facility_count|default:0 }};
-    const polygonAssetsCount = {{ polygon_assets_count|default:0 }};
-    const granularPointsCount = {{ granular_points_count|default:0 }};
-
-    // Show indicator for mixed assets OR polygon-only assets
-    if (hasMixedAssets || polygonAssetsCount > 0) {
-        const indicator = document.createElement('div');
-        indicator.className = 'mixed-assets-indicator';
-        // Dynamic message based on asset types
-        let analysisType = "Mixed Asset Analysis";
-        let analysisDescription = `This analysis includes ${facilityCount} regular facilities and ${polygonAssetsCount} polygon assets`;
-
-        if (facilityCount === 0 && polygonAssetsCount > 0) {
-            analysisType = "Polygon Asset Analysis";
-            analysisDescription = `This analysis includes ${polygonAssetsCount} polygon assets`;
-        } else if (polygonAssetsCount === 0 && facilityCount > 0) {
-            analysisType = "Regular Facility Analysis";
-            analysisDescription = `This analysis includes ${facilityCount} regular facilities`;
-        }
-
-        if (granularPointsCount > 0) {
-            analysisDescription += ` with ${granularPointsCount} granular analysis points.`;
-        } else {
-            analysisDescription += ".";
-        }
-
-        indicator.innerHTML = `
-            <strong>🔄 ${analysisType}</strong><br>
-            ${analysisDescription}
-            ${polygonAssetsCount > 0 ? 'Polygon assets are shown as parent rows with expandable child points.' : ''}
-        `;
-
-        // Insert before the table
-        const tableContainer = document.querySelector('.table-responsive');
-        if (tableContainer) {
-            tableContainer.parentNode.insertBefore(indicator, tableContainer);
-        }
-    }
-}
-
-// Initialize mixed assets indicator on page load
-$(document).ready(function() {
-    addMixedAssetsIndicator();
-});
-
 </script>
-
-<!-- Development Utilities (Only in Development Mode) -->
-{% if debug %}
-<!-- Compatibility Fix (Load first) -->
-<script src="{% static 'js/compatibility-fix.js' %}"></script>
-
-<!-- Immediate Fix (Critical - Load Second) -->
-<script src="{% static 'js/immediate-fix.js' %}"></script>
-
-<!-- Hierarchical Detection Fix -->
-<script src="{% static 'js/hierarchical-detection-fix.js' %}"></script>
-
-<!-- Development-Optimized Table Manager -->
-<script src="{% static 'js/dev-optimized-table.js' %}"></script>
-
-<!-- Development-Simplified API Manager -->
-<script src="{% static 'js/dev-simple-api.js' %}"></script>
-
-<!-- Development Enhanced Console -->
-<script src="{% static 'js/dev-enhanced-console.js' %}"></script>
-
-<!-- Development Utilities Integration -->
-<script src="{% static 'js/dev-utilities-integration.js' %}"></script>
-
-<script>
-    // Development initialization
-    $(document).ready(function() {
-        console.log('🚀 [Dev Integration] Development environment detected - loading utilities...');
-
-        // Add development banner
-        const devBanner = $(`
-            <div style="position: fixed; top: 0; left: 0; right: 0; background: linear-gradient(90deg, #ff6b6b, #4ecdc4); color: white; text-align: center; padding: 8px; font-size: 12px; font-weight: bold; z-index: 10002; box-shadow: 0 2px 10px rgba(0,0,0,0.3);">
-                🛠️ DEVELOPMENT MODE - Enhanced debugging tools enabled | Press Ctrl+Shift+D for console
-            </div>
-        `);
-
-        $('body').prepend(devBanner);
-
-        // Auto-hide banner after 5 seconds
-        setTimeout(() => {
-            devBanner.fadeOut(1000);
-        }, 5000);
-
-        // Initialize development utilities after existing scripts load
-        setTimeout(() => {
-            if (typeof window.devIntegration !== 'undefined') {
-                console.success('✅ [Dev Integration] All development utilities loaded successfully!');
-            } else {
-                console.warn('⚠️ [Dev Integration] Some development utilities may not have loaded properly');
-            }
-        }, 4000);
-    });
-</script>
-{% endif %}
 
 {% endblock %}

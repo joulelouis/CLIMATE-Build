@@ -106,7 +106,12 @@
             }
 
             // Skip CSRF-exempt endpoints
-            if (url && url.includes('/api/add-facility/')) {
+            if (url && (url.includes('/api/add-facility/') ||
+                       url.includes('/api/granular/workflow/execute/') ||
+                       url.includes('/api/granular/workflow/results/') ||
+                       url.includes('/api/polygon-assets/create/') ||
+                       url.includes('/api/polygon/complete/') ||
+                       url.includes('/api/generate-asset-exposure/'))) {
                 return false;
             }
 

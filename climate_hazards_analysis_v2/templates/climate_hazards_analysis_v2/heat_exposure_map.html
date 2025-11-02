@@ -1,0 +1,683 @@
+{% extends "base.html" %}
+{% load static %}
+{% load float_filters %}
+{% load my_filters %}
+
+{% block title %}
+Heat Exposure Map
+{% endblock %}
+
+{% block content %}
+<!-- Add CSRF token for AJAX requests -->
+{% csrf_token %}
+
+<style>
+    /* Heat Exposure Map Specific Styles */
+    .heat-map-header {
+        background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
+        color: white;
+        padding: 2rem 0;
+        margin-bottom: 2rem;
+    }
+
+    .heat-map-container {
+        height: 70vh;
+        min-height: 600px;
+        position: relative;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .map-controls {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        z-index: 1000;
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        min-width: 280px;
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+
+    .heat-stats-panel {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 20px;
+        margin-top: 2rem;
+    }
+
+    .legend {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+
+    .legend-color {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        margin-right: 12px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.9);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+
+    .error-message {
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+        padding: 20px;
+        border-radius: 8px;
+        margin: 20px 0;
+        text-align: center;
+    }
+
+    .breadcrumb-nav {
+        background: #f8f9fa;
+        padding: 1rem 0;
+        margin-bottom: 0;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .back-button {
+        background: #6c757d;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        transition: background-color 0.3s;
+    }
+
+    .back-button:hover {
+        background: #5a6268;
+        color: white;
+        text-decoration: none;
+    }
+
+    .refresh-button {
+        background: #28a745;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 5px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        margin-left: 10px;
+        transition: background-color 0.3s;
+    }
+
+    .refresh-button:hover {
+        background: #218838;
+    }
+
+    .mapboxgl-popup {
+        max-width: 300px;
+    }
+
+    .mapboxgl-popup-content {
+        padding: 15px;
+        border-radius: 8px;
+    }
+
+    .facility-popup h6 {
+        color: #dc3545;
+        margin-bottom: 10px;
+    }
+
+    .facility-popup p {
+        margin-bottom: 5px;
+    }
+
+    .badge {
+        font-size: 0.8em;
+    }
+
+    .badge-success {
+        background-color: #28a745;
+    }
+
+    .badge-warning {
+        background-color: #fd7e14;
+    }
+
+    .badge-danger {
+        background-color: #dc3545;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .heat-map-container {
+            height: 60vh;
+            min-height: 400px;
+        }
+
+        .map-controls {
+            position: relative;
+            top: auto;
+            right: auto;
+            margin-top: 20px;
+            max-height: none;
+        }
+
+        .heat-map-header {
+            padding: 1rem 0;
+        }
+
+        .heat-map-header h1 {
+            font-size: 1.5rem;
+        }
+    }
+</style>
+
+<!-- Breadcrumb Navigation -->
+<nav aria-label="breadcrumb" class="breadcrumb-nav">
+    <div class="container">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item">
+                <a href="{% url 'climate_hazards_analysis_v2:view_map' %}">Climate Hazards Analysis</a>
+            </li>
+            <li class="breadcrumb-item">
+                <a href="{% url 'climate_hazards_analysis_v2:show_results' %}">Results</a>
+            </li>
+            <li class="breadcrumb-item active" aria-current="page">Heat Exposure Map</li>
+        </ol>
+        <a href="{% url 'climate_hazards_analysis_v2:show_results' %}" class="back-button mt-2">
+            <i class="fas fa-arrow-left me-2"></i>
+            Back to Results
+        </a>
+    </div>
+</nav>
+
+<!-- Heat Map Header -->
+<div class="heat-map-header">
+    <div class="container text-center">
+        <h1><i class="fas fa-temperature-high me-3"></i>Heat Exposure Map</h1>
+        <p class="lead mb-0">Interactive map showing heat exposure levels for your facilities</p>
+        <button class="refresh-button mt-3" onclick="initializeHeatExposureMap()">
+            <i class="fas fa-sync-alt me-2"></i>
+            Refresh Data
+        </button>
+    </div>
+</div>
+
+<!-- Main Content -->
+<div class="container">
+    <div class="row">
+        <div class="col-12">
+            <!-- Heat Map Container -->
+            <div class="heat-map-container" id="heat-map-container">
+                <div class="loading-overlay" id="loading-overlay">
+                    <i class="fas fa-spinner fa-spin fa-3x mb-3 text-danger"></i>
+                    <h4>Loading Heat Exposure Data...</h4>
+                    <p class="text-muted">Please wait while we prepare your interactive map</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Map Statistics Panel -->
+    <div class="row mt-4">
+        <div class="col-md-8">
+            <div class="heat-stats-panel">
+                <h4><i class="fas fa-chart-bar me-2 text-danger"></i>Heat Exposure Statistics</h4>
+                <div id="heat-stats-content">
+                    <!-- Stats will be populated by JavaScript -->
+                    <div class="text-center py-3">
+                        <i class="fas fa-spinner fa-spin text-muted"></i>
+                        <p class="text-muted mt-2">Loading statistics...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="legend">
+                <h5><i class="fas fa-palette me-2"></i>Legend</h5>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #28a745;"></div>
+                    <span>Low Exposure (0-33%)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #fd7e14;"></div>
+                    <span>Medium Exposure (34-66%)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #dc3545;"></div>
+                    <span>High Exposure (67-100%)</span>
+                </div>
+            </div>
+
+            <!-- Map Info -->
+            <div class="mt-3 p-3 bg-light rounded">
+                <h6><i class="fas fa-info-circle me-2"></i>Map Controls</h6>
+                <ul class="small mb-0">
+                    <li>Click on facilities to view details</li>
+                    <li>Use mouse wheel to zoom in/out</li>
+                    <li>Click and drag to pan the map</li>
+                    <li>Double-click to zoom in</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Error Container (initially hidden) -->
+<div id="error-container" style="display: none;">
+    <div class="container">
+        <div class="error-message">
+            <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
+            <h4>Error Loading Heat Exposure Map</h4>
+            <p id="error-text">An error occurred while loading the heat exposure data.</p>
+            <button class="btn btn-primary" onclick="initializeHeatExposureMap()">
+                <i class="fas fa-redo me-2"></i>Try Again
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+<link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+
+<script>
+// Heat Exposure Map functionality
+let heatMap = null;
+let heatMapInitialized = false;
+let heatMapRetryCount = 0;
+
+// Initialize the map when the page loads
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🌡️ Heat Exposure Map page loaded, initializing...');
+    initializeHeatExposureMap();
+});
+
+function initializeHeatExposureMap() {
+    console.log('🌡️ Initializing Heat Exposure Map...');
+    console.log('🔍 Debug: DOM ready?', document.readyState);
+    console.log('🔍 Debug: Mapbox available?', typeof mapboxgl !== 'undefined');
+
+    const container = document.getElementById('heat-map-container');
+    if (!container) {
+        console.error('❌ Heat map container #heat-map-container not found');
+        console.log('🔍 Debug: Available containers:', document.querySelectorAll('[id*="heat"]'));
+        showError('Map container not found. Please refresh the page.');
+        return;
+    }
+    console.log('✅ Heat map container found:', container);
+
+    // Reset retry count
+    heatMapRetryCount = 0;
+
+    // Show loading state
+    showLoading(true);
+    hideError();
+
+    // Load heat exposure data from our API
+    console.log('📡 Fetching heat exposure data from API...');
+    fetch('{{ heat_exposure_api_url }}')
+        .then(response => {
+            console.log('📡 API response received:', response.status, response.statusText);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('🔥 Heat exposure data received:', data);
+
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to load heat exposure data');
+            }
+
+            renderHeatExposureMap(data);
+        })
+        .catch(error => {
+            console.error('❌ Error loading heat exposure map:', error);
+            showError(`Failed to load heat exposure data: ${error.message}`);
+        });
+}
+
+function renderHeatExposureMap(data) {
+    console.log('🔥 Rendering heat exposure map with', data.metadata.total_facilities, 'facilities');
+    console.log('🔍 Debug: Map data structure:', data.data ? 'GeoJSON found' : 'No GeoJSON data');
+
+    const container = document.getElementById('heat-map-container');
+    if (!container) {
+        console.error('❌ Container #heat-map-container not found in renderHeatExposureMap');
+        showError('Map container not found during rendering.');
+        return;
+    }
+
+    // Check if Mapbox is available
+    if (typeof mapboxgl === 'undefined') {
+        console.error('❌ Mapbox GL not loaded');
+        showError('Mapbox library failed to load. Please refresh the page.');
+        return;
+    }
+
+    // Initialize Mapbox map
+    mapboxgl.accessToken = 'pk.eyJ1Ijoiam91bGUyMzMxIiwiYSI6ImNtZWpqcGRlZDA2aTkybXNmY3BhcnJjMzMifQ.l5raW7vd-PNzS1jYsbyC7g';
+
+    console.log('✅ Map container found, initializing Mapbox...');
+
+    // Calculate bounds from data
+    const bounds = calculateMapBounds(data.data);
+
+    // Clean up existing map if it exists
+    if (heatMap) {
+        heatMap.remove();
+    }
+
+    heatMap = new mapboxgl.Map({
+        container: 'heat-map-container',
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: bounds.center,
+        zoom: bounds.zoom,
+        attributionControl: false
+    });
+
+    // Add navigation control
+    heatMap.addControl(new mapboxgl.NavigationControl());
+
+    // Add attribution control
+    heatMap.addControl(new mapboxgl.AttributionControl({
+        compact: true
+    }));
+
+    heatMap.on('load', function() {
+        console.log('🗺️ Heat map loaded, adding data...');
+
+        // Add heat exposure data as source
+        heatMap.addSource('heat-exposure-data', {
+            type: 'geojson',
+            data: data.data
+        });
+
+        // Add heat exposure layer with category-based coloring
+        heatMap.addLayer({
+            id: 'heat-exposure-layer',
+            type: 'circle',
+            source: 'heat-exposure-data',
+            paint: {
+                'circle-radius': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    0, 6,
+                    10, 10,
+                    15, 15
+                ],
+                'circle-color': [
+                    'match',
+                    ['get', 'heat_category'],
+                    'Low', '#28a745',
+                    'Medium', '#fd7e14',
+                    'High', '#dc3545',
+                    '#6c757d'
+                ],
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+                'circle-opacity': 0.8
+            }
+        });
+
+        // Add popup on click
+        heatMap.on('click', 'heat-exposure-layer', function(e) {
+            const coordinates = e.features[0].geometry.coordinates.slice();
+            const properties = e.features[0].properties;
+
+            // Ensure that if the map is zoomed out such that multiple
+            // copies of the feature are visible, the popup appears
+            // over the copy being pointed to.
+            while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
+                coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
+            }
+
+            new mapboxgl.Popup()
+                .setLngLat(coordinates)
+                .setHTML(`
+                    <div class="facility-popup">
+                        <h6 class="mb-2"><i class="fas fa-temperature-high text-danger"></i> ${properties.name}</h6>
+                        <hr>
+                        <p><strong>Archetype:</strong> ${properties.archetype}</p>
+                        <p><strong>Heat Exposure:</strong> ${properties.heat_exposure}%</p>
+                        <p><strong>Category:</strong>
+                            <span class="badge badge-${getHeatCategoryBadgeClass(properties.heat_category)}">
+                                ${properties.heat_category}
+                            </span>
+                        </p>
+                        <p><strong>Coordinates:</strong> ${properties.latitude.toFixed(4)}, ${properties.longitude.toFixed(4)}</p>
+                    </div>
+                `)
+                .addTo(heatMap);
+        });
+
+        // Change cursor on hover
+        heatMap.on('mouseenter', 'heat-exposure-layer', function() {
+            heatMap.getCanvas().style.cursor = 'pointer';
+        });
+
+        heatMap.on('mouseleave', 'heat-exposure-layer', function() {
+            heatMap.getCanvas().style.cursor = '';
+        });
+
+        // Fit map to data bounds
+        if (bounds.coordinates) {
+            heatMap.fitBounds(bounds.coordinates, {
+                padding: 50,
+                maxZoom: 12
+            });
+        }
+
+        // Update statistics
+        updateHeatStatistics(data);
+
+        // Hide loading and show map
+        showLoading(false);
+        heatMapInitialized = true;
+        console.log('✅ Heat exposure map fully initialized');
+    });
+}
+
+function calculateMapBounds(geoJsonData) {
+    if (!geoJsonData || !geoJsonData.features || geoJsonData.features.length === 0) {
+        return {
+            center: [0, 20],
+            zoom: 2,
+            coordinates: null
+        };
+    }
+
+    let minLng = Infinity, maxLng = -Infinity;
+    let minLat = Infinity, maxLat = -Infinity;
+    let totalLng = 0, totalLat = 0;
+    let pointCount = 0;
+
+    geoJsonData.features.forEach(feature => {
+        if (feature.geometry && feature.geometry.coordinates) {
+            const [lng, lat] = feature.geometry.coordinates;
+            minLng = Math.min(minLng, lng);
+            maxLng = Math.max(maxLng, lng);
+            minLat = Math.min(minLat, lat);
+            maxLat = Math.max(maxLat, lat);
+            totalLng += lng;
+            totalLat += lat;
+            pointCount++;
+        }
+    });
+
+    const center = [totalLng / pointCount, totalLat / pointCount];
+
+    // If we have valid bounds, calculate appropriate zoom
+    if (minLng !== Infinity && maxLng !== -Infinity) {
+        const bounds = [
+            [minLng, minLat],
+            [maxLng, maxLat]
+        ];
+
+        return {
+            center: center,
+            zoom: 10, // Will be overridden by fitBounds
+            coordinates: bounds
+        };
+    }
+
+    return {
+        center: center,
+        zoom: 10,
+        coordinates: null
+    };
+}
+
+function getHeatCategoryBadgeClass(category) {
+    switch (category) {
+        case 'Low': return 'success';
+        case 'Medium': return 'warning';
+        case 'High': return 'danger';
+        default: return 'secondary';
+    }
+}
+
+function updateHeatStatistics(data) {
+    const statsContent = document.getElementById('heat-stats-content');
+    if (!statsContent || !data.data || !data.data.features) {
+        return;
+    }
+
+    const features = data.data.features;
+    const categoryCounts = {};
+    let totalExposure = 0;
+    let facilityCount = 0;
+
+    features.forEach(feature => {
+        const category = feature.properties.heat_category;
+        categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+
+        if (feature.properties.heat_exposure > 0) {
+            totalExposure += feature.properties.heat_exposure;
+            facilityCount++;
+        }
+    });
+
+    const averageExposure = facilityCount > 0 ? (totalExposure / facilityCount).toFixed(1) : 0;
+
+    statsContent.innerHTML = `
+        <div class="row text-center">
+            <div class="col-md-3 mb-3">
+                <div class="p-3 bg-light rounded">
+                    <h3 class="text-primary mb-1">${data.metadata.total_facilities}</h3>
+                    <small class="text-muted">Total Facilities</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="p-3 bg-light rounded">
+                    <h3 class="text-danger mb-1">${averageExposure}%</h3>
+                    <small class="text-muted">Average Exposure</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="p-3 bg-light rounded">
+                    <h3 class="text-warning mb-1">${(categoryCounts['Medium'] || 0)}</h3>
+                    <small class="text-muted">Medium Risk</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="p-3 bg-light rounded">
+                    <h3 class="text-danger mb-1">${(categoryCounts['High'] || 0)}</h3>
+                    <small class="text-muted">High Risk</small>
+                </div>
+            </div>
+        </div>
+        <div class="mt-3">
+            <h6 class="mb-3">Category Breakdown</h6>
+            ${Object.entries(categoryCounts).map(([category, count]) => `
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span>
+                        <span class="badge badge-${getHeatCategoryBadgeClass(category)} mr-2" style="font-size: 0.8em;">
+                            ${category}
+                        </span>
+                        ${count} facilities
+                    </span>
+                    <span class="text-muted">
+                        ${((count / data.metadata.total_facilities) * 100).toFixed(1)}%
+                    </span>
+                </div>
+            `).join('')}
+            <hr>
+            <div class="text-center">
+                <strong>Average Heat Exposure:</strong><br>
+                <span class="h4 text-danger">${averageExposure}%</span>
+            </div>
+        </div>
+    `;
+}
+
+function showLoading(show) {
+    const loadingOverlay = document.getElementById('loading-overlay');
+    if (loadingOverlay) {
+        loadingOverlay.style.display = show ? 'flex' : 'none';
+    }
+}
+
+function hideError() {
+    const errorContainer = document.getElementById('error-container');
+    if (errorContainer) {
+        errorContainer.style.display = 'none';
+    }
+}
+
+function showError(message) {
+    showLoading(false);
+    const errorContainer = document.getElementById('error-container');
+    const errorText = document.getElementById('error-text');
+    if (errorContainer && errorText) {
+        errorText.textContent = message;
+        errorContainer.style.display = 'block';
+    }
+}
+
+// Handle browser back/forward navigation
+window.addEventListener('popstate', function(event) {
+    if (heatMapInitialized && heatMap) {
+        // Refresh map when navigating back to this page
+        setTimeout(initializeHeatExposureMap, 100);
+    }
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', function() {
+    if (heatMap) {
+        heatMap.remove();
+    }
+});
+</script>
+
+{% endblock %}

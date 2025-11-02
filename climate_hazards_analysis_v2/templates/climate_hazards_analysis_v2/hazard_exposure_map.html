@@ -1,0 +1,2608 @@
+{% extends "base.html" %}
+{% load static %}
+{% load float_filters %}
+{% load my_filters %}
+{% load common_filters %}
+
+{% block title %}
+Hazard Exposure Map
+{% endblock %}
+
+{% block content %}
+<!-- Add CSRF token for AJAX requests -->
+{% csrf_token %}
+
+<style>
+    /* Hazard Exposure Map Specific Styles */
+      .hazard-map-header {
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+        padding: 1.5rem 0;
+        margin-bottom: 2rem;
+    }
+
+    .hazard-map-header h1 {
+        color: #495057;
+        margin-bottom: 0.5rem;
+    }
+
+    .hazard-map-header .lead {
+        color: #6c757d;
+        margin-bottom: 0;
+    }
+
+    /* Main layout with left sidebar and right map */
+    .hazard-exposure-layout {
+        display: flex;
+        gap: 20px;
+        height: 70vh;
+        min-height: 600px;
+    }
+
+    .hazard-controls-sidebar {
+        width: 350px;
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 10px;
+        padding: 20px;
+        overflow-y: auto;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .hazard-map-container {
+        flex: 1;
+        position: relative;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Hazard selector styling based on column selector from results page */
+    .hazard-selector-card {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+
+    .hazard-selector-card h6 {
+        color: #495057;
+        font-weight: 600;
+        margin-bottom: 15px;
+    }
+
+    .hazard-controls {
+        max-height: 400px;
+        overflow-y: auto;
+    }
+
+    .form-check {
+        margin-bottom: 8px;
+    }
+
+    .form-check-input:checked {
+        background-color: #F1D500;
+        border-color: #F1D500;
+    }
+
+    .form-check-label {
+        font-size: 14px;
+        color: #495057;
+        cursor: pointer;
+    }
+
+    .hazard-stats-panel {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 15px;
+        margin-top: 15px;
+    }
+
+    .facility-popup {
+        font-family: Arial, sans-serif;
+        max-width: 300px;
+    }
+
+    .facility-popup h5 {
+        color: #333;
+        margin-bottom: 10px;
+        border-bottom: 2px solid #007bff;
+        padding-bottom: 5px;
+    }
+
+    .hazard-values {
+        margin-top: 10px;
+    }
+
+    .hazard-value-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 5px 0;
+        border-bottom: 1px solid #eee;
+    }
+
+    .hazard-value-item:last-child {
+        border-bottom: none;
+    }
+
+    .hazard-badge {
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 0.8em;
+        font-weight: bold;
+        color: white;
+    }
+
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+    }
+
+    .facility-count-badge {
+        background: #007bff;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 0.8em;
+        margin-left: 8px;
+    }
+
+    .hazard-controls-buttons {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+
+    .hazard-controls-buttons .btn {
+        flex: 1;
+        padding: 6px 12px;
+        font-size: 13px;
+    }
+
+    /* Search functionality */
+    .hazard-search-container {
+        margin-bottom: 15px;
+    }
+
+    .hazard-search-container .form-control {
+        font-size: 14px;
+    }
+
+    .search-results-indicator {
+        font-size: 12px;
+        padding: 8px;
+        border-radius: 6px;
+        margin-top: 8px;
+        border-radius: 8px;
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Hazard icon in checkbox label */
+    .hazard-icon {
+        margin-right: 8px;
+        width: 16px;
+        text-align: center;
+    }
+
+    /* Enhanced Popup Styles */
+    .enhanced-facility-popup {
+        font-family: Arial, sans-serif;
+        max-width: 320px;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .enhanced-facility-popup .popup-header {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        padding: 12px;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .enhanced-facility-popup .popup-header h6 {
+        margin: 0;
+        color: #495057;
+        font-weight: 600;
+    }
+
+    .facility-type-badge {
+        background: #6c757d;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        margin-top: 4px;
+        display: inline-block;
+    }
+
+    .enhanced-facility-popup .popup-body {
+        padding: 12px;
+    }
+
+    .hazard-display {
+        margin-bottom: 10px;
+    }
+
+    .hazard-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+
+    .hazard-label {
+        font-size: 13px;
+        color: #495057;
+        font-weight: 500;
+    }
+
+    .hazard-value {
+        font-size: 14px;
+        font-weight: bold;
+    }
+
+    .exposure-bar-container {
+        margin-top: 6px;
+    }
+
+    .exposure-bar {
+        height: 6px;
+        background: #e9ecef;
+        border-radius: 3px;
+        overflow: hidden;
+    }
+
+    .exposure-fill {
+        height: 100%;
+        transition: width 0.3s ease;
+        border-radius: 3px;
+    }
+
+    .enhanced-facility-popup .popup-actions {
+        padding: 10px 12px;
+        border-top: 1px solid #f1f3f4;
+        background: #f8f9fa;
+    }
+
+    .enhanced-facility-popup .popup-actions .btn {
+        font-size: 11px;
+        padding: 4px 8px;
+    }
+
+    /* Legend Styles */
+    .hazard-legend {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        background: rgba(255, 255, 255, 0.95);
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        z-index: 1000;
+        max-width: 200px;
+    }
+
+    .hazard-legend h6 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+        font-weight: 600;
+        color: #495057;
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 6px;
+    }
+
+    .legend-marker {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 2px solid #ffffff;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        margin-right: 8px;
+    }
+
+    .legend-marker.legend-low {
+        background-color: #28a745;
+    }
+
+    .legend-marker.legend-medium {
+        background-color: #ffc107;
+    }
+
+    .legend-marker.legend-high {
+        background-color: #dc3545;
+    }
+
+    .legend-label {
+        font-size: 12px;
+        color: #495057;
+    }
+
+  
+    /* Enhanced Checkbox Styling */
+    .hazard-selector .form-check-input:checked {
+        background-color: #007bff;
+        border-color: #007bff;
+    }
+
+    /* Hazard-specific checkbox colors */
+    .hazard-selector input[type="checkbox"]:checked.hazard-group[data-hazard="flood"],
+    .hazard-selector input[type="checkbox"]:checked.flood {
+        background-color: #5DADE2;
+        border-color: #5DADE2;
+    }
+
+    .hazard-selector input[type="checkbox"]:checked.hazard-group[data-hazard="water-stress"],
+    .hazard-selector input[type="checkbox"]:checked.water-stress {
+        background-color: #1ABC9C;
+        border-color: #1ABC9C;
+    }
+
+    .hazard-selector input[type="checkbox"]:checked.hazard-group[data-hazard="sea-level-rise"],
+    .hazard-selector input[type="checkbox"]:checked.sea-level-rise {
+        background-color: #007bff;
+        border-color: #007bff;
+    }
+
+    .hazard-selector input[type="checkbox"]:checked.hazard-group[data-hazard="tropical-cyclone"],
+    .hazard-selector input[type="checkbox"]:checked.tropical-cyclone {
+        background-color: #95A5A6;
+        border-color: #95A5A6;
+    }
+
+    .hazard-selector input[type="checkbox"]:checked.hazard-group[data-hazard="heat"],
+    .hazard-selector input[type="checkbox"]:checked.heat {
+        background-color: #E74C3C;
+        border-color: #E74C3C;
+    }
+
+    .hazard-selector input[type="checkbox"]:checked.hazard-group[data-hazard="storm-surge"],
+    .hazard-selector input[type="checkbox"]:checked.storm-surge {
+        background-color: #0056b3;
+        border-color: #0056b3;
+    }
+
+    .hazard-selector input[type="checkbox"]:checked.hazard-group[data-hazard="landslide"],
+    .hazard-selector input[type="checkbox"]:checked.landslide {
+        background-color: #8E44AD;
+        border-color: #8E44AD;
+    }
+
+    /* Scenario-specific colors (sub-hazards) */
+    .hazard-selector input[type="checkbox"]:checked.flood-current { background-color: #5DADE2; border-color: #5DADE2; }
+    .hazard-selector input[type="checkbox"]:checked.flood-moderate { background-color: #3498DB; border-color: #3498DB; }
+    .hazard-selector input[type="checkbox"]:checked.flood-worst { background-color: #2874A6; border-color: #2874A6; }
+
+    .hazard-selector input[type="checkbox"]:checked.ws-base { background-color: #1ABC9C; border-color: #1ABC9C; }
+    .hazard-selector input[type="checkbox"]:checked.ws-mod { background-color: #16A085; border-color: #16A085; }
+    .hazard-selector input[type="checkbox"]:checked.ws-worst { background-color: #138D75; border-color: #138D75; }
+
+    .hazard-selector input[type="checkbox"]:checked.slr-moderate { background-color: #007bff; border-color: #007bff; }
+    .hazard-selector input[type="checkbox"]:checked.slr-worst { background-color: #0056b3; border-color: #0056b3; }
+
+    .hazard-selector input[type="checkbox"]:checked.tc-baseline { background-color: #95A5A6; border-color: #95A5A6; }
+    .hazard-selector input[type="checkbox"]:checked.tc-moderate { background-color: #7F8C8D; border-color: #7F8C8D; }
+    .hazard-selector input[type="checkbox"]:checked.tc-worst { background-color: #696969; border-color: #696969; }
+
+    .hazard-selector input[type="checkbox"]:checked.heat-baseline { background-color: #E74C3C; border-color: #E74C3C; }
+    .hazard-selector input[type="checkbox"]:checked.heat-moderate { background-color: #C0392B; border-color: #C0392B; }
+    .hazard-selector input[type="checkbox"]:checked.heat-worst { background-color: #A93226; border-color: #A93226; }
+
+    .hazard-selector input[type="checkbox"]:checked.ss-baseline { background-color: #0056b3; border-color: #0056b3; }
+    .hazard-selector input[type="checkbox"]:checked.ss-worst { background-color: #003d82; border-color: #003d82; }
+
+    .hazard-selector input[type="checkbox"]:checked.landslide-baseline { background-color: #8E44AD; border-color: #8E44AD; }
+    .hazard-selector input[type="checkbox"]:checked.landslide-moderate { background-color: #7D3C98; border-color: #7D3C98; }
+    .hazard-selector input[type="checkbox"]:checked.landslide-worst { background-color: #6C3483; border-color: #6C3483; }
+
+    .hazard-selector .form-check-input:indeterminate {
+        background-color: #6c757d;
+        border-color: #6c757d;
+    }
+</style>
+
+<!-- Header Section -->
+<div class="hazard-map-header">
+    <div class="container">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <h1 class="display-4 fw-bold mb-3">
+                    <i class="fas fa-globe me-3"></i>Hazard Exposure Map
+                </h1>
+                <p class="lead mb-0">
+                    Interactive visualization of climate hazard exposure for {{ facility_count }} facilities
+                    {% if selected_hazards %}
+                    with {{ selected_hazards|length }} selected hazard type{{ selected_hazards|length|pluralize }}
+                    {% endif %}
+                </p>
+            </div>
+            <div class="col-md-4 text-end">
+                <a href="{{ results_url }}" class="btn btn-light btn-lg">
+                    <i class="fas fa-arrow-left me-2"></i> Back to Results
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Main Layout with Left Sidebar and Right Map -->
+<div class="container mb-5">
+    <div class="hazard-exposure-layout">
+        <!-- Left Sidebar - Enhanced Hazard Controls -->
+        <div class="hazard-controls-sidebar">
+            <h5 class="mb-4">
+                Select Information to Display
+            </h5>
+
+            <!-- Enhanced Hazard Selection from Column Selector -->
+            <div class="card custom-card mb-4">
+                <div class="card-header no-border">
+                    <strong>Hazard Data Display</strong>
+                </div>
+                <div class="card-body p-3">
+                    <!-- Search Input -->
+                    <div class="mb-3">
+                        <small class="text-muted">Filter hazards by name or scenario</small>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">
+                                <i class="fas fa-search"></i>
+                            </span>
+                            <input type="text" class="form-control" id="hazard-search" placeholder="Search hazards..." autocomplete="off">
+                            <button class="btn btn-outline-secondary" type="button" id="clear-search" title="Clear search">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="hazard-selector">
+                        <!-- Flood -->
+                        {% if 'Flood' in selected_hazards %}
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input hazard-group" id="map-flood" checked data-hazard="flood">
+                                <label class="form-check-label fw-bold" for="map-flood">
+                                    <i class="fas fa-water me-1" style="color: #5DADE2;"></i>Flood
+                                </label>
+                            </div>
+
+                            <!-- Current Scenario -->
+                            <div class="ms-4">
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-flood-current-group" checked data-hazard="flood-current">
+                                    <label class="form-check-label fw-bold" for="map-flood-current-group">Current</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column flood-current flood" id="map-flood-current" checked data-column="Flood Depth (meters)">
+                                        <label class="form-check-label" for="map-flood-current">Flood Depth (meters)</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Future (Moderate Case) Scenario -->
+                            <div class="ms-4">
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-flood-moderate-group" data-hazard="flood-moderate">
+                                    <label class="form-check-label fw-bold" for="map-flood-moderate-group">Future (Moderate Case)</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column flood-moderate flood" id="map-flood-moderate" data-column="Flood Depth (meters) - Moderate Case">
+                                        <label class="form-check-label" for="map-flood-moderate">Flood Depth (meters)</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Future (Worst Case) Scenario -->
+                            <div class="ms-4">
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-flood-worst-group" data-hazard="flood-worst">
+                                    <label class="form-check-label fw-bold" for="map-flood-worst-group">Future (Worst Case)</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column flood-worst flood" id="map-flood-worst" data-column="Flood Depth (meters) - Worst Case">
+                                        <label class="form-check-label" for="map-flood-worst">Flood Depth (meters)</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Water Stress -->
+                        {% if 'Water Stress' in selected_hazards %}
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input hazard-group" id="map-water-stress" data-hazard="water-stress">
+                                <label class="form-check-label fw-bold" for="map-water-stress">
+                                    <i class="fas fa-tint me-1" style="color: #1ABC9C;"></i>Water Stress
+                                </label>
+                            </div>
+                            <div class="ms-4">
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-ws-base-group" data-hazard="ws-base">
+                                    <label class="form-check-label fw-bold" for="map-ws-base-group">Current</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column ws-base water-stress" id="map-ws-exp" checked data-column="Water Stress Exposure (%)">
+                                        <label class="form-check-label" for="map-ws-exp">Water Stress Exposure (%)</label>
+                                    </div>
+                                </div>
+
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-ws-mod-group" data-hazard="ws-mod">
+                                    <label class="form-check-label fw-bold" for="map-ws-mod-group">Future (Moderate Case)</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column ws-mod water-stress" id="map-ws-2030-m" data-column="Water Stress Exposure 2030 (%) - Moderate Case">
+                                        <label class="form-check-label" for="map-ws-2030-m">Water Stress Exposure 2030 (%)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column ws-mod water-stress" id="map-ws-2050-m" data-column="Water Stress Exposure 2050 (%) - Moderate Case">
+                                        <label class="form-check-label" for="map-ws-2050-m">Water Stress Exposure 2050 (%)</label>
+                                    </div>
+                                </div>
+
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-ws-worst-group" data-hazard="ws-worst">
+                                    <label class="form-check-label fw-bold" for="map-ws-worst-group">Future (Worst Case)</label>
+                                </div>
+                                <div class="ms-4">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column ws-worst water-stress" id="map-ws-2030-w" data-column="Water Stress Exposure 2030 (%) - Worst Case">
+                                        <label class="form-check-label" for="map-ws-2030-w">Water Stress Exposure 2030 (%)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column ws-worst water-stress" id="map-ws-2050-w" data-column="Water Stress Exposure 2050 (%) - Worst Case">
+                                        <label class="form-check-label" for="map-ws-2050-w">Water Stress Exposure 2050 (%)</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Sea Level Rise -->
+                        {% if 'Sea Level Rise' in selected_hazards %}
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input hazard-group" id="map-sea-level-rise" data-hazard="sea-level-rise">
+                                <label class="form-check-label fw-bold" for="map-sea-level-rise">
+                                    <i class="fas fa-water me-1" style="color: #007bff;"></i>Sea Level Rise
+                                </label>
+                            </div>
+                            <div class="ms-4">
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-slr-moderate-group" data-hazard="slr-moderate">
+                                    <label class="form-check-label fw-bold" for="map-slr-moderate-group">Future (Moderate Case)</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column slr-moderate sea-level-rise" id="map-slr-2030-mod" data-column="2030 Sea Level Rise (meters) - Moderate Case">
+                                        <label class="form-check-label" for="map-slr-2030-mod">2030 Sea Level Rise (meters)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column slr-moderate sea-level-rise" id="map-slr-2040-mod" data-column="2040 Sea Level Rise (meters) - Moderate Case">
+                                        <label class="form-check-label" for="map-slr-2040-mod">2040 Sea Level Rise (meters)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column slr-moderate sea-level-rise" id="map-slr-2050-mod" checked data-column="2050 Sea Level Rise (meters) - Moderate Case">
+                                        <label class="form-check-label" for="map-slr-2050-mod">2050 Sea Level Rise (meters)</label>
+                                    </div>
+                                </div>
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-slr-worst-group" data-hazard="slr-worst">
+                                    <label class="form-check-label fw-bold" for="map-slr-worst-group">Future (Worst Case)</label>
+                                </div>
+                                <div class="ms-4">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column slr-worst sea-level-rise" id="map-slr-2030-worst" data-column="2030 Sea Level Rise (meters) - Worst Case">
+                                        <label class="form-check-label" for="map-slr-2030-worst">2030 Sea Level Rise (meters)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column slr-worst sea-level-rise" id="map-slr-2040-worst" data-column="2040 Sea Level Rise (meters) - Worst Case">
+                                        <label class="form-check-label" for="map-slr-2040-worst">2040 Sea Level Rise (meters)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column slr-worst sea-level-rise" id="map-slr-2050-worst" data-column="2050 Sea Level Rise (meters) - Worst Case">
+                                        <label class="form-check-label" for="map-slr-2050-worst">2050 Sea Level Rise (meters)</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Tropical Cyclones -->
+                        {% if 'Tropical Cyclones' in selected_hazards %}
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input hazard-group" id="map-tropical-cyclone" data-hazard="tropical-cyclone">
+                                <label class="form-check-label fw-bold" for="map-tropical-cyclone">
+                                    <i class="fas fa-wind me-1" style="color: #95A5A6;"></i>Tropical Cyclone
+                                </label>
+                            </div>
+                            <div class="ms-4">
+                                <!-- Current Columns -->
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-tc-baseline-group" data-hazard="tc-baseline">
+                                    <label class="form-check-label fw-bold" for="map-tc-baseline-group">Current</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column tc-baseline tropical-cyclone" id="map-tc-100yr" checked data-column="Extreme Windspeed 100 year Return Period (km/h)">
+                                        <label class="form-check-label" for="map-tc-100yr">Extreme Windspeed 100 year Return Period</label>
+                                    </div>
+                                </div>
+
+                                <!-- Future Moderate Case -->
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-tc-moderate-group" data-hazard="tc-moderate">
+                                    <label class="form-check-label fw-bold" for="map-tc-moderate-group">Future (Moderate Case)</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column tc-moderate tropical-cyclone" id="map-tc-100yr-base" data-column="Extreme Windspeed 100 year Return Period (km/h) - Moderate Case">
+                                        <label class="form-check-label" for="map-tc-100yr-base">Extreme Windspeed 100 year Return Period</label>
+                                    </div>
+                                </div>
+
+                                <!-- Future Worst Case -->
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-tc-worst-group" data-hazard="tc-worst">
+                                    <label class="form-check-label fw-bold" for="map-tc-worst-group">Future (Worst Case)</label>
+                                </div>
+                                <div class="ms-4">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column tc-worst tropical-cyclone" id="map-tc-100yr-worst" data-column="Extreme Windspeed 100 year Return Period (km/h) - Worst Case">
+                                        <label class="form-check-label" for="map-tc-100yr-worst">Extreme Windspeed 100 year Return Period</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Heat -->
+                        {% if 'Heat' in selected_hazards %}
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input hazard-group" id="map-heat" data-hazard="heat">
+                                <label class="form-check-label fw-bold" for="map-heat">
+                                    <i class="fas fa-temperature-high me-1" style="color: #E74C3C;"></i>Heat
+                                </label>
+                            </div>
+                            <div class="ms-4">
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-heat-baseline-group" data-hazard="heat-baseline">
+                                    <label class="form-check-label fw-bold" for="map-heat-baseline-group">Current</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column heat-baseline heat" id="map-heat-35c" checked data-column="Days over 35° Celsius">
+                                        <label class="form-check-label" for="map-heat-35c">Days over 35° Celsius</label>
+                                    </div>
+                                </div>
+
+                                <!-- Future Moderate Case Group -->
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-heat-moderate-group" data-hazard="heat-moderate">
+                                    <label class="form-check-label fw-bold" for="map-heat-moderate-group">Future (Moderate Case)</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column heat-moderate heat" id="map-heat-ssp245-2630" data-column="Days over 35° Celsius (2026 - 2030) - Moderate Case">
+                                        <label class="form-check-label" for="map-heat-ssp245-2630">Days over 35° Celsius (2026 - 2030)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column heat-moderate heat" id="map-heat-ssp245-3140" data-column="Days over 35° Celsius (2031 - 2040) - Moderate Case">
+                                        <label class="form-check-label" for="map-heat-ssp245-3140">Days over 35° Celsius (2031 - 2040)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column heat-moderate heat" id="map-heat-ssp245-4150" data-column="Days over 35° Celsius (2041 - 2050) - Moderate Case">
+                                        <label class="form-check-label" for="map-heat-ssp245-4150">Days over 35° Celsius (2041 - 2050)</label>
+                                    </div>
+                                </div>
+
+                                <!-- Future Worst Case Group -->
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-heat-worst-group" data-hazard="heat-worst">
+                                    <label class="form-check-label fw-bold" for="map-heat-worst-group">Future (Worst Case)</label>
+                                </div>
+                                <div class="ms-4">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column heat-worst heat" id="map-heat-ssp585-2630" data-column="Days over 35° Celsius (2026 - 2030) - Worst Case">
+                                        <label class="form-check-label" for="map-heat-ssp585-2630">Days over 35° Celsius (2026 - 2030)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column heat-worst heat" id="map-heat-ssp585-3140" data-column="Days over 35° Celsius (2031 - 2040) - Worst Case">
+                                        <label class="form-check-label" for="map-heat-ssp585-3140">Days over 35° Celsius (2031 - 2040)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column heat-worst heat" id="map-heat-ssp585-4150" data-column="Days over 35° Celsius (2041 - 2050) - Worst Case">
+                                        <label class="form-check-label" for="map-heat-ssp585-4150">Days over 35° Celsius (2041 - 2050)</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Storm Surge -->
+                        {% if 'Storm Surge' in selected_hazards %}
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input hazard-group" id="map-storm-surge" data-hazard="storm-surge">
+                                <label class="form-check-label fw-bold" for="map-storm-surge">
+                                    <i class="fas fa-water me-1" style="color: #0056b3;"></i>Storm Surge
+                                </label>
+                            </div>
+                            <div class="ms-4">
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-ss-baseline-group" data-hazard="ss-baseline">
+                                    <label class="form-check-label fw-bold" for="map-ss-baseline-group">Current</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column ss-baseline storm-surge" id="map-ss-depth" checked data-column="Storm Surge Flood Depth (meters)">
+                                        <label class="form-check-label" for="map-ss-depth">Storm Surge Flood Depth (meters)</label>
+                                    </div>
+                                </div>
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-ss-worst-group" data-hazard="ss-worst">
+                                    <label class="form-check-label fw-bold" for="map-ss-worst-group">Future (Worst Case)</label>
+                                </div>
+                                <div class="ms-4">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column ss-worst storm-surge" id="map-ss-depth-worst" data-column="Storm Surge Flood Depth (meters) - Worst Case">
+                                        <label class="form-check-label" for="map-ss-depth-worst">Storm Surge Flood Depth (meters)</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Rainfall Induced Landslide -->
+                        {% if 'Rainfall Induced Landslide' in selected_hazards %}
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input hazard-group" id="map-landslide" data-hazard="landslide">
+                                <label class="form-check-label fw-bold" for="map-landslide">
+                                    <i class="fas fa-mountain me-1" style="color: #8E44AD;"></i>Rainfall Induced Landslide
+                                </label>
+                            </div>
+                            <div class="ms-4">
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-landslide-baseline-group" data-hazard="landslide-baseline">
+                                    <label class="form-check-label fw-bold" for="map-landslide-baseline-group">Current</label>
+                                </div>
+
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column landslide-baseline landslide" id="map-landslide-baseline" checked data-column="Rainfall-Induced Landslide (factor of safety)">
+                                        <label class="form-check-label" for="map-landslide-baseline">Rainfall-Induced Landslide (factor of safety)</label>
+                                    </div>
+                                </div>
+
+                                <!-- Future Moderate Case Group -->
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-landslide-moderate-group" data-hazard="landslide-moderate">
+                                    <label class="form-check-label fw-bold" for="map-landslide-moderate-group">Future (Moderate Case)</label>
+                                </div>
+                                <div class="ms-4 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column landslide-moderate landslide" id="map-landslide-moderate" data-column="Rainfall-Induced Landslide (factor of safety) - Moderate Case">
+                                        <label class="form-check-label" for="map-landslide-moderate">Rainfall-Induced Landslide (factor of safety)</label>
+                                    </div>
+                                </div>
+
+                                <!-- Future Worst Case Group -->
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input hazard-group" id="map-landslide-worst-group" data-hazard="landslide-worst">
+                                    <label class="form-check-label fw-bold" for="map-landslide-worst-group">Future (Worst Case)</label>
+                                </div>
+                                <div class="ms-4">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input hazard-column landslide-worst landslide" id="map-landslide-worst" data-column="Rainfall-Induced Landslide (factor of safety) - Worst Case">
+                                        <label class="form-check-label" for="map-landslide-worst">Rainfall-Induced Landslide (factor of safety)</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Show/Hide All Control -->
+                        <div class="mt-4">
+                            <button type="button" class="btn btn-sm btn-outline-primary me-2" onclick="showAllHazards()">
+                                <i class="fas fa-eye me-1"></i> Show All
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="hideAllHazards()">
+                                <i class="fas fa-eye-slash me-1"></i> Hide All
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map Display Options -->
+            <div class="card custom-card mb-4">
+                <div class="card-header no-border">
+                    <strong>Map Display Options</strong>
+                </div>
+                <div class="card-body p-3">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="enable-clustering" checked>
+                        <label class="form-check-label" for="enable-clustering">
+                            <i class="fas fa-users me-1"></i>Enable Clustering
+                        </label>
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="show-heatmap-mode" checked>
+                        <label class="form-check-label" for="show-heatmap-mode">
+                            <i class="fas fa-fire me-1"></i>Granular Heatmaps
+                        </label>
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="showseverity-based-sizing" checked>
+                        <label class="form-check-label" for="showseverity-based-sizing">
+                            <i class="fas fa-expand me-1"></i>Severity-Based Sizing
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+          </div>
+
+        <!-- Right Side - Map -->
+        <div class="hazard-map-container">
+            <!-- Map will be initialized here -->
+            <div id="hazard-map" style="width: 100%; height: 100%;"></div>
+
+            <!-- Loading Overlay -->
+            <div id="loading-overlay" class="loading-overlay">
+                <div class="text-center">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-3 mb-0">Loading hazard exposure data...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MapLibre GL JS -->
+<script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+
+<!-- JavaScript -->
+<script>
+let map;
+let hazardData = null;
+let activeHazards = new Set({{ selected_hazards|safe }});
+let activeHazardColumns = new Set();
+let hazardLayerManager = null;
+let currentDisplayMode = 'markers'; // 'markers' or 'heatmap'
+
+// Performance optimization: debounce function for search
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Performance optimization: memoize hazard type detection
+const hazardTypeCache = new Map();
+function memoizedGetHazardType(columnName) {
+    if (hazardTypeCache.has(columnName)) {
+        return hazardTypeCache.get(columnName);
+    }
+    const hazardType = getHazardTypeForColumn(columnName);
+    hazardTypeCache.set(columnName, hazardType);
+    return hazardType;
+}
+
+// Hazard configuration with colors and icons
+const hazardConfig = {
+    'Flood': { color: '#5DADE2', icon: 'fas fa-water', heatmapColor: '#1ABC9C' },
+    'Water Stress': { color: '#1ABC9C', icon: 'fas fa-tint', heatmapColor: '#16A085' },
+    'Sea Level Rise': { color: '#007bff', icon: 'fas fa-water', heatmapColor: '#0056b3' },
+    'Tropical Cyclones': { color: '#95A5A6', icon: 'fas fa-wind', heatmapColor: '#7F8C8D' },
+    'Heat': { color: '#E74C3C', icon: 'fas fa-temperature-high', heatmapColor: '#C0392B' },
+    'Storm Surge': { color: '#0056b3', icon: 'fas fa-water', heatmapColor: '#003d82' },
+    'Rainfall Induced Landslide': { color: '#8E44AD', icon: 'fas fa-mountain', heatmapColor: '#7D3C98' }
+};
+
+// Initialize map when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    initializeMap();
+    loadHazardData();
+    setupEnhancedHazardControls();
+    setupMapDisplayOptions();
+});
+
+function initializeMap() {
+    // Initialize MapLibre GL map
+    map = new maplibregl.Map({
+        container: 'hazard-map',
+        style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+        center: [0, 20],
+        zoom: 2,
+        attributionControl: false
+    });
+
+    // Handle missing images to prevent errors
+    map.on('styleimagemissing', (e) => {
+        const id = e.id;
+
+        // Skip empty or invalid icon names that cause errors
+        if (!id || id.trim() === '' || id === ' ') {
+            console.log('Skipping empty/invalid icon name:', id);
+            return;
+        }
+
+        console.log('Missing image/icon:', id);
+
+        // For non-empty icons, create a simple fallback only if needed
+        // But avoid SDF conflicts by not adding icons that might conflict with base map
+        try {
+            // Check if this is one of our custom hazard icons we should handle
+            if (id && (id.includes('hazard') || id.includes('marker') || id.includes('pin') || id === 'office')) {
+                // Only create fallbacks for our custom icons, not base map icons
+                if (!map.hasImage(id)) {
+                    // Create appropriate SVG based on icon type
+                    let svgContent;
+
+                    if (id === 'office') {
+                        svgContent = `
+                            <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="4" y="6" width="12" height="10" fill="#6c757d" stroke="#495057" stroke-width="1"/>
+                                <rect x="6" y="8" width="3" height="2" fill="#ffffff"/>
+                                <rect x="11" y="8" width="3" height="2" fill="#ffffff"/>
+                                <rect x="6" y="11" width="3" height="2" fill="#ffffff"/>
+                                <rect x="11" y="11" width="3" height="2" fill="#ffffff"/>
+                                <rect x="7" y="2" width="6" height="4" fill="#dc3545" stroke="#bd2130" stroke-width="1"/>
+                            </svg>
+                        `;
+                    } else {
+                        svgContent = `
+                            <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="10" cy="10" r="8" fill="#007bff" stroke="#0056b3" stroke-width="1"/>
+                            </svg>
+                        `;
+                    }
+
+                    const svgDataUrl = 'data:image/svg+xml;base64,' + btoa(svgContent);
+
+                    // Create image from SVG
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            map.addImage(id, img);
+                        } catch (err) {
+                            console.warn(`Could not add SVG fallback for ${id}:`, err);
+                        }
+                    };
+                    img.onerror = () => {
+                        console.warn(`Failed to load SVG fallback for ${id}`);
+                    };
+                    img.src = svgDataUrl;
+                }
+            }
+        } catch (error) {
+            console.warn(`Error handling missing icon ${id}:`, error);
+        }
+    });
+
+    // Add navigation controls
+    map.addControl(new maplibregl.NavigationControl(), 'top-left');
+
+    
+    // Add scale control
+    map.addControl(new maplibregl.ScaleControl({
+        maxWidth: 100,
+        unit: 'metric'
+    }), 'bottom-left');
+
+    // Add attribution control
+    map.addControl(new maplibregl.AttributionControl({
+        compact: true
+    }), 'bottom-right');
+
+    // Hide loading overlay when map loads
+    map.on('load', function() {
+        document.getElementById('loading-overlay').style.display = 'none';
+    });
+}
+
+function setupEnhancedHazardControls() {
+    // Initialize hazard layer manager
+    hazardLayerManager = new HazardLayerManager(map);
+
+    // Setup group checkbox handlers
+    document.querySelectorAll('.hazard-group').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const hazardGroup = this.dataset.hazard;
+            const isChecked = this.checked;
+
+            // Handle child checkboxes
+            const childCheckboxes = document.querySelectorAll(`.hazard-column.${hazardGroup}`);
+            childCheckboxes.forEach(child => {
+                child.checked = isChecked;
+                if (isChecked) {
+                    activeHazardColumns.add(child.dataset.column);
+                } else {
+                    activeHazardColumns.delete(child.dataset.column);
+                }
+            });
+
+            updateMapLayers();
+        });
+    });
+
+    // Setup individual hazard column handlers
+    document.querySelectorAll('.hazard-column').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const column = this.dataset.column;
+
+            if (this.checked) {
+                activeHazardColumns.add(column);
+
+                // Show granular heatmaps for this hazard if heatmap mode is enabled
+                if (document.getElementById('show-heatmap-mode').checked &&
+                    window.granularAnalysisData && window.granularAnalysisData.polygon_assets) {
+                    Object.keys(window.granularAnalysisData.polygon_assets).forEach(assetId => {
+                        const assetData = window.granularAnalysisData.polygon_assets[assetId];
+                        Object.keys(assetData.heatmaps).forEach(hazardType => {
+                            if (column.includes(hazardType.toLowerCase())) {
+                                const heatmapData = assetData.heatmaps[hazardType];
+                                createRealHeatmap(hazardType, heatmapData);
+                            }
+                        });
+                    });
+                }
+            } else {
+                activeHazardColumns.delete(column);
+
+                // Hide granular heatmaps for this hazard
+                if (window.granularAnalysisData && window.granularAnalysisData.polygon_assets) {
+                    Object.keys(window.granularAnalysisData.polygon_assets).forEach(assetId => {
+                        const assetData = window.granularAnalysisData.polygon_assets[assetId];
+                        Object.keys(assetData.heatmaps).forEach(hazardType => {
+                            if (column.includes(hazardType.toLowerCase())) {
+                                const layerId = `granular-heatmap-${hazardType}`;
+                                if (map.getLayer(layerId)) {
+                                    map.removeLayer(layerId);
+                                }
+                                if (map.getSource(layerId)) {
+                                    map.removeSource(layerId);
+                                }
+                                const outlineLayerId = `${layerId}-outline`;
+                                if (map.getLayer(outlineLayerId)) {
+                                    map.removeLayer(outlineLayerId);
+                                }
+                                if (map.getSource(outlineLayerId)) {
+                                    map.removeSource(outlineLayerId);
+                                }
+                            }
+                        });
+                    });
+                }
+            }
+
+            // Update parent checkbox state
+            updateParentCheckboxState(this);
+
+            updateMapLayers();
+        });
+    });
+
+    // Setup search functionality
+    const searchInput = document.getElementById('hazard-search');
+    const clearButton = document.getElementById('clear-search');
+
+    if (searchInput) {
+        // Debounced search for better performance
+        const debouncedSearch = debounce(function() {
+            filterHazardsBySearch(searchInput.value.toLowerCase().trim());
+        }, 300);
+
+        searchInput.addEventListener('input', debouncedSearch);
+    }
+
+    if (clearButton) {
+        clearButton.addEventListener('click', function() {
+            searchInput.value = '';
+            filterHazardsBySearch('');
+            searchInput.focus();
+        });
+    }
+
+    // Initialize active columns with checked boxes
+    document.querySelectorAll('.hazard-column:checked').forEach(checkbox => {
+        activeHazardColumns.add(checkbox.dataset.column);
+    });
+}
+
+function updateParentCheckboxState(changedCheckbox) {
+    const classes = changedCheckbox.className.split(' ');
+    const hazardClasses = classes.filter(cls =>
+        cls !== 'form-check-input' && cls !== 'hazard-column'
+    );
+
+    hazardClasses.forEach(function(hazardClass) {
+        const parentCheckbox = document.querySelector(`.hazard-group[data-hazard="${hazardClass}"]`);
+        const childCheckboxes = document.querySelectorAll(`.hazard-column.${hazardClass}`);
+        const checkedChildren = document.querySelectorAll(`.hazard-column.${hazardClass}:checked`);
+
+        if (parentCheckbox) {
+            parentCheckbox.checked = checkedChildren.length > 0;
+            parentCheckbox.indeterminate = checkedChildren.length > 0 && checkedChildren.length < childCheckboxes.length;
+        }
+    });
+}
+
+function setupMapDisplayOptions() {
+    // Clustering toggle
+    document.getElementById('enable-clustering').addEventListener('change', function() {
+        updateMapLayers();
+    });
+
+    // Heatmap mode toggle
+    document.getElementById('show-heatmap-mode').addEventListener('change', function() {
+        currentDisplayMode = this.checked ? 'heatmap' : 'markers';
+
+        // Handle granular heatmap layers for polygon assets
+        if (window.granularAnalysisData && window.granularAnalysisData.polygon_assets) {
+            if (this.checked) {
+                // Show granular heatmaps
+                Object.keys(window.granularAnalysisData.polygon_assets).forEach(assetId => {
+                    const assetData = window.granularAnalysisData.polygon_assets[assetId];
+                    Object.keys(assetData.heatmaps).forEach(hazardType => {
+                        const heatmapData = assetData.heatmaps[hazardType];
+                        if (activeHazardColumns.some(col => col.includes(hazardType.toLowerCase()))) {
+                            createRealHeatmap(hazardType, heatmapData);
+                        }
+                    });
+                });
+            } else {
+                // Hide granular heatmap layers
+                Object.keys(window.granularAnalysisData.polygon_assets).forEach(assetId => {
+                    const assetData = window.granularAnalysisData.polygon_assets[assetId];
+                    Object.keys(assetData.heatmaps).forEach(hazardType => {
+                        const layerId = `granular-heatmap-${hazardType}`;
+                        if (map.getLayer(layerId)) {
+                            map.removeLayer(layerId);
+                        }
+                        if (map.getSource(layerId)) {
+                            map.removeSource(layerId);
+                        }
+                        const outlineLayerId = `${layerId}-outline`;
+                        if (map.getLayer(outlineLayerId)) {
+                            map.removeLayer(outlineLayerId);
+                        }
+                        if (map.getSource(outlineLayerId)) {
+                            map.removeSource(outlineLayerId);
+                        }
+                    });
+                });
+            }
+        }
+
+        updateMapLayers();
+    });
+
+    // Severity-based sizing toggle
+    document.getElementById('showseverity-based-sizing').addEventListener('change', function() {
+        updateMapLayers();
+    });
+}
+
+// Hazard Layer Manager Class
+class HazardLayerManager {
+    constructor(mapInstance) {
+        this.map = mapInstance;
+        this.layers = new Map();
+        this.sources = new Map();
+        this.popup = null; // Track current popup to prevent multiple popups
+        this.maxLayers = 50; // Performance: limit maximum layers
+    }
+
+    createHazardLayer(columnName, hazardData) {
+        const layerId = `hazard-${columnName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const sourceId = `source-${layerId}`;
+
+        // Determine hazard type for styling (memoized for performance)
+        const hazardType = memoizedGetHazardType(columnName);
+        const config = hazardConfig[hazardType] || { color: '#007bff', icon: 'fas fa-exclamation-triangle' };
+
+        // Add source if it doesn't exist
+        if (!this.map.getSource(sourceId)) {
+            this.map.addSource(sourceId, {
+                type: 'geojson',
+                data: hazardData
+            });
+            this.sources.set(sourceId, true);
+        }
+
+        // Remove existing layer if it exists
+        if (this.map.getLayer(layerId)) {
+            this.map.removeLayer(layerId);
+        }
+
+        if (currentDisplayMode === 'heatmap') {
+            this.createHeatmapLayer(layerId, sourceId, config);
+        } else {
+            this.createMarkerLayer(layerId, sourceId, config, columnName);
+        }
+
+        this.layers.set(layerId, {
+            type: currentDisplayMode,
+            hazardType: hazardType,
+            columnName: columnName
+        });
+
+        // Add popup interaction
+        this.addPopupInteraction(layerId, columnName);
+    }
+
+    createMarkerLayer(layerId, sourceId, config, columnName) {
+        const severitySizing = document.getElementById('showseverity-based-sizing').checked;
+
+        this.map.addLayer({
+            id: layerId,
+            type: 'circle',
+            source: sourceId,
+            paint: {
+                'circle-radius': severitySizing ? [
+                    'interpolate',
+                    ['linear'],
+                    ['get', this.getColumnValueField(columnName)],
+                    0, 6,
+                    25, 8,
+                    50, 12,
+                    75, 18,
+                    100, 25
+                ] : 8,
+                'circle-color': severitySizing ? [
+                    'interpolate',
+                    ['linear'],
+                    ['get', this.getColumnValueField(columnName)],
+                    0, '#28a745',      // Green for low exposure (0-33%)
+                    33, '#28a745',
+                    34, '#ffc107',     // Orange for medium exposure (34-66%)
+                    66, '#ffc107',
+                    67, '#dc3545',     // Red for high exposure (67-100%)
+                    100, '#dc3545'
+                ] : config.color,
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+                'circle-opacity': 0.8
+            }
+        });
+    }
+
+    createHeatmapLayer(layerId, sourceId, config) {
+        this.map.addLayer({
+            id: layerId,
+            type: 'heatmap',
+            source: sourceId,
+            paint: {
+                'heatmap-weight': [
+                    'interpolate',
+                    ['linear'],
+                    ['get', 'exposure_value'],
+                    0, 0,
+                    100, 1
+                ],
+                'heatmap-intensity': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    0, 1,
+                    15, 3
+                ],
+                'heatmap-color': [
+                    'interpolate',
+                    ['linear'],
+                    ['heatmap-density'],
+                    0, 'rgba(33,102,172,0)',
+                    0.2, `rgba(${this.hexToRgb(config.color)},0.5)`,
+                    0.4, `rgba(${this.hexToRgb(config.color)},0.7)`,
+                    0.6, config.color,
+                    1, `rgba(${this.hexToRgb(config.color)},1)`
+                ],
+                'heatmap-radius': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    0, 2,
+                    15, 20
+                ]
+            }
+        });
+    }
+
+    addPopupInteraction(layerId, columnName) {
+        this.map.on('click', layerId, (e) => {
+            const properties = e.features[0].properties;
+            this.showEnhancedPopup(e.lngLat, properties, columnName);
+        });
+
+        this.map.on('mouseenter', layerId, () => {
+            this.map.getCanvas().style.cursor = 'pointer';
+        });
+
+        this.map.on('mouseleave', layerId, () => {
+            this.map.getCanvas().style.cursor = '';
+        });
+    }
+
+    // Enhanced popup management - prevent multiple popups
+    showEnhancedPopup(coordinates, properties, columnName) {
+        // Remove existing popup to prevent multiple popups
+        if (this.popup) {
+            this.popup.remove();
+        }
+
+        const hazardType = memoizedGetHazardType(columnName);
+        const value = properties.hazard_values ? properties.hazard_values[hazardType] : 0;
+        const config = hazardConfig[hazardType] || { color: '#007bff', icon: 'fas fa-exclamation-triangle' };
+
+        // Determine exposure level and color
+        let exposureLevel, exposureColor;
+        if (value <= 33) {
+            exposureLevel = 'Low';
+            exposureColor = '#28a745';
+        } else if (value <= 66) {
+            exposureLevel = 'Medium';
+            exposureColor = '#ffc107';
+        } else {
+            exposureLevel = 'High';
+            exposureColor = '#dc3545';
+        }
+
+        const severitySizing = document.getElementById('showseverity-based-sizing').checked;
+        const displayColor = severitySizing ? exposureColor : config.color;
+
+        const html = `
+            <div class="enhanced-facility-popup">
+                <div class="popup-header" style="border-left: 4px solid ${displayColor};">
+                    <h6><i class="${config.icon} me-2"></i>${properties.name}</h6>
+                    <span class="facility-type-badge">${properties.archetype}</span>
+                </div>
+                <div class="popup-body">
+                    <div class="hazard-display">
+                        <div class="hazard-item">
+                            <span class="hazard-label">${columnName}:</span>
+                            <span class="hazard-value" style="color: ${displayColor}; font-weight: bold;">${value}%</span>
+                            <span class="exposure-badge" style="background-color: ${exposureColor}; color: white; padding: 2px 6px; border-radius: 8px; font-size: 10px; margin-left: 4px;">${exposureLevel}</span>
+                        </div>
+                        <div class="exposure-bar-container">
+                            <div class="exposure-bar">
+                                <div class="exposure-fill" style="width: ${value}%; background-color: ${displayColor};"></div>
+                            </div>
+                        </div>
+                        ${severitySizing ? `<div class="exposure-level-info" style="margin-top: 8px; font-size: 11px; color: #6c757d;">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Colors based on exposure level: ${exposureLevel} (${value}%)
+                        </div>` : ''}
+                    </div>
+                </div>
+                <div class="popup-actions">
+                    <button class="btn btn-sm btn-outline-primary" onclick="showDetailedAnalysis('${properties.name}')">
+                        <i class="fas fa-chart-line me-1"></i>Analysis
+                    </button>
+                </div>
+            </div>
+        `;
+
+        this.popup = new maplibregl.Popup()
+            .setLngLat(coordinates)
+            .setHTML(html)
+            .addTo(this.map);
+    }
+
+    
+    
+    getColumnValueField(columnName) {
+        // Return the field name to use for getting values from feature properties
+        return 'exposure_value';
+    }
+
+    hexToRgb(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ?
+            `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` :
+            '0, 123, 255';
+    }
+
+    hideLayer(layerId) {
+        if (this.map.getLayer(layerId)) {
+            this.map.setLayoutProperty(layerId, 'visibility', 'none');
+        }
+    }
+
+    showLayer(layerId) {
+        if (this.map.getLayer(layerId)) {
+            this.map.setLayoutProperty(layerId, 'visibility', 'visible');
+        }
+    }
+
+    removeLayer(layerId) {
+        if (this.map.getLayer(layerId)) {
+            this.map.removeLayer(layerId);
+        }
+        const sourceId = `source-${layerId}`;
+        if (this.map.getSource(sourceId)) {
+            this.map.removeSource(sourceId);
+        }
+        this.layers.delete(layerId);
+        this.sources.delete(sourceId);
+    }
+}
+
+function filterHazardsBySearch(searchTerm) {
+    const hazardSelector = document.querySelector('.hazard-selector');
+    if (!hazardSelector) return;
+
+    let totalMatches = 0;
+
+    // Get all major hazard sections
+    const hazardSections = hazardSelector.querySelectorAll('.mb-3');
+
+    hazardSections.forEach(section => {
+        let sectionHasMatch = false;
+        const sectionText = section.textContent.toLowerCase();
+
+        // Check if the main hazard type matches
+        const mainCheckbox = section.querySelector('.hazard-group');
+        const mainLabel = mainCheckbox ? mainCheckbox.nextElementSibling.textContent.toLowerCase() : '';
+        const mainHazard = mainCheckbox ? mainCheckbox.dataset.hazard.toLowerCase() : '';
+
+        const mainMatches = searchTerm === '' ||
+                          mainLabel.includes(searchTerm) ||
+                          mainHazard.includes(searchTerm);
+
+        if (mainMatches) {
+            sectionHasMatch = true;
+        }
+
+        // Check child elements within the section
+        const childElements = section.querySelectorAll('.form-check');
+        childElements.forEach(childElement => {
+            const label = childElement.querySelector('.form-check-label');
+            const labelText = label ? label.textContent.toLowerCase() : '';
+            const checkbox = childElement.querySelector('.hazard-column');
+            const dataColumn = checkbox ? checkbox.dataset.column.toLowerCase() : '';
+
+            const matches = searchTerm === '' ||
+                          labelText.includes(searchTerm) ||
+                          dataColumn.includes(searchTerm);
+
+            if (matches) {
+                childElement.style.display = 'block';
+                sectionHasMatch = true;
+                totalMatches++;
+            } else {
+                childElement.style.display = 'none';
+            }
+        });
+
+        // Show/hide the entire section based on matches
+        section.style.display = sectionHasMatch ? 'block' : 'none';
+        if (sectionHasMatch && searchTerm !== '') {
+            totalMatches++;
+        }
+    });
+
+    // Update search results indicator
+    updateSearchResultsIndicator(totalMatches, searchTerm);
+}
+
+function updateSearchResultsIndicator(matchCount, searchTerm) {
+    // Remove existing indicator
+    const existingIndicator = document.querySelector('.search-results-indicator');
+    if (existingIndicator) {
+        existingIndicator.remove();
+    }
+
+    if (searchTerm && matchCount > 0) {
+        // Add search results indicator
+        const indicator = document.createElement('div');
+        indicator.className = 'search-results-indicator alert alert-info py-2 mb-2';
+        indicator.innerHTML = `<small><i class="fas fa-search me-1"></i>${matchCount} match(es) found for "${searchTerm}"</small>`;
+
+        const searchContainer = document.querySelector('.input-group');
+        if (searchContainer) {
+            searchContainer.insertAdjacentElement('afterend', indicator);
+        }
+    }
+}
+
+function showAllHazards() {
+    // Clear search first
+    const searchInput = document.getElementById('hazard-search');
+    if (searchInput) {
+        searchInput.value = '';
+        filterHazardsBySearch('');
+    }
+
+    document.querySelectorAll('.hazard-column').forEach(checkbox => {
+        checkbox.checked = true;
+        checkbox.parentElement.style.display = 'block';
+        activeHazardColumns.add(checkbox.dataset.column);
+    });
+
+    // Update parent checkboxes
+    document.querySelectorAll('.hazard-group').forEach(checkbox => {
+        checkbox.checked = true;
+        checkbox.indeterminate = false;
+        checkbox.closest('.mb-3').style.display = 'block';
+    });
+
+    updateMapLayers();
+}
+
+function hideAllHazards() {
+    // Clear search first
+    const searchInput = document.getElementById('hazard-search');
+    if (searchInput) {
+        searchInput.value = '';
+        filterHazardsBySearch('');
+    }
+
+    document.querySelectorAll('.hazard-column').forEach(checkbox => {
+        checkbox.checked = false;
+    });
+
+    document.querySelectorAll('.hazard-group').forEach(checkbox => {
+        checkbox.checked = false;
+        checkbox.indeterminate = false;
+    });
+
+    activeHazardColumns.clear();
+    updateMapLayers();
+}
+
+function updateMapLayers() {
+    if (!hazardLayerManager || !hazardData) return;
+
+    // Clear existing layers
+    hazardLayerManager.layers.forEach((layerInfo, layerId) => {
+        hazardLayerManager.removeLayer(layerId);
+    });
+
+    // Create layers for active columns
+    activeHazardColumns.forEach(columnName => {
+        // Create filtered data for this specific column
+        const filteredData = createFilteredHazardData(columnName);
+        if (filteredData && filteredData.features.length > 0) {
+            hazardLayerManager.createHazardLayer(columnName, filteredData);
+        }
+    });
+
+    // Update legend
+    updateLegend();
+}
+
+function createFilteredHazardData(columnName) {
+    if (!hazardData || !hazardData.features) return null;
+
+    const hazardType = getHazardTypeForColumn(columnName);
+
+    const filteredFeatures = hazardData.features.map(feature => {
+        const properties = feature.properties;
+        const hazardValue = properties.hazard_values ? properties.hazard_values[hazardType] || 0 : 0;
+
+        return {
+            ...feature,
+            properties: {
+                ...properties,
+                exposure_value: hazardValue,
+                display_column: columnName
+            }
+        };
+    }).filter(feature => feature.properties.exposure_value > 0);
+
+    return {
+        type: 'FeatureCollection',
+        features: filteredFeatures
+    };
+}
+
+function getHazardTypeForColumn(columnName) {
+    if (columnName.includes('Flood')) return 'Flood';
+    if (columnName.includes('Water Stress')) return 'Water Stress';
+    if (columnName.includes('Sea Level Rise')) return 'Sea Level Rise';
+    if (columnName.includes('Windspeed') || columnName.includes('Cyclone')) return 'Tropical Cyclones';
+    if (columnName.includes('Days over') || columnName.includes('Heat')) return 'Heat';
+    if (columnName.includes('Storm Surge')) return 'Storm Surge';
+    if (columnName.includes('Landslide')) return 'Rainfall Induced Landslide';
+    return 'Other';
+}
+
+
+function updateLegend() {
+    // Remove existing legend
+    const existingLegend = document.getElementById('hazard-legend');
+    if (existingLegend) {
+        existingLegend.remove();
+    }
+
+    if (activeHazardColumns.size === 0) return;
+
+    // Create exposure level legend HTML
+    let legendHTML = '<div id="hazard-legend" class="hazard-legend mt-3"><h6>Exposure Levels</h6>';
+
+    legendHTML += `
+        <div class="legend-item">
+            <div class="legend-marker legend-low"></div>
+            <span class="legend-label">Low Exposure</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-marker legend-medium"></div>
+            <span class="legend-label">Medium Exposure</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-marker legend-high"></div>
+            <span class="legend-label">High Exposure</span>
+        </div>
+    `;
+
+    legendHTML += '</div>';
+
+    // Add legend to the map container
+    const mapContainer = document.querySelector('.hazard-map-container');
+    if (mapContainer) {
+        mapContainer.insertAdjacentHTML('beforeend', legendHTML);
+    }
+}
+
+function showDetailedAnalysis(facilityName) {
+    // Placeholder for detailed analysis function
+    console.log('Showing detailed analysis for:', facilityName);
+    // This could open a modal or navigate to a detailed view
+}
+
+function loadHazardData() {
+    console.log('Loading hazard data...');
+
+    // First, check if we have granular workflow results from the main workflow
+    if (window.granularAnalysisResults && window.currentAssetId) {
+        console.log('Loading granular workflow results for asset:', window.currentAssetId);
+        loadGranularWorkflowResults(window.currentAssetId);
+    } else {
+        // Check if we have granular workflow context indicators
+        const hasGranularContext = document.querySelector('[data-granular-workflow="true"]') ||
+                                  window.location.search.includes('granular=true') ||
+                                  document.title.includes('Granular') ||
+                                  document.body.classList.contains('granular-workflow');
+
+        console.log('Has granular workflow context:', hasGranularContext);
+
+        if (hasGranularContext) {
+            // Try to get the current asset ID from URL parameters or session storage
+            const urlParams = new URLSearchParams(window.location.search);
+            const assetId = urlParams.get('asset_id') ||
+                          sessionStorage.getItem('currentAssetId') ||
+                          window.currentAssetId;
+
+            if (assetId) {
+                console.log('Found asset ID in context:', assetId);
+                loadGranularWorkflowResults(assetId);
+                return;
+            }
+        }
+
+        // Fall back to regular hazard data loading
+        loadRegularHazardData();
+    }
+}
+
+// Function to load granular workflow results from the new API
+function loadGranularWorkflowResults(assetId) {
+    console.log('Loading granular workflow results for asset ID:', assetId);
+
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+
+    fetch(`/api/granular/workflow/results/${assetId}/`, {
+        method: 'GET',
+        headers: {
+            'X-CSRFToken': csrfToken,
+            'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        console.log('Granular workflow results response status:', response.status);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Received granular workflow results:', data);
+
+        if (data.success && (data.status === 'completed' || data.results)) {
+            // Process granular workflow results
+            displayGranularWorkflowResults(data);
+        } else if (data.status === 'processing') {
+            // Still processing, show loading state and poll
+            console.log('Analysis still processing, showing loading state...');
+            showAnalysisProcessingState(assetId);
+            pollGranularWorkflowStatus(assetId);
+        } else {
+            console.error('Error loading granular workflow results:', data.error);
+            // Fall back to regular hazard data
+            loadRegularHazardData();
+        }
+    })
+    .catch(error => {
+        console.error('Error loading granular workflow results:', error);
+        // Fall back to regular hazard data
+        loadRegularHazardData();
+    });
+}
+
+// Function to load regular hazard data (fallback)
+function loadRegularHazardData() {
+    const apiEndpoint = "{{ hazard_exposure_api_url }}";
+    console.log('Loading regular hazard data from:', apiEndpoint);
+
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    fetch(apiEndpoint, {
+        method: 'GET',
+        headers: {
+            'X-CSRFToken': csrfToken,
+            'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Received regular hazard data:', data);
+        if (data.success) {
+            hazardData = data.data;
+            console.log('Hazard data loaded successfully. Features:', hazardData?.features?.length);
+            displayHazardData(data);
+        } else {
+            console.error('Error loading hazard data:', data.error);
+            showError('Failed to load hazard data: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showError('Network error while loading hazard data: ' + error.message);
+    });
+}
+
+// Function to display granular workflow results
+function displayGranularWorkflowResults(data) {
+    console.log('Displaying granular workflow results:', data);
+
+    // Convert granular workflow results to the expected format for displayHazardData
+    const convertedData = {
+        success: true,
+        data: convertGranularResultsToHazardData(data.results || data),
+        metadata: {
+            heatmap_layers: data.results?.heatmap_layers || {},
+            assets: data.results?.assets || [],
+            granular_workflow: true,
+            asset_id: data.asset_id
+        }
+    };
+
+    // Store the original granular results for reference
+    window.originalGranularResults = data;
+
+    // Display using the existing function
+    displayHazardData(convertedData);
+}
+
+// Function to convert granular workflow results to hazard data format
+function convertGranularResultsToHazardData(results) {
+    if (!results) {
+        return { type: 'FeatureCollection', features: [] };
+    }
+
+    // If results already have the expected format, return as-is
+    if (results.type === 'FeatureCollection' && results.features) {
+        return results;
+    }
+
+    // Convert table results to GeoJSON format if needed
+    const features = [];
+
+    // Process polygon assets
+    if (results.polygon_assets) {
+        Object.keys(results.polygon_assets).forEach(assetId => {
+            const asset = results.polygon_assets[assetId];
+            if (asset.geometry) {
+                features.push({
+                    type: 'Feature',
+                    geometry: asset.geometry,
+                    properties: {
+                        id: assetId,
+                        name: asset.name || `Asset ${assetId}`,
+                        asset_type: 'polygon',
+                        feature_type: 'boundary',
+                        hazard_values: asset.hazard_values || {},
+                        archetype: asset.archetype || 'default archetype',
+                        grid_points: asset.grid_points || []
+                    }
+                });
+            }
+        });
+    }
+
+    // Process heatmap data
+    if (results.heatmap_layers) {
+        Object.keys(results.heatmap_layers).forEach(hazardType => {
+            const heatmapLayer = results.heatmap_layers[hazardType];
+            if (heatmapLayer.grid_points) {
+                heatmapLayer.grid_points.forEach(point => {
+                    features.push({
+                        type: 'Feature',
+                        geometry: {
+                            type: 'Point',
+                            coordinates: [point.lng, point.lat]
+                        },
+                        properties: {
+                            id: `grid_${hazardType}_${point.row}_${point.col}`,
+                            feature_type: 'grid_point',
+                            hazard_type: hazardType,
+                            exposure_value: point.value,
+                            risk_level: getRiskLevel(point.value),
+                            hazard_values: {
+                                [hazardType]: point.value
+                            },
+                            row: point.row,
+                            col: point.col,
+                            archetype: 'grid_point'
+                        }
+                    });
+                });
+            }
+        });
+    }
+
+    return {
+        type: 'FeatureCollection',
+        features: features
+    };
+}
+
+// Function to show processing state for granular workflow
+function showAnalysisProcessingState(assetId) {
+    // Show a custom loading overlay for granular analysis
+    const loadingOverlay = document.getElementById('loading-overlay');
+    if (loadingOverlay) {
+        loadingOverlay.innerHTML = `
+            <div class="text-center">
+                <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
+                    <span class="visually-hidden">Processing granular analysis...</span>
+                </div>
+                <h5 class="mb-3">Processing Granular Analysis</h5>
+                <p class="mb-2">Analyzing climate hazards for your polygon asset...</p>
+                <p class="text-muted small mb-0">This may take a few moments for complex areas</p>
+                <div class="progress mt-3" style="width: 300px; margin: 0 auto;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated"
+                         role="progressbar"
+                         style="width: 100%">
+                    </div>
+                </div>
+            </div>
+        `;
+        loadingOverlay.style.display = 'flex';
+    }
+}
+
+// Function to poll granular workflow status
+function pollGranularWorkflowStatus(assetId) {
+    const maxAttempts = 60; // Maximum 5 minutes
+    let attempts = 0;
+
+    const poll = async () => {
+        try {
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+
+            const response = await fetch(`/api/granular/workflow/results/${assetId}/`, {
+                method: 'GET',
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'same-origin'
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+
+                if (data.success && data.status === 'completed') {
+                    // Hide loading overlay and display results
+                    const loadingOverlay = document.getElementById('loading-overlay');
+                    if (loadingOverlay) {
+                        loadingOverlay.style.display = 'none';
+                    }
+                    displayGranularWorkflowResults(data);
+                    return;
+                } else if (data.status === 'failed') {
+                    throw new Error(data.error || 'Analysis failed');
+                }
+            }
+
+            if (attempts >= maxAttempts) {
+                throw new Error('Analysis timeout');
+            } else {
+                attempts++;
+                setTimeout(poll, 5000); // Poll every 5 seconds
+            }
+        } catch (error) {
+            console.error('Polling error:', error);
+            // Hide loading overlay and fall back to regular data
+            const loadingOverlay = document.getElementById('loading-overlay');
+            if (loadingOverlay) {
+                loadingOverlay.style.display = 'none';
+            }
+            loadRegularHazardData();
+        }
+    };
+
+    poll();
+}
+
+function displayHazardData(data) {
+    console.log('Displaying hazard data with new API format:', data);
+
+    // Store hazard data for use by the layer manager
+    hazardData = data.data;
+
+    // Handle granular workflow metadata
+    if (data.metadata && data.metadata.granular_workflow) {
+        console.log('Processing granular workflow data...');
+
+        // Store granular workflow information
+        window.granularAnalysisData = {
+            polygon_assets: {},
+            is_workflow: true,
+            asset_id: data.metadata.asset_id
+        };
+
+        // Process heatmap layers from granular workflow results
+        if (data.metadata.heatmap_layers) {
+            Object.keys(data.metadata.heatmap_layers).forEach(hazardType => {
+                const heatmapData = data.metadata.heatmap_layers[hazardType];
+
+                // Create polygon asset entry for each hazard type
+                const assetId = `workflow_${hazardType}`;
+                window.granularAnalysisData.polygon_assets[assetId] = {
+                    asset: {
+                        id: assetId,
+                        name: `Granular Analysis - ${hazardType}`,
+                        hazard_type: hazardType,
+                        asset_type: 'polygon'
+                    },
+                    heatmaps: {
+                        [hazardType]: heatmapData
+                    }
+                };
+            });
+        }
+
+        // Process polygon assets from granular workflow
+        if (data.metadata.assets) {
+            data.metadata.assets.forEach(asset => {
+                if (asset.asset_type === 'polygon') {
+                    window.granularAnalysisData.polygon_assets[asset.id] = {
+                        asset: asset,
+                        heatmaps: asset.heatmaps || data.metadata.heatmap_layers || {}
+                    };
+                }
+            });
+        }
+
+        console.log('Granular workflow data initialized:', window.granularAnalysisData);
+    }
+    // Handle regular granular analysis metadata (legacy)
+    else if (data.metadata && data.metadata.heatmap_layers) {
+        window.granularAnalysisData = {
+            polygon_assets: {},
+            is_workflow: false
+        };
+
+        // Create a mapping for polygon assets
+        if (data.metadata.assets) {
+            data.metadata.assets.forEach(asset => {
+                if (asset.asset_type === 'polygon' && asset.heatmaps) {
+                    window.granularAnalysisData.polygon_assets[asset.id] = {
+                        asset: asset,
+                        heatmaps: asset.heatmaps
+                    };
+                }
+            });
+        }
+
+        console.log('Legacy granular analysis data initialized:', window.granularAnalysisData);
+    }
+
+    // Initialize the layer manager if not already done
+    if (!hazardLayerManager) {
+        hazardLayerManager = new HazardLayerManager(map);
+    }
+
+    // Check for polygon assets with granular analysis and create heatmaps
+    createGranularAnalysisHeatmaps();
+
+    // Update initial map layers based on checked columns
+    updateMapLayers();
+
+    // Fit map to show all facilities
+    if (hazardData && hazardData.features.length > 0) {
+        const bounds = new maplibregl.LngLatBounds();
+        hazardData.features.forEach(function(feature) {
+            if (feature.geometry && feature.geometry.coordinates) {
+                if (feature.geometry.type === 'Point') {
+                    bounds.extend(feature.geometry.coordinates);
+                } else if (feature.geometry.type === 'Polygon' && feature.geometry.coordinates.length > 0) {
+                    // For polygon features, extend bounds to include all coordinates
+                    const coords = feature.geometry.coordinates[0]; // Exterior ring
+                    coords.forEach(coord => bounds.extend(coord));
+                }
+            }
+        });
+        if (!bounds.isEmpty()) {
+            map.fitBounds(bounds, { padding: 50 });
+        }
+    }
+}
+
+function createGranularAnalysisHeatmaps() {
+    // Debug: Log the hazardData structure
+    console.log('Hazard data structure:', hazardData);
+
+    if (!hazardData || !hazardData.features) {
+        console.log('No hazard data or features available');
+        return;
+    }
+
+    console.log('Total features:', hazardData.features.length);
+
+    // Debug: Log all feature properties and geometry
+    hazardData.features.forEach((feature, index) => {
+        console.log(`Feature ${index} Properties:`, feature.properties);
+        console.log(`Feature ${index} Geometry Type:`, feature.geometry?.type);
+        console.log(`Feature ${index} Asset Type:`, feature.properties?.asset_type);
+        console.log(`Feature ${index} Feature Type:`, feature.properties?.feature_type);
+        console.log(`Feature ${index} Coordinates:`, feature.geometry?.coordinates);
+        console.log(`Feature ${index} All Properties:`, Object.keys(feature.properties));
+    });
+
+    // Check if we have polygon assets with granular analysis (enhanced detection)
+    const polygonAssets = hazardData.features.filter(feature => {
+        const geometryType = feature.geometry?.type;
+        const assetType = feature.properties?.asset_type;
+        const featureType = feature.properties?.feature_type;
+
+        console.log(`Checking feature - Geometry: ${geometryType}, Asset Type: ${assetType}, Feature Type: ${featureType}`);
+
+        return (
+            feature.properties &&
+            (
+                assetType === 'polygon' ||
+                assetType === 'Polygon' ||
+                geometryType === 'Polygon' ||
+                geometryType === 'MultiPolygon' ||
+                geometryType === 'polygon' ||
+                geometryType === 'multipolygon' ||
+                featureType === 'boundary'
+            )
+        );
+    });
+
+    console.log('Polygon assets found:', polygonAssets.length);
+
+    if (polygonAssets.length === 0) {
+        console.log('No polygon assets found - this is normal if you only have point facilities');
+        // Don't return - continue with point-based visualization
+        return;
+    }
+
+    console.log(`Found ${polygonAssets.length} polygon assets`);
+
+    // Use the granular analysis data that was initialized in displayHazardData
+    if (window.granularAnalysisData && window.granularAnalysisData.polygon_assets) {
+        const polygonAssetIds = Object.keys(window.granularAnalysisData.polygon_assets);
+        console.log('Granular analysis data available for assets:', polygonAssetIds);
+
+        // Only create heatmaps if heatmap mode is enabled
+        if (document.getElementById('show-heatmap-mode').checked) {
+            Object.keys(window.granularAnalysisData.polygon_assets).forEach(assetId => {
+                const assetData = window.granularAnalysisData.polygon_assets[assetId];
+                Object.keys(assetData.heatmaps).forEach(hazardType => {
+                    const heatmapData = assetData.heatmaps[hazardType];
+                    if (activeHazardColumns.some(col => col.includes(hazardType.toLowerCase()))) {
+                        createRealHeatmap(hazardType, heatmapData);
+                    }
+                });
+            });
+        }
+
+        // Add polygon outlines for context
+        addPolygonOutlines();
+    } else {
+        console.log('No granular analysis data found in window.granularAnalysisData');
+
+        // Fallback to checking hazardData.metadata for heatmap layers
+        if (hazardData.metadata && hazardData.metadata.heatmap_layers) {
+            console.log('Found heatmap layers in metadata, using them');
+            const heatmapLayers = hazardData.metadata.heatmap_layers;
+
+            // Initialize granular analysis data storage
+            window.granularAnalysisData = {
+                polygon_assets: {}
+            };
+
+            // Store granular analysis data for heatmap toggle
+            polygonAssets.forEach(asset => {
+                const assetId = asset.properties.asset_id || asset.properties.id;
+                window.granularAnalysisData.polygon_assets[assetId] = {
+                    asset: asset,
+                    heatmaps: heatmapLayers
+                };
+            });
+
+            // Only create heatmaps if heatmap mode is enabled
+            if (document.getElementById('show-heatmap-mode').checked) {
+                Object.keys(heatmapLayers).forEach(hazardType => {
+                    const heatmapLayer = heatmapLayers[hazardType];
+                    if (activeHazardColumns.some(col => col.includes(hazardType.toLowerCase()))) {
+                        createRealHeatmap(hazardType, heatmapLayer);
+                    }
+                });
+            }
+
+            // Add polygon outlines for context
+            addPolygonOutlines();
+        } else {
+            console.log('No heatmap layers found, falling back to simulated data');
+
+            // Initialize granular analysis data storage
+            window.granularAnalysisData = {
+                polygon_assets: {}
+            };
+
+            // Fallback to simulated data for development
+            polygonAssets.forEach(asset => {
+                const assetId = asset.properties.asset_id || asset.properties.id;
+                window.granularAnalysisData.polygon_assets[assetId] = {
+                    asset: asset,
+                    heatmaps: {}
+                };
+
+                activeHazardColumns.forEach(columnName => {
+                    const hazardType = getHazardTypeForColumn(columnName);
+                    createPolygonHeatmap(asset, hazardType, columnName);
+                });
+            });
+        }
+    }
+}
+
+function addPolygonOutlines() {
+    // Get polygon features from hazard data
+    const polygonFeatures = hazardData.features.filter(feature => {
+        const properties = feature.properties || {};
+        return (
+            properties.feature_type === 'boundary' ||
+            properties.asset_type === 'polygon' ||
+            properties.asset_type === 'Polygon' ||
+            (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon'))
+        );
+    });
+
+    console.log(`Adding outlines for ${polygonFeatures.length} polygon features`);
+
+    polygonFeatures.forEach(feature => {
+        const assetId = feature.properties.asset_id || feature.properties.id || `polygon-${Math.random().toString(36).substr(2, 9)}`;
+        const layerId = `polygon-outline-${assetId}`;
+        const sourceId = `polygon-source-${assetId}`;
+
+        // Remove existing layer if it exists
+        if (map.getLayer(layerId)) {
+            map.removeLayer(layerId);
+        }
+        if (map.getSource(sourceId)) {
+            map.removeSource(sourceId);
+        }
+
+        // Add polygon source
+        map.addSource(sourceId, {
+            type: 'geojson',
+            data: {
+                type: 'Feature',
+                geometry: feature.geometry,
+                properties: feature.properties
+            }
+        });
+
+        // Add polygon outline layer
+        map.addLayer({
+            id: layerId,
+            type: 'line',
+            source: sourceId,
+            paint: {
+                'line-color': '#007bff',
+                'line-width': 3,
+                'line-opacity': 0.8
+            }
+        });
+
+        console.log(`Added polygon outline for ${feature.properties.name || 'Unnamed Asset'} (${assetId})`);
+    });
+}
+
+function createRealHeatmap(hazardType, heatmapLayer) {
+    const gridPoints = heatmapLayer.grid_points;
+    const metadata = heatmapLayer.metadata;
+
+    if (!gridPoints || gridPoints.length === 0) {
+        console.log(`No grid points found for hazard ${hazardType}`);
+        return;
+    }
+
+    // Create heatmap data from real granular analysis points
+    const heatmapData = {
+        type: 'FeatureCollection',
+        features: gridPoints.map(point => ({
+            type: 'Feature',
+            properties: {
+                hazard_type: hazardType,
+                exposure_value: point.value,
+                risk_level: getRiskLevel(point.value),
+                row: point.row,
+                col: point.col,
+                feature_type: 'grid_point'
+            },
+            geometry: {
+                type: 'Point',
+                coordinates: [point.lng, point.lat]
+            }
+        }))
+    };
+
+    // Add heatmap layer to map
+    const layerId = `granular-heatmap-${hazardType}`;
+    const sourceId = `source-${layerId}`;
+
+    // Remove existing layer if it exists
+    if (map.getLayer(layerId)) {
+        map.removeLayer(layerId);
+    }
+    if (map.getSource(sourceId)) {
+        map.removeSource(sourceId);
+    }
+
+    // Add source
+    map.addSource(sourceId, {
+        type: 'geojson',
+        data: heatmapData
+    });
+
+    // Add heatmap layer with exposure-based colors
+    map.addLayer({
+        id: layerId,
+        type: 'heatmap',
+        source: sourceId,
+        paint: {
+            'heatmap-weight': [
+                'interpolate',
+                ['linear'],
+                ['get', 'exposure_value'],
+                0, 0,
+                100, 1
+            ],
+            'heatmap-intensity': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                0, 1,
+                15, 3
+            ],
+            'heatmap-color': [
+                'interpolate',
+                ['linear'],
+                ['heatmap-density'],
+                0, 'rgba(255, 255, 255, 0)',
+                0.2, 'rgba(40, 167, 69, 0.3)',   // Green for low exposure
+                0.4, 'rgba(255, 193, 7, 0.6)',    // Yellow for medium exposure
+                0.6, 'rgba(249, 115, 22, 0.8)',   // Orange for high exposure
+                1, 'rgba(220, 38, 38, 1)'        // Red for very high exposure
+            ],
+            'heatmap-radius': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                0, 10,
+                15, 40
+            ],
+            'heatmap-opacity': 0.8
+        }
+    });
+
+    // Store layer info
+    hazardLayerManager.layers.set(layerId, {
+        type: 'heatmap',
+        hazardType: hazardType,
+        metadata: metadata
+    });
+
+    console.log(`Created real heatmap for ${hazardType} with ${gridPoints.length} points`);
+}
+
+function createPolygonHeatmap(asset, hazardType, columnName) {
+    // Fallback function for development - uses simulated data
+    const polygonGeometry = asset.properties.polygon_geometry;
+    const coordinates = polygonGeometry.coordinates[0]; // Exterior ring
+
+    // Calculate bounding box
+    const lats = coordinates.map(coord => coord[1]);
+    const lngs = coordinates.map(coord => coord[0]);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+
+    // Generate sample points within the polygon (simplified grid)
+    const gridPoints = generateSamplePointsInPolygon(
+        polygonGeometry,
+        minLat, maxLat, minLng, maxLng,
+        0.001 // ~100m grid spacing
+    );
+
+    if (gridPoints.length === 0) return;
+
+    // Create heatmap data from sample points
+    const heatmapData = {
+        type: 'FeatureCollection',
+        features: gridPoints.map(point => ({
+            type: 'Feature',
+            properties: {
+                asset_id: asset.properties.id,
+                asset_name: asset.properties.name,
+                hazard_type: hazardType,
+                column_name: columnName,
+                exposure_value: Math.random() * 100, // Simulated value - replace with real data
+                risk_level: getRiskLevel(Math.random() * 100)
+            },
+            geometry: {
+                type: 'Point',
+                coordinates: [point.lng, point.lat]
+            }
+        }))
+    };
+
+    // Add heatmap layer to map
+    const layerId = `heatmap-${asset.properties.id}-${hazardType}-${columnName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const sourceId = `source-${layerId}`;
+
+    // Remove existing layer if it exists
+    if (map.getLayer(layerId)) {
+        map.removeLayer(layerId);
+    }
+    if (map.getSource(sourceId)) {
+        map.removeSource(sourceId);
+    }
+
+    // Add source
+    map.addSource(sourceId, {
+        type: 'geojson',
+        data: heatmapData
+    });
+
+    // Add heatmap layer
+    const config = hazardConfig[hazardType] || { color: '#007bff', heatmapColor: '#007bff' };
+
+    map.addLayer({
+        id: layerId,
+        type: 'heatmap',
+        source: sourceId,
+        paint: {
+            'heatmap-weight': [
+                'interpolate',
+                ['linear'],
+                ['get', 'exposure_value'],
+                0, 0,
+                100, 1
+            ],
+            'heatmap-intensity': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                0, 1,
+                15, 3
+            ],
+            'heatmap-color': [
+                'interpolate',
+                ['linear'],
+                ['heatmap-density'],
+                0, 'rgba(255, 255, 255, 0)',
+                0.2, `rgba(255, 248, 220, 0.5)`, // Light yellow for low exposure
+                0.4, `rgba(255, 228, 181, 0.7)`, // Orange for medium exposure
+                0.6, `rgba(255, 160, 122, 0.9)`, // Darker orange for high exposure
+                1, `rgba(255, 69, 0, 1)` // Red-orange for very high exposure
+            ],
+            'heatmap-radius': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                0, 5,
+                15, 30
+            ],
+            'heatmap-opacity': 0.7
+        }
+    });
+
+    // Store layer info
+    hazardLayerManager.layers.set(layerId, {
+        type: 'heatmap',
+        hazardType: hazardType,
+        columnName: columnName,
+        assetId: asset.properties.id,
+        assetName: asset.properties.name
+    });
+
+    // Add polygon outline for context
+    const polygonLayerId = `polygon-outline-${asset.properties.id}`;
+    if (!map.getLayer(polygonLayerId)) {
+        map.addSource(`polygon-source-${asset.properties.id}`, {
+            type: 'geojson',
+            data: {
+                type: 'Feature',
+                geometry: polygonGeometry,
+                properties: {
+                    asset_id: asset.properties.id,
+                    asset_name: asset.properties.name
+                }
+            }
+        });
+
+        map.addLayer({
+            id: polygonLayerId,
+            type: 'line',
+            source: `polygon-source-${asset.properties.id}`,
+            paint: {
+                'line-color': config.color,
+                'line-width': 2,
+                'line-opacity': 0.8
+            }
+        });
+    }
+}
+
+function generateSamplePointsInPolygon(polygonGeometry, minLat, maxLat, minLng, maxLng, gridSpacing) {
+    const points = [];
+    const coordinates = polygonGeometry.coordinates[0];
+
+    // Simple point-in-polygon check
+    function isPointInPolygon(lat, lng, polyCoords) {
+        let inside = false;
+        const x = lng, y = lat;
+        for (let i = 0, j = polyCoords.length - 1; i < polyCoords.length; j = i++) {
+            const xi = polyCoords[i][0], yi = polyCoords[i][1];
+            const xj = polyCoords[j][0], yj = polyCoords[j][1];
+
+            const intersect = ((yi > y) != (yj > y))
+                && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    }
+
+    // Generate grid points
+    let lat = minLat;
+    while (lat <= maxLat) {
+        let lng = minLng;
+        while (lng <= maxLng) {
+            if (isPointInPolygon(lat, lng, coordinates)) {
+                points.push({ lat, lng });
+            }
+            lng += gridSpacing;
+        }
+        lat += gridSpacing;
+    }
+
+    return points;
+}
+
+function getRiskLevel(exposureValue) {
+    if (exposureValue <= 33) return 'Low';
+    if (exposureValue <= 66) return 'Medium';
+    return 'High';
+}
+
+function showFacilityPopup(coordinates, properties) {
+    const html = `
+        <div class="facility-popup">
+            <h5><i class="fas fa-map-marker-alt me-2"></i>${properties.name}</h5>
+            <p class="mb-2"><strong>Archetype:</strong> ${properties.archetype}</p>
+            <div class="hazard-values">
+                <h6 class="mb-2">Hazard Exposure Values:</h6>
+                ${Object.entries(properties.hazard_values).map(([hazard, value]) => `
+                    <div class="hazard-value-item">
+                        <span>${hazard}:</span>
+                        <span class="hazard-badge" style="background-color: ${getHazardColor(hazard)};">
+                            ${value}%
+                        </span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+
+    new maplibregl.Popup()
+        .setLngLat(coordinates)
+        .setHTML(html)
+        .addTo(map);
+}
+
+function getHazardColor(hazard) {
+    const colors = {
+        'Heat': '#dc3545',
+        'Cold': '#17a2b8',
+        'Wind': '#28a745',
+        'Coastal': '#007bff',
+        'Flooding': '#6f42c1',
+        'Drought': '#fd7e14',
+        'Landslide': '#6c757d'
+    };
+    return colors[hazard] || '#6c757d';
+}
+
+
+function showError(message) {
+    document.getElementById('loading-overlay').innerHTML = `
+        <div class="text-center text-danger">
+            <i class="fas fa-exclamation-triangle fa-3x mb-3"></i>
+            <p class="fw-bold">${message}</p>
+            <button class="btn btn-primary mt-3" onclick="location.reload()">
+                <i class="fas fa-redo me-2"></i>Retry
+            </button>
+        </div>
+    `;
+}
+</script>
+
+{% endblock %}

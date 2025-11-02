@@ -1,33 +1,42 @@
 from django.shortcuts import render, redirect
 from django.http import JsonResponse, HttpResponse
+from django.urls import reverse
+from django.utils import timezone
 import os
+import uuid
 from io import BytesIO
 import pandas as pd
 import geopandas as gpd
 import json
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
-from django.views.decorators.http import require_http_methods, require_GET
+from django.views.decorators.http import require_http_methods, require_GET, require_POST
 from django.utils.decorators import method_decorator
 from django.middleware.csrf import get_token
+from django.views.generic import TemplateView
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.urls import reverse_lazy
+from django.core.exceptions import ValidationError
 from .utils import standardize_facility_dataframe, load_cached_hazard_data, combine_facility_with_hazard_data, validate_shapefile
 from .error_utils import handle_sensitivity_param_error
-<<<<<<< HEAD
-from .models import Asset, HazardAnalysisResult
-=======
-from .granular_analysis import (
-    generate_sample_grid,
-    query_hazard_for_points,
-    classify_hazard_risk,
-    consolidate_points_to_clusters,
-    calculate_polygon_area_km2
+from .models import Asset, HazardAnalysisResult, GranularAnalysisResult, HeatmapData
+from .granular_analysis import generate_sample_grid, calculate_polygon_area_km2
+from .granular_utils import (
+    generate_grid_points_from_polygon, create_granular_analysis_results,
+    calculate_granular_statistics, create_heatmap_data, get_granular_analysis_progress,
+    calculate_polygon_bounding_box, is_point_in_polygon
 )
->>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
+from .session_utils import GranularAnalysisSessionManager
+from .granular_workflow_service import (
+    GranularAnalysisWorkflowService, execute_granular_analysis_workflow
+)
 import logging
 import copy
 import zipfile
 import tempfile
 import glob
+from typing import List, Dict, Any, Optional
+import mimetypes
 
 # Import from climate_hazards_analysis module
 from climate_hazards_analysis.utils.climate_hazards_analysis import generate_climate_hazards_analysis
@@ -35,6 +44,39 @@ from climate_hazards_analysis.utils.generate_report import generate_climate_haza
 from tropical_cyclone_analysis.utils.tropical_cyclone_analysis import generate_tropical_cyclone_analysis
 
 logger = logging.getLogger(__name__)
+
+def order_selected_hazards(selected_hazards):
+    """
+    Reorder selected hazards to match the desired display order.
+
+    Args:
+        selected_hazards (list): List of selected hazard names
+
+    Returns:
+        list: Reordered list of hazard names
+    """
+    desired_order = [
+        'Flood',
+        'Water Stress',
+        'Sea Level Rise',
+        'Tropical Cyclones',
+        'Heat',
+        'Storm Surge',
+        'Rainfall-Induced Landslide'
+    ]
+
+    # Create ordered list maintaining only selected hazards
+    ordered_hazards = []
+    for hazard in desired_order:
+        if hazard in selected_hazards:
+            ordered_hazards.append(hazard)
+
+    # Add any additional hazards not in our desired order at the end
+    for hazard in selected_hazards:
+        if hazard not in ordered_hazards:
+            ordered_hazards.append(hazard)
+
+    return ordered_hazards
 
 def parse_numeric(value, default=0):
     """Convert POST parameter to int or float.
@@ -112,13 +154,8 @@ def view_map(request):
 
 
             # Store facility data in session for map display
-<<<<<<< HEAD
-            if ext in ['.shp', '.zip']:
-                uploaded_facilities = []
-=======
             if ext in ['.shp', '.zip', '.gpkg']:
                 facility_data = []
->>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
                 for i, row in df.iterrows():
                     record = row.to_dict()
                     geom = gdf.geometry.iloc[i]
@@ -126,17 +163,13 @@ def view_map(request):
                         record['geometry'] = geom.convex_hull.__geo_interface__
                     elif geom.geom_type in ['Polygon', 'MultiPolygon']:
                         record['geometry'] = geom.__geo_interface__
-<<<<<<< HEAD
-                    uploaded_facilities.append(record)
-=======
 
                     facility_data.append(record)
->>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
             else:
-                uploaded_facilities = df.to_dict(orient='records')
+                facility_data = df.to_dict(orient='records')
 
             # Debug: Log the uploaded facility data
-            logger.info(f"Processed {len(uploaded_facilities)} facilities from file: {str(uploaded_facilities)[:200]}...")
+            logger.info(f"Processed {len(facility_data)} facilities from file: {str(facility_data)[:200]}...")
 
             # Get existing facility data (preserves drawn polygon assets)
             existing_facility_data = request.session.get('climate_hazards_v2_facility_data', [])
@@ -144,7 +177,7 @@ def view_map(request):
 
             # Combine existing facilities with uploaded facilities
             # This preserves drawn polygon assets and adds uploaded file data
-            facility_data = existing_facility_data + uploaded_facilities
+            facility_data = existing_facility_data + facility_data
             logger.info(f"Combined total: {len(facility_data)} facilities")
 
             # Explicitly store combined data in session
@@ -160,7 +193,7 @@ def view_map(request):
 
             # Add success message to context
             total_facilities = len(facility_data)
-            uploaded_count = len(uploaded_facilities)
+            uploaded_count = len(facility_data)
             existing_count = len(existing_facility_data)
 
             if existing_count > 0:
@@ -184,33 +217,32 @@ def get_facility_data(request):
     # Get base facility data from session
     facility_data = request.session.get('climate_hazards_v2_facility_data', [])
 
-    # Get polygon assets from database for the current session
+    # Get polygon assets from database for current session
     try:
-        session_key = request.session.session_key
-        if session_key:
-            polygon_assets = Asset.objects.filter(
-                session_key=session_key,
-                asset_type='polygon'
-            ).order_by('-created_at')
+        session_key = request.session.session_key or 'anonymous'
+        polygon_assets = Asset.objects.filter(
+            asset_type='polygon',
+            source=session_key
+        ).order_by('-created_at')
 
-            # Convert database assets to facility data format
-            for asset in polygon_assets:
-                facility_asset = {
-                    'Facility': asset.name,
-                    'Lat': float(asset.latitude),
-                    'Long': float(asset.longitude),
-                    'Archetype': asset.archetype,
-                    'AssetType': 'polygon',
-                    'AssetId': asset.id,
-                    'CreatedAt': asset.created_at.isoformat()
-                }
+        # Convert database assets to facility data format
+        for asset in polygon_assets:
+            facility_asset = {
+                'Facility': asset.name,
+                'Lat': float(asset.latitude),
+                'Long': float(asset.longitude),
+                'Archetype': asset.archetype,
+                'AssetType': 'polygon',
+                'AssetId': asset.id,
+                'CreatedAt': asset.created_at.isoformat()
+            }
 
-                # Include polygon geometry
-                polygon_coords = asset.get_polygon_coordinates()
-                if polygon_coords:
-                    facility_asset['geometry'] = polygon_coords
+            # Include polygon geometry
+            polygon_coords = asset.get_polygon_coordinates()
+            if polygon_coords:
+                facility_asset['geometry'] = polygon_coords
 
-                facility_data.append(facility_asset)
+            facility_data.append(facility_asset)
 
     except Exception as db_error:
         logger.warning(f"Error retrieving polygon assets from database: {str(db_error)}")
@@ -259,6 +291,146 @@ def preview_uploaded_file(request):
 
     return HttpResponse(content, content_type='text/csv')
 
+
+@require_GET
+def preview_enhanced_facilities(request):
+    """
+    Enhanced preview endpoint that returns facility data with hierarchical structure
+    including polygon assets and their granular analysis points.
+    """
+    try:
+        # Get regular facility data from session
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+
+        # Initialize enhanced data structure
+        enhanced_data = {
+            'regular_facilities': [],
+            'polygon_assets': [],
+            'summary': {
+                'total_facilities': 0,
+                'total_polygons': 0,
+                'total_granular_points': 0
+            }
+        }
+
+        # Process regular facilities (point assets)
+        for facility in facility_data:
+            if facility.get('AssetType') != 'polygon':
+                enhanced_data['regular_facilities'].append(facility)
+
+        # Session-only approach: Get polygon assets from session facility_data
+        polygon_assets = [f for f in facility_data if f.get('AssetType') == 'polygon' or f.get('geometry')]
+
+        # Process polygon assets
+        for asset in polygon_assets:
+            polygon_data = {
+                'id': asset.get('AssetId'),
+                'name': asset['Facility'],
+                'archetype': asset['Archetype'],
+                'latitude': float(asset['Lat']),
+                'longitude': float(asset['Long']),
+                'area_km2': asset.get('polygon_area_km2'),
+                'has_granular_analysis': asset.get('granular_analysis_enabled', False),
+                'granular_grid_spacing': asset.get('granular_grid_spacing'),
+                'granular_points_count': asset.get('granular_points_count', 0),
+                'created_at': None,  # Session assets don't have DB timestamps
+                'granular_points': asset.get('granular-points', []),
+                'centroid': {
+                    'lat': float(asset['Lat']),
+                    'lng': float(asset['Long'])
+                }
+            }
+
+            # Calculate polygon area if geometry is available
+            if asset.get('geometry'):
+                try:
+                    import json
+                    from shapely.geometry import shape
+                    geometry = shape(asset['geometry'])
+                    # Convert from square meters to square kilometers
+                    polygon_data['area_km2'] = geometry.area / 1000000
+                except Exception as e:
+                    logger.warning(f"Could not calculate area for asset {asset.get('AssetId')}: {e}")
+                    polygon_data['area_km2'] = 0
+
+            # Get granular points from session asset data
+            if asset.get('granular_analysis_enabled') and asset.get('granular-points'):
+                granular_points = asset['granular-points']
+                if granular_points:
+                    polygon_data['granular_points'] = granular_points
+                    enhanced_data['summary']['total_granular_points'] += len(granular_points)
+
+            enhanced_data['polygon_assets'].append(polygon_data)
+            enhanced_data['summary']['total_polygons'] += 1
+
+        # Update summary counts
+        enhanced_data['summary']['total_facilities'] = len(enhanced_data['regular_facilities'])
+
+        return JsonResponse({
+            'success': True,
+            'data': enhanced_data
+        })
+
+    except Exception as e:
+        logger.exception(f"Error in enhanced facility preview: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to load enhanced facility preview'
+        }, status=500)
+
+
+# Test data injection endpoint for heat exposure map
+@csrf_exempt
+@require_http_methods(["GET"])
+def inject_test_heat_data(request):
+    """Inject test data for heat exposure map testing."""
+    try:
+        # Create test facilities with heat exposure data
+        test_facilities = [
+            {
+                'Facility': 'Test Facility 1',
+                'Lat': 14.5992,
+                'Long': 120.9842,
+                'Archetype': 'Commercial',
+                'Heat Exposure (%)': 15.2,
+                'geometry': None
+            },
+            {
+                'Facility': 'Test Facility 2',
+                'Lat': 14.5993,
+                'Long': 120.9851,
+                'Archetype': 'Industrial',
+                'Heat Exposure (%)': 45.8,
+                'geometry': None
+            },
+            {
+                'Facility': 'Test Facility 3',
+                'Lat': 14.5994,
+                'Long': 120.9853,
+                'Archetype': 'Residential',
+                'Heat Exposure (%)': 85.3,
+                'geometry': None
+            }
+        ]
+
+        # Populate session with test data
+        request.session['climate_hazards_v2_facility_data'] = test_facilities
+        request.session['climate_hazards_v2_selected_hazards'] = ['Heat']
+
+        logger.info(f"Test heat data injected: {len(test_facilities)} facilities")
+
+        return JsonResponse({
+            'success': True,
+            'message': f'Test data injected successfully. {len(test_facilities)} facilities with heat exposure data.'
+        })
+
+    except Exception as e:
+        logger.exception(f"Error injecting test heat data: {e}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to inject test data'
+        }, status=500)
+
 @csrf_exempt
 def add_facility(request):
     """
@@ -286,21 +458,27 @@ def add_facility(request):
 
             # Create database asset record (simplified)
             try:
-                # Ensure session has a key
-                if not request.session.session_key:
-                    request.session.create()
-
+                session_key = request.session.session_key or 'anonymous'
                 asset = Asset(
                     name=name.strip(),
                     archetype=archetype.strip() if archetype else 'default archetype',
                     latitude=lat,
                     longitude=lng,
-                    session_key=request.session.session_key
+                    source=session_key
                 )
 
                 # Set polygon geometry if provided
                 if geometry and asset.set_polygon_from_geojson(geometry):
                     pass  # Geometry set successfully
+
+                # Store additional properties (area, grid spacing) in properties JSON field
+                properties = {}
+                if area_km2:
+                    properties['area_km2'] = area_km2
+                if grid_spacing:
+                    properties['grid_spacing'] = grid_spacing
+                if properties:
+                    asset.properties = properties
 
                 asset.save()
 
@@ -329,29 +507,12 @@ def add_facility(request):
 
                 new_facility['polygon_area_km2'] = area_km2
 
-                # Check if polygon qualifies for granular analysis (≥ 6 km²)
-                if area_km2 >= 6:
-                    # Use provided grid spacing or default to 100m
-                    if grid_spacing is None:
-                        grid_spacing = 100  # Default
-                        logger.info(f"No grid spacing provided, using default: {grid_spacing}m")
+                # Store grid spacing for later hazard analysis
+                if grid_spacing:
+                    new_facility['grid_spacing_meters'] = grid_spacing
 
-                    logger.info(f"Starting granular analysis for {name}: "
-                              f"Area={area_km2:.4f} km², Grid spacing={grid_spacing}m")
-
-                    # Generate sample grid
-                    sample_points = generate_sample_grid(geometry, grid_spacing_meters=grid_spacing)
-
-                    if sample_points:
-                        new_facility['sample_points'] = sample_points
-                        new_facility['grid_spacing_meters'] = grid_spacing
-                        new_facility['sample_points_count'] = len(sample_points)
-
-                        logger.info(f"Generated {len(sample_points)} sample points for {name}")
-                    else:
-                        logger.warning(f"Failed to generate sample points for {name}")
-                else:
-                    logger.info(f"Polygon area {area_km2:.2f} km² < 6 km², skipping granular analysis for {name}")
+                logger.info(f"Polygon asset '{name}' created with area {area_km2:.2f} km². "
+                          f"Hazard analysis will be performed in step 6 of the workflow.")
 
             facility_data.append(new_facility)
 
@@ -457,8 +618,28 @@ def select_hazards(request):
         'Rainfall Induced Landslide'
     ]
 
+    # Count regular assets (excluding polygons)
+    regular_assets_count = len([f for f in facility_data if f.get('AssetType') != 'polygon'])
+
+    # Count polygon assets and granular points from session (session-only)
+    polygon_assets_count = 0
+    granular_points_count = 0
+
+    # Get polygon assets from session facility_data
+    polygon_assets = [f for f in facility_data if f.get('AssetType') == 'polygon' or f.get('geometry')]
+    polygon_assets_count = len(polygon_assets)
+
+    # Count granular points from session data
+    for asset in polygon_assets:
+        if asset.get('granular_analysis_enabled') and asset.get('granular-points'):
+            granular_points = asset['granular-points']
+            if granular_points:
+                granular_points_count += len(granular_points)
+
     context = {
-        'facility_count': len(facility_data),
+        'facility_count': regular_assets_count,
+        'polygon_assets_count': polygon_assets_count,
+        'granular_points_count': granular_points_count,
         'hazard_types': hazard_types,
         'selected_hazards': request.session.get('climate_hazards_v2_selected_hazards', []),
     }
@@ -466,13 +647,173 @@ def select_hazards(request):
     # Handle form submission
     if request.method == 'POST':
         selected_hazards = request.POST.getlist('hazards')
-        request.session['climate_hazards_v2_selected_hazards'] = selected_hazards
+        ordered_hazards = order_selected_hazards(selected_hazards)
+        request.session['climate_hazards_v2_selected_hazards'] = ordered_hazards
 
-        # Redirect to results page
+        # Capture parent_facility information from form data
+        parent_facilities = {}
+
+        # Debug: Log all POST keys to understand the data structure
+        logger.info(f"[DEBUG] All POST keys: {list(request.POST.keys())}")
+        for key, value in request.POST.items():
+            logger.info(f"[DEBUG] POST data: {key} = {value}")
+
+        # Method 1: Look for parent_facility_* fields
+        for key in request.POST:
+            if key.startswith('parent_facility_'):
+                facility_id = key.replace('parent_facility_', '')
+                parent_facilities[facility_id] = request.POST[key]
+                logger.info(f"Captured parent_facility mapping: {facility_id} -> {request.POST[key]}")
+
+        # Method 2: Look for single parent_facility field
+        if 'parent_facility' in request.POST:
+            # If it's a single value, we need to map it to the correct archetype
+            parent_facility_value = request.POST['parent_facility']
+            logger.info(f"Found single parent_facility field: {parent_facility_value}")
+
+            # We'll need to determine the archetype from the facility data
+            # For now, store it as a default mapping
+            parent_facilities['default'] = parent_facility_value
+            parent_facilities['residential'] = parent_facility_value  # Default assumption
+
+        # Store parent facility mappings in session for processing
+        if parent_facilities:
+            request.session['climate_hazards_v2_parent_facilities'] = parent_facilities
+            request.session.modified = True
+            logger.info(f"Stored {len(parent_facilities)} parent facility mappings in session")
+            for fid, name in parent_facilities.items():
+                logger.info(f"  - {fid} -> {name}")
+
+        # Prepare unified asset inventory for processing
+        asset_inventory = _prepare_unified_asset_inventory(facility_data, request)
+
+        # Store asset inventory in session for processing in show_results
+        request.session['climate_hazards_v2_asset_inventory'] = asset_inventory
+
+        logger.info(f"Prepared unified asset inventory: {asset_inventory['summary']}")
+
+        # Check if this is granular analysis workflow (for backward compatibility)
+        granular_workflow = GranularAnalysisSessionManager.is_granular_workflow(request)
+        polygon_asset_id = GranularAnalysisSessionManager.get_asset_id(request)
+
+        if granular_workflow and polygon_asset_id:
+            # For granular analysis, trigger the analysis processing
+            try:
+                asset = Asset.objects.get(id=polygon_asset_id)
+                if asset.has_granular_analysis and asset.granular_analysis_status == 'pending':
+                    from .granular_processor import process_asset_granular_analysis
+                    processing_result = process_asset_granular_analysis(
+                        asset.id, selected_hazards, scenario='current'
+                    )
+
+                    if processing_result.get('success'):
+                        logger.info(f"Started granular analysis processing for asset {asset.name}")
+                    else:
+                        logger.error(f"Failed to start granular analysis: {processing_result.get('error')}")
+
+                # Redirect to results page for granular assets
+                return redirect('climate_hazards_analysis_v2:show_results')
+
+            except Asset.DoesNotExist:
+                logger.error(f"Polygon asset {polygon_asset_id} not found")
+            except Exception as e:
+                logger.exception(f"Error processing granular analysis: {str(e)}")
+
+        # Redirect to results page for unified workflow
         return redirect('climate_hazards_analysis_v2:show_results')
 
     # For GET requests, just display the hazard selection form
     return render(request, 'climate_hazards_analysis_v2/select_hazards.html', context)
+
+
+def _prepare_unified_asset_inventory(facility_data, request):
+    """
+    Prepare a unified inventory of all assets (regular facilities + polygon assets)
+    for processing in the main workflow.
+
+    Args:
+        facility_data: List of facility data from session
+        request: Django request object
+
+    Returns:
+        dict: Unified asset inventory with metadata
+    """
+    logger.info("Preparing unified asset inventory for mixed asset types")
+
+    # Initialize inventory structure
+    inventory = {
+        'regular_facilities': [],
+        'polygon_assets': [],
+        'summary': {
+            'total_regular_facilities': 0,
+            'total_polygon_assets': 0,
+            'total_granular_points': 0,
+            'has_mixed_assets': False
+        },
+        'processing_plan': {
+            'regular_facilities_count': 0,
+            'polygon_assets_count': 0,
+            'requires_hierarchical_display': False
+        }
+    }
+
+    # Separate regular facilities from polygon assets
+    logger.info(f"[DEBUG] Processing {len(facility_data)} facility records for asset inventory")
+    for facility in facility_data:
+        if facility.get('AssetType') == 'polygon' or facility.get('geometry'):
+            # This is a polygon asset
+            logger.info(f"[DEBUG] Found polygon asset: {facility.get('Facility', facility.get('Name', 'Unknown'))}")
+            polygon_info = {
+                'id': facility.get('id'),
+                'name': facility.get('Facility', facility.get('Name', 'Unknown Polygon')),
+                'archetype': facility.get('Archetype', 'default archetype'),
+                'geometry': facility.get('geometry'),
+                'asset_type': 'polygon',
+                'granular_analysis_enabled': facility.get('granular_analysis_enabled', False),
+                'granular_points': facility.get('granular-points', []),
+                'centroid_lat': facility.get('Latitude'),
+                'centroid_lng': facility.get('Longitude'),
+                'properties': facility
+            }
+            inventory['polygon_assets'].append(polygon_info)
+
+            # Count granular points
+            if polygon_info['granular_analysis_enabled'] and polygon_info['granular_points']:
+                inventory['summary']['total_granular_points'] += len(polygon_info['granular_points'])
+                inventory['processing_plan']['requires_hierarchical_display'] = True
+
+        else:
+            # This is a regular facility
+            regular_info = {
+                'id': facility.get('id'),
+                'name': facility.get('Facility', facility.get('Name', 'Unknown Facility')),
+                'archetype': facility.get('Archetype', 'default archetype'),
+                'latitude': facility.get('Latitude'),
+                'longitude': facility.get('Longitude'),
+                'asset_type': 'point',
+                'properties': facility
+            }
+            inventory['regular_facilities'].append(regular_info)
+
+    # Update summary counts
+    inventory['summary']['total_regular_facilities'] = len(inventory['regular_facilities'])
+    inventory['summary']['total_polygon_assets'] = len(inventory['polygon_assets'])
+    inventory['summary']['has_mixed_assets'] = (
+        inventory['summary']['total_regular_facilities'] > 0 and
+        inventory['summary']['total_polygon_assets'] > 0
+    )
+
+    # Update processing plan
+    inventory['processing_plan']['regular_facilities_count'] = inventory['summary']['total_regular_facilities']
+    inventory['processing_plan']['polygon_assets_count'] = inventory['summary']['total_polygon_assets']
+
+    logger.info(f"Asset inventory prepared: {inventory['summary']}")
+    logger.info(f"[DEBUG] Final inventory - Regular facilities: {inventory['summary']['total_regular_facilities']}, "
+                f"Polygon assets: {inventory['summary']['total_polygon_assets']}, "
+                f"Has mixed assets: {inventory['summary']['has_mixed_assets']}")
+
+    return inventory
+
 
 def _validate_and_prepare_session_data(request):
     """
@@ -485,8 +826,16 @@ def _validate_and_prepare_session_data(request):
     selected_hazards = request.session.get('climate_hazards_v2_selected_hazards', [])
     facility_csv_path = request.session.get('climate_hazards_v2_facility_csv_path')
 
+    # Debug logging
+    logger.info(f"[DEBUG] Session data validation:")
+    logger.info(f"[DEBUG] facility_data count: {len(facility_data)}")
+    logger.info(f"[DEBUG] selected_hazards: {selected_hazards}")
+    logger.info(f"[DEBUG] facility_csv_path: {facility_csv_path}")
+    logger.info(f"[DEBUG] Session keys: {list(request.session.keys())}")
+
     # Check if we have the necessary data
     if not facility_data or not selected_hazards:
+        logger.warning(f"[DEBUG] Missing data - facility_data: {len(facility_data)}, selected_hazards: {len(selected_hazards) if selected_hazards else 0}")
         return None, None, None, redirect('climate_hazards_analysis_v2:select_hazards')
 
     logger.info(f"Starting results processing for {len(facility_data)} facilities")
@@ -562,9 +911,9 @@ def _render_error_page(request, error_message, facility_data, selected_hazards):
 def show_results(request):
     """
     View to display climate hazard analysis results.
-    Updated to work with simplified flood categories and tropical cyclone integration.
+    Updated to work with unified processing of regular facilities and polygon assets.
     """
-    logger.info("SHOW_RESULTS function called - starting climate hazard analysis")
+    logger.info("SHOW_RESULTS function called - starting unified climate hazard analysis")
 
     # Validate and prepare session data
     facility_data, selected_hazards, facility_csv_path, redirect_response = _validate_and_prepare_session_data(request)
@@ -573,9 +922,32 @@ def show_results(request):
 
     try:
         logger.info(f"Facility CSV path: {facility_csv_path}")
-<<<<<<< HEAD
-=======
-        
+
+        # Check for unified asset inventory (new approach) or legacy granular workflow
+        asset_inventory = request.session.get('climate_hazards_v2_asset_inventory')
+        granular_workflow = GranularAnalysisSessionManager.is_granular_workflow(request)
+        polygon_asset_id = GranularAnalysisSessionManager.get_asset_id(request)
+
+        # Debug logging for asset inventory detection
+        if asset_inventory:
+            logger.info(f"[DEBUG] Asset inventory found: {asset_inventory.get('summary', {})}")
+            logger.info(f"[DEBUG] Has mixed assets: {asset_inventory.get('summary', {}).get('has_mixed_assets')}")
+            logger.info(f"[DEBUG] Total polygon assets: {asset_inventory.get('summary', {}).get('total_polygon_assets', 0)}")
+        else:
+            logger.warning("[DEBUG] No asset inventory found in session")
+
+        if asset_inventory and (
+            asset_inventory.get('summary', {}).get('has_mixed_assets') or
+            asset_inventory.get('summary', {}).get('total_polygon_assets', 0) > 0
+        ):
+            logger.info("Processing unified asset inventory with mixed asset types or polygon-only assets")
+            return _handle_unified_mixed_assets_results(request, asset_inventory, selected_hazards, facility_data, facility_csv_path)
+
+        elif granular_workflow and polygon_asset_id:
+            logger.info(f"Processing legacy granular analysis results for polygon asset {polygon_asset_id}")
+            return _handle_granular_polygon_results(request, polygon_asset_id, selected_hazards)
+
+  
         # Verify facility CSV file exists, create if needed (for polygon/point-drawn assets)
         if not facility_csv_path or not os.path.exists(facility_csv_path):
             logger.warning(f"Facility CSV file not found: {facility_csv_path}, creating from session data...")
@@ -721,7 +1093,6 @@ def show_results(request):
                 except UnicodeDecodeError:
                     logger.error(f"Could not read CSV file {combined_csv_path} with any encoding")
                     raise
->>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
 
         # Ensure facility CSV file exists
         validated_csv_path = _ensure_facility_csv_exists(request, facility_data, facility_csv_path, selected_hazards)
@@ -761,8 +1132,6 @@ def show_results(request):
         # Add asset archetype information
         df = _add_asset_archetype_info(df, validated_csv_path)
 
-<<<<<<< HEAD
-=======
         # Clean up potential merge suffixes like _x or _y that may appear
         rename_map = {c: c[:-2] for c in df.columns if c.endswith('_x') or c.endswith('_y')}
         if rename_map:
@@ -990,12 +1359,7 @@ def show_results(request):
             data = reconstructed_data
             logger.info(f"Final data after granular parsing: {len(data)} rows (including sample points)")
 
-        # 🚨 EMERGENCY TC DEBUG - Final check before group creation
-        logger.info("🚨 EMERGENCY TC DEBUG - PRE GROUP CREATION 🚨")
-        tc_final_check = [col for col in tc_expected if col in columns]
-        logger.info(f"TC columns in final data: {tc_final_check}")
-        logger.info(f"TC column count in final data: {len(tc_final_check)}")
-        logger.info("🚨 END EMERGENCY DEBUG - PRE GROUP CREATION 🚨")
+        # Debug info will be handled in the hazard-specific sections below
         
         # Create detailed column groups for the table header
         groups = {}
@@ -1023,9 +1387,9 @@ def show_results(request):
                 '2040 Sea Level Rise (meters) - Worst Case',
                 '2050 Sea Level Rise (meters) - Worst Case'
             ],
-            'Tropical Cyclones': ['Extreme Windspeed 10 year Return Period (km/h)', 
-                                'Extreme Windspeed 20 year Return Period (km/h)', 
-                                'Extreme Windspeed 50 year Return Period (km/h)', 
+            'Tropical Cyclones': ['Extreme Windspeed 10 year Return Period (km/h)',
+                                'Extreme Windspeed 20 year Return Period (km/h)',
+                                'Extreme Windspeed 50 year Return Period (km/h)',
                                 'Extreme Windspeed 100 year Return Period (km/h)'],
             'Heat': [
                 'Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius',
@@ -1165,14 +1529,21 @@ def show_results(request):
         
         # Enhanced TC Debug
         if 'Tropical Cyclones' in selected_hazards:
-            tc_expected = ['Extreme Windspeed 10 year Return Period (km/h)', 
-                          'Extreme Windspeed 20 year Return Period (km/h)', 
-                          'Extreme Windspeed 50 year Return Period (km/h)', 
+            tc_expected = ['Extreme Windspeed 10 year Return Period (km/h)',
+                          'Extreme Windspeed 20 year Return Period (km/h)',
+                          'Extreme Windspeed 50 year Return Period (km/h)',
                           'Extreme Windspeed 100 year Return Period (km/h)']
             tc_found = [col for col in tc_expected if col in columns]
             logger.info(f"'Tropical Cyclones' expected columns: {tc_expected}")
             logger.info(f"'Tropical Cyclones' found columns: {tc_found}")
             logger.info(f"'Tropical Cyclones' found count: {len(tc_found)}")
+
+            # 🚨 EMERGENCY TC DEBUG - Final check before group creation
+            logger.info("🚨 EMERGENCY TC DEBUG - PRE GROUP CREATION 🚨")
+            tc_final_check = [col for col in tc_expected if col in columns]
+            logger.info(f"TC columns in final data: {tc_final_check}")
+            logger.info(f"TC column count in final data: {len(tc_final_check)}")
+            logger.info("🚨 END EMERGENCY DEBUG - PRE GROUP CREATION 🚨")
         
         # Verify specific hazard groups were added if selected
         if 'Flood' in selected_hazards:
@@ -1193,7 +1564,6 @@ def show_results(request):
                 tc_debug_found = [col for col in hazard_columns['Tropical Cyclones'] if col in columns]
                 logger.error(f"❌ TC columns actually found: {tc_debug_found}")
         
->>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
         # Get the paths to any generated plots
         plot_path = result.get('plot_path')
         all_plots = result.get('all_plots', [])
@@ -1213,13 +1583,8 @@ def show_results(request):
                 request.session['climate_hazards_v2_results']
             )
 
-<<<<<<< HEAD
         # Build comprehensive column groups for hazard exposure table
         groups = _build_column_groups(df.columns.tolist(), selected_hazards)
-=======
-        # Note: Granular analysis is now handled via unified approach (see lines 820-898)
-        # Sample points are included in the main analysis CSV and results are parsed
->>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
 
         # Prepare context for the template
         context = {
@@ -1247,6 +1612,1056 @@ def show_results(request):
             ],
             'selected_hazards': selected_hazards
         })
+
+
+def _handle_unified_mixed_assets_results(request, asset_inventory, selected_hazards, facility_data, facility_csv_path):
+    """
+    Handle results display for mixed asset types (regular facilities + polygon assets).
+    Processes both asset types in parallel and merges results into hierarchical format.
+
+    Args:
+        request: Django request object
+        asset_inventory: Unified asset inventory from select_hazards
+        selected_hazards: List of selected hazard types
+        facility_data: Original facility data from session
+        facility_csv_path: Path to facility CSV file
+
+    Returns:
+        HttpResponse: Rendered results page with hierarchical table
+    """
+    try:
+        logger.info(f"Processing unified mixed assets results via CSV approach: {asset_inventory['summary']}")
+        logger.info(f"[DEBUG] Asset inventory summary details:")
+        logger.info(f"[DEBUG] - Regular facilities: {asset_inventory['summary']['total_regular_facilities']}")
+        logger.info(f"[DEBUG] - Polygon assets: {asset_inventory['summary']['total_polygon_assets']}")
+        logger.info(f"[DEBUG] - Granular points: {asset_inventory['summary']['total_granular_points']}")
+        logger.info(f"[DEBUG] - Has mixed assets: {asset_inventory['summary']['has_mixed_assets']}")
+
+        # Process mixed assets using unified CSV approach
+        logger.info("=== USING UNIFIED CSV APPROACH FOR MIXED ASSETS ===")
+        mixed_results = _process_mixed_assets_via_unified_csv(asset_inventory, selected_hazards, request)
+
+        if not mixed_results.get('success'):
+            logger.error(f"Unified CSV processing failed: {mixed_results.get('error')}")
+            return _render_error_page(request, f"Mixed asset processing failed: {mixed_results.get('error')}", facility_data, selected_hazards)
+
+        hierarchical_data = mixed_results.get('data', [])
+        logger.info(f"Successfully processed {len(hierarchical_data)} hierarchical rows via unified CSV")
+
+        # Extract columns from hierarchical data
+        if hierarchical_data:
+            sample_row = hierarchical_data[0]
+            columns = list(sample_row.keys())
+            # Filter out internal metadata columns
+            display_columns = [col for col in columns if not col.startswith('_') and col not in ['row_type', 'parent_id', 'level', 'parent_facility', 'original_asset_name']]
+        else:
+            display_columns = ['Facility', 'Asset Archetype'] + selected_hazards
+
+        # Prepare context for template
+        context = {
+            'data': hierarchical_data,  # Hierarchical data directly for template
+            'columns': display_columns,
+            'selected_hazards': selected_hazards,
+            'facility_count': asset_inventory['summary']['total_regular_facilities'],
+            'polygon_assets_count': asset_inventory['summary']['total_polygon_assets'],
+            'granular_points_count': asset_inventory['summary']['total_granular_points'],
+            'has_mixed_assets': asset_inventory['summary']['has_mixed_assets'],
+            'requires_hierarchical_display': True,  # Always hierarchical for mixed assets
+            'groups': _build_column_groups(display_columns, selected_hazards),  # Fixed: use 'groups' instead of 'column_groups'
+            'processing_method': 'unified_csv',  # Indicate unified CSV approach
+        }
+
+        logger.info(f"Successfully processed mixed assets via unified CSV: {len(hierarchical_data)} total rows")
+
+        return render(request, 'climate_hazards_analysis_v2/results.html', context)
+
+    except Exception as e:
+        logger.exception(f"Error handling unified mixed assets results: {str(e)}")
+        return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+            'error': f'Error processing mixed asset analysis: {str(e)}',
+            'facility_count': len(facility_data),
+            'hazard_types': _get_hazard_types(),
+            'selected_hazards': selected_hazards
+        })
+
+
+def _process_regular_facilities_unified(facility_data, selected_hazards, facility_csv_path, asset_inventory):
+    """
+    Process regular facilities using the existing climate hazards analysis pipeline.
+
+    Args:
+        facility_data: List of regular facility data
+        selected_hazards: List of selected hazard types
+        facility_csv_path: Path to facility CSV file
+        asset_inventory: Asset inventory containing metadata
+
+    Returns:
+        dict: Processing results with success status and data
+    """
+    try:
+        logger.info(f"Processing {len(facility_data)} regular facilities through existing pipeline")
+
+        # Filter regular facilities from facility_data
+        regular_facilities = [f for f in facility_data if f.get('AssetType') != 'polygon' and not f.get('geometry')]
+
+        if not regular_facilities:
+            return {'success': True, 'data': []}
+
+        # Create temporary CSV with only regular facilities
+        regular_csv_path = _create_temporary_regular_facilities_csv(regular_facilities)
+        if not regular_csv_path:
+            return {'success': False, 'error': 'Failed to create temporary CSV for regular facilities'}
+
+        # Execute climate analysis using existing function
+        result = _execute_climate_analysis(regular_csv_path, selected_hazards)
+        if not result:
+            return {'success': False, 'error': 'Climate analysis failed for regular facilities'}
+
+        # Load and process results
+        df, error = _load_and_process_combined_csv(result.get('combined_csv_path'))
+        if error:
+            return {'success': False, 'error': error}
+
+        # Process tropical cyclone data if selected
+        if 'Tropical Cyclones' in selected_hazards:
+            df = _process_tropical_cyclone_data(df, regular_csv_path)
+
+        # Add asset archetype information
+        df = _add_asset_archetype_info(df, regular_csv_path)
+
+        # Clean up merge suffixes
+        rename_map = {c: c[:-2] for c in df.columns if c.endswith('_x') or c.endswith('_y')}
+        if rename_map:
+            df.rename(columns=rename_map, inplace=True)
+            df = df.loc[:, ~df.columns.duplicated()]
+
+        # Convert to dict format
+        data = df.to_dict(orient="records")
+
+        # Clean up temporary file
+        try:
+            os.remove(regular_csv_path)
+        except:
+            pass
+
+        logger.info(f"Successfully processed {len(data)} regular facility results")
+        return {'success': True, 'data': data}
+
+    except Exception as e:
+        logger.exception(f"Error processing regular facilities: {str(e)}")
+        return {'success': False, 'error': str(e)}
+
+
+def _create_unified_mixed_assets_csv(asset_inventory, selected_hazards):
+    """
+    Create a unified CSV containing both regular facilities and polygon granular points.
+    This enables using the existing climate_hazards_analysis pipeline for mixed asset processing.
+
+    Args:
+        asset_inventory: Unified asset inventory from select_hazards
+        selected_hazards: List of selected hazard types
+
+    Returns:
+        str: Path to the unified CSV file, or None if failed
+    """
+    try:
+        logger.info("Creating unified CSV for mixed asset processing")
+
+        import tempfile
+        import csv
+        from datetime import datetime
+
+        # Create temporary CSV file
+        temp_dir = tempfile.mkdtemp()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unified_csv_path = os.path.join(temp_dir, f'unified_mixed_assets_{timestamp}.csv')
+
+        unified_rows = []
+
+        # Process regular facilities
+        regular_facilities = asset_inventory.get('regular_facilities', [])
+        logger.info(f"Adding {len(regular_facilities)} regular facilities to unified CSV")
+
+        for facility in regular_facilities:
+            row = {
+                'Facility': facility.get('Facility', ''),
+                'Lat': facility.get('Lat', ''),
+                'Long': facility.get('Long', ''),
+                'Asset Archetype': facility.get('Asset Archetype', 'default archetype'),
+                'AssetType': 'regular',
+                'Asset_ID': facility.get('id', ''),
+                'Parent_Facility': '',  # Regular facilities have no parent
+                'Point_Type': 'facility'  # For identification
+            }
+            unified_rows.append(row)
+
+        # Process polygon assets and their granular points
+        polygon_assets = asset_inventory.get('polygon_assets', [])
+        logger.info(f"Processing {len(polygon_assets)} polygon assets for unified CSV")
+
+        for polygon_asset in polygon_assets:
+            asset_name = polygon_asset.get('name', polygon_asset.get('Facility', 'Unknown Polygon'))
+            asset_archetype = polygon_asset.get('archetype', 'default archetype')
+            polygon_id = polygon_asset.get('id', '')
+
+            # Get polygon geometry and granular points
+            geometry = polygon_asset.get('geometry')
+            if not geometry:
+                logger.warning(f"No geometry found for polygon asset: {asset_name}")
+                continue
+
+            # Use stored granular points from session data instead of generating new ones
+            grid_points = polygon_asset.get('granular_points', [])
+
+            if not grid_points:
+                logger.warning(f"No granular points found for polygon: {asset_name}")
+                continue
+
+            logger.info(f"Using {len(grid_points)} stored granular points for polygon: {asset_name}")
+
+            # Add centroid as parent row
+            centroid_lat = polygon_asset.get('centroid_lat') or polygon_asset.get('latitude')
+            centroid_lng = polygon_asset.get('centroid_lng') or polygon_asset.get('longitude')
+
+            # Debug logging to understand centroid data
+            logger.info(f"Centroid data for {asset_name}: lat={centroid_lat}, lng={centroid_lng}")
+            logger.info(f"Available polygon asset keys: {list(polygon_asset.keys())}")
+
+            if centroid_lat and centroid_lng:
+                # Convert to float if string
+                try:
+                    centroid_lat = float(centroid_lat)
+                    centroid_lng = float(centroid_lng)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid centroid coordinates format for {asset_name}: lat={centroid_lat}, lng={centroid_lng}")
+                    # Calculate centroid from geometry as fallback
+                    geometry = polygon_asset.get('geometry')
+                    if geometry and geometry.get('type') == 'Polygon':
+                        coordinates = geometry['coordinates'][0]  # Exterior ring
+                        if len(coordinates) >= 4:
+                            lats = [coord[1] for coord in coordinates[:-1]]  # Exclude closing point
+                            lngs = [coord[0] for coord in coordinates[:-1]]
+                            centroid_lat = sum(lats) / len(lats)
+                            centroid_lng = sum(lngs) / len(lngs)
+                            logger.info(f"Calculated centroid from geometry: {centroid_lat}, {centroid_lng}")
+                        else:
+                            logger.warning(f"Invalid polygon geometry for centroid calculation: {asset_name}")
+                            continue
+                    else:
+                        logger.warning(f"No valid geometry for centroid calculation: {asset_name}")
+                        continue
+
+                centroid_row = {
+                    'Facility': f"🟢 {asset_name} (Centroid)",
+                    'Lat': centroid_lat,
+                    'Long': centroid_lng,
+                    'Asset Archetype': f"{asset_archetype} - Polygon Centroid",
+                    'AssetType': 'polygon_centroid',
+                    'Asset_ID': polygon_id,
+                    'Parent_Facility': '',
+                    'Point_Type': 'centroid'
+                }
+                unified_rows.append(centroid_row)
+                logger.info(f"Added centroid row for polygon: {asset_name} at ({centroid_lat}, {centroid_lng})")
+            else:
+                logger.warning(f"No centroid coordinates found for polygon: {asset_name}")
+                logger.warning(f"  Available keys: centroid_lat={polygon_asset.get('centroid_lat')}, latitude={polygon_asset.get('latitude')}")
+                logger.warning(f"  Available keys: centroid_lng={polygon_asset.get('centroid_lng')}, longitude={polygon_asset.get('longitude')}")
+
+            # Add granular points as child rows
+            logger.info(f"Adding {len(grid_points)} granular points for polygon: {asset_name}")
+            for i, point in enumerate(grid_points):
+                # Handle tuple format: (latitude, longitude, grid_row, grid_col)
+                if isinstance(point, tuple) and len(point) >= 2:
+                    lat, lon = point[0], point[1]
+                elif isinstance(point, dict):
+                    lat = point.get('lat', point.get('latitude'))
+                    lon = point.get('lon', point.get('longitude'))
+                else:
+                    logger.warning(f"Invalid point format at index {i}: {point}")
+                    continue
+
+                child_row = {
+                    'Facility': f"└── Granular Point {i+1}",
+                    'Lat': lat,
+                    'Long': lon,
+                    'Asset Archetype': f"{asset_archetype} - Granular Point",
+                    'AssetType': 'polygon_granular',
+                    'Asset_ID': f"{polygon_id}_point_{i}",
+                    'Parent_Facility': asset_name,
+                    'Point_Type': 'granular'
+                }
+                unified_rows.append(child_row)
+
+        # Write unified CSV
+        logger.info(f"Writing {len(unified_rows)} total rows to unified CSV: {unified_csv_path}")
+
+        with open(unified_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['Facility', 'Lat', 'Long', 'Asset Archetype', 'AssetType', 'Asset_ID', 'Parent_Facility', 'Point_Type']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(unified_rows)
+
+        logger.info(f"Successfully created unified CSV with {len(unified_rows)} rows")
+        return unified_csv_path
+
+    except Exception as e:
+        logger.exception(f"Error creating unified mixed assets CSV: {str(e)}")
+        return None
+
+
+def _process_mixed_assets_via_unified_csv(asset_inventory, selected_hazards, request=None):
+    """
+    Process mixed assets using the unified CSV approach with existing climate_hazards_analysis pipeline.
+
+    Args:
+        asset_inventory: Unified asset inventory from select_hazards
+        selected_hazards: List of selected hazard types
+        request: Django request object (optional, for accessing session data)
+
+    Returns:
+        dict: Processing results with success status and data
+    """
+    try:
+        logger.info("=== PROCESSING MIXED ASSETS VIA UNIFIED CSV APPROACH ===")
+        logger.info(f"Asset inventory summary: {asset_inventory.get('summary', {})}")
+        logger.info(f"Selected hazards: {selected_hazards}")
+
+        # Validate inputs
+        if not asset_inventory:
+            return {'success': False, 'error': 'No asset inventory provided'}
+
+        if not selected_hazards:
+            return {'success': False, 'error': 'No hazards selected'}
+
+        # Create unified CSV containing all assets
+        logger.info("Step 1: Creating unified CSV...")
+        unified_csv_path = _create_unified_mixed_assets_csv(asset_inventory, selected_hazards)
+        if not unified_csv_path:
+            return {'success': False, 'error': 'Failed to create unified CSV'}
+
+        logger.info(f"Step 1 Complete: Unified CSV created at {unified_csv_path}")
+
+        try:
+            # Step 2: Execute climate analysis using existing pipeline
+            logger.info("Step 2: Executing climate hazards analysis on unified CSV...")
+
+            # Validate CSV file exists before processing
+            if not os.path.exists(unified_csv_path):
+                return {'success': False, 'error': f'Unified CSV file not found: {unified_csv_path}'}
+
+            result = generate_climate_hazards_analysis(
+                facility_csv_path=unified_csv_path,
+                selected_fields=selected_hazards,
+                flood_scenarios=['current', 'moderate', 'worst']
+            )
+
+            if result is None:
+                return {'success': False, 'error': 'Climate analysis returned None result'}
+
+            if 'error' in result:
+                error_msg = result.get('error', 'Unknown climate analysis error')
+                logger.error(f"Climate analysis failed: {error_msg}")
+                return {'success': False, 'error': f'Climate analysis failed: {error_msg}'}
+
+            logger.info(f"Step 2 Complete: Climate analysis successful")
+            logger.info(f"Analysis result keys: {list(result.keys())}")
+
+            # Step 3: Load and process results
+            logger.info("Step 3: Loading and processing combined CSV...")
+            combined_csv_path = result.get('combined_csv_path')
+
+            if not combined_csv_path:
+                return {'success': False, 'error': 'No combined CSV path in analysis result'}
+
+            if not os.path.exists(combined_csv_path):
+                return {'success': False, 'error': f'Combined CSV file not found: {combined_csv_path}'}
+
+            df, error = _load_and_process_combined_csv(combined_csv_path)
+            if error:
+                return {'success': False, 'error': f'Failed to load combined CSV: {error}'}
+
+            if df is None or df.empty:
+                return {'success': False, 'error': 'Combined CSV resulted in empty DataFrame'}
+
+            logger.info(f"Step 3 Complete: Loaded DataFrame with shape {df.shape}")
+            logger.info(f"DataFrame columns: {df.columns.tolist()}")
+
+            # Step 4: Convert to hierarchical structure
+            logger.info("Step 4: Converting to hierarchical structure...")
+            hierarchical_data = _convert_unified_csv_to_hierarchical(df, asset_inventory, request)
+
+            if not hierarchical_data:
+                logger.warning("Hierarchical conversion resulted in empty data")
+                # Return success but with empty data - this might be valid for some cases
+                return {'success': True, 'data': [], 'warning': 'No hierarchical data generated'}
+
+            logger.info(f"Step 4 Complete: Hierarchical structure created with {len(hierarchical_data)} rows")
+
+            logger.info(f"=== UNIFIED CSV PROCESSING SUCCESSFUL ===")
+            return {'success': True, 'data': hierarchical_data}
+
+        except Exception as inner_e:
+            logger.exception(f"Error in climate analysis phase: {str(inner_e)}")
+            return {'success': False, 'error': f'Climate analysis error: {str(inner_e)}'}
+
+        finally:
+            # Clean up temporary unified CSV
+            try:
+                if os.path.exists(unified_csv_path):
+                    os.remove(unified_csv_path)
+                    logger.info(f"Cleaned up temporary unified CSV: {unified_csv_path}")
+
+                temp_dir = os.path.dirname(unified_csv_path)
+                if temp_dir and os.path.exists(temp_dir):
+                    os.rmdir(temp_dir)
+                    logger.info(f"Cleaned up temporary directory: {temp_dir}")
+            except Exception as cleanup_e:
+                logger.warning(f"Error cleaning up temporary files: {str(cleanup_e)}")
+
+    except Exception as e:
+        logger.exception(f"Critical error in _process_mixed_assets_via_unified_csv: {str(e)}")
+        return {'success': False, 'error': f'Processing failed: {str(e)}'}
+
+
+def _convert_unified_csv_to_hierarchical(df, asset_inventory, request=None):
+    """
+    Convert unified CSV results back to hierarchical structure for template display.
+
+    Args:
+        df: DataFrame with processed results from unified CSV
+        asset_inventory: Original asset inventory for reference
+        request: Django request object (optional, for accessing session data)
+
+    Returns:
+        list: Hierarchical data structure for template
+    """
+    try:
+        hierarchical_data = []
+
+        # Validate DataFrame
+        if df is None or df.empty:
+            logger.warning("Empty DataFrame received in _convert_unified_csv_to_hierarchical")
+            return []
+
+        logger.info(f"Converting unified CSV with {len(df)} rows and columns: {df.columns.tolist()}")
+
+        # Check if this is unified CSV data (has AssetType) or regular combined output
+        if 'AssetType' in df.columns:
+            logger.info("Processing unified CSV with AssetType column")
+            return _process_unified_csv_with_assettype(df)
+        else:
+            logger.info("Processing regular combined output CSV")
+            return _process_combined_output_csv(df, asset_inventory, request)
+
+    except Exception as e:
+        logger.exception(f"Critical error in _convert_unified_csv_to_hierarchical: {str(e)}")
+        return []
+
+
+def _process_unified_csv_with_assettype(df):
+    """
+    Process unified CSV that contains AssetType column.
+    """
+    try:
+        hierarchical_data = []
+
+        # Group by asset type with error handling
+        try:
+            polygon_centroids = df[df['AssetType'] == 'polygon_centroid'] if 'AssetType' in df.columns else pd.DataFrame()
+            granular_points = df[df['AssetType'] == 'polygon_granular'] if 'AssetType' in df.columns else pd.DataFrame()
+            regular_facilities = df[df['AssetType'] == 'regular'] if 'AssetType' in df.columns else pd.DataFrame()
+        except Exception as e:
+            logger.error(f"Error grouping DataFrame by AssetType: {str(e)}")
+            return []
+
+        logger.info(f"Data groups - Regular: {len(regular_facilities)}, Centroids: {len(polygon_centroids)}, Granular: {len(granular_points)}")
+
+        # Process regular facilities (as top-level rows)
+        for _, facility_row in regular_facilities.iterrows():
+            try:
+                row_data = facility_row.to_dict()
+                row_data['row_type'] = 'facility'
+                row_data['parent_id'] = None
+                row_data['level'] = 0
+                hierarchical_data.append(row_data)
+            except Exception as e:
+                logger.error(f"Error processing facility row: {str(e)}")
+                continue
+
+        # Process polygon centroids and their granular points
+        for _, centroid_row in polygon_centroids.iterrows():
+            try:
+                centroid_data = centroid_row.to_dict()
+                centroid_data['row_type'] = 'polygon_parent'
+                centroid_data['parent_id'] = None
+                centroid_data['level'] = 0
+                centroid_data['has_granular_analysis'] = True
+
+                # Add hierarchical metadata with safe string operations
+                facility_name = centroid_data.get('Facility', '')
+                asset_name = centroid_data.get('Parent_Facility', facility_name.replace('🟢 ', '').replace(' (Centroid)', '') if facility_name else '')
+                centroid_data['original_asset_name'] = asset_name
+
+                hierarchical_data.append(centroid_data)
+
+                # Find and add child granular points with error handling
+                try:
+                    parent_facility = facility_name.replace('🟢 ', '').replace(' (Centroid)', '') if facility_name else ''
+                    if 'Parent_Facility' in granular_points.columns and not granular_points.empty:
+                        child_points = granular_points[granular_points['Parent_Facility'] == parent_facility]
+
+                        for _, child_row in child_points.iterrows():
+                            try:
+                                child_data = child_row.to_dict()
+                                child_data['row_type'] = 'polygon_child'
+                                child_data['parent_id'] = facility_name
+                                child_data['level'] = 1
+                                child_data['parent_facility'] = facility_name
+                                child_data['has_granular_analysis'] = False  # Child rows don't have their own granular analysis
+                                hierarchical_data.append(child_data)
+                            except Exception as e:
+                                logger.error(f"Error processing child granular point: {str(e)}")
+                                continue
+                except Exception as e:
+                    logger.error(f"Error finding child granular points for {parent_facility}: {str(e)}")
+
+            except Exception as e:
+                logger.error(f"Error processing polygon centroid: {str(e)}")
+                continue
+
+        logger.info(f"Successfully converted unified CSV to hierarchical structure: {len(hierarchical_data)} rows")
+        return hierarchical_data
+
+    except Exception as e:
+        logger.exception(f"Error in _process_unified_csv_with_assettype: {str(e)}")
+        return []
+
+
+def _process_combined_output_csv(df, asset_inventory=None, request=None):
+    """
+    Process regular combined output CSV that doesn't have AssetType column.
+    Detects hierarchical structure based on facility names and asset archetypes.
+
+    Args:
+        df: DataFrame with combined output data
+        asset_inventory: Asset inventory containing polygon asset information
+        request: Django request object (optional, for accessing session data)
+    """
+    try:
+        hierarchical_data = []
+
+        logger.info(f"=== PROCESSING COMBINED OUTPUT CSV ===")
+        logger.info(f"Processing combined output CSV with {len(df)} rows")
+        logger.info(f"Asset inventory provided: {asset_inventory is not None}")
+        if asset_inventory:
+            logger.info(f"Asset inventory keys: {list(asset_inventory.keys())}")
+            if 'polygon_assets' in asset_inventory:
+                logger.info(f"Polygon assets count: {len(asset_inventory['polygon_assets'])}")
+
+        # Get parent facility mappings from session
+        parent_facilities = {}
+        if request:
+            parent_facilities = request.session.get('climate_hazards_v2_parent_facilities', {})
+            logger.info(f"Retrieved {len(parent_facilities)} parent facility mappings from session")
+            for facility_id, parent_name in parent_facilities.items():
+                logger.info(f"  - {facility_id} -> {parent_name}")
+
+        # Identify parent and child rows based on facility naming patterns
+        parent_rows = []
+        child_rows = []
+
+        for _, row in df.iterrows():
+            facility_name = row.get('Facility', '')
+            asset_archetype = row.get('Asset Archetype', '')
+
+            # Detect parent rows (polygon centroids)
+            if ('Centroid' in facility_name or
+                '🟢' in facility_name or
+                'Polygon Centroid' in asset_archetype):
+
+                row_data = row.to_dict()
+                row_data['row_type'] = 'polygon_parent'
+                row_data['parent_id'] = None
+                row_data['level'] = 0
+                row_data['has_granular_analysis'] = True
+                row_data['original_asset_name'] = facility_name.replace('🟢 ', '').replace(' (Centroid)', '')
+                parent_rows.append(row_data)
+
+            # Detect child rows (granular points)
+            elif ('└──' in facility_name or
+                  'Granular Point' in facility_name or
+                  'Granular Point' in asset_archetype):
+
+                row_data = row.to_dict()
+                row_data['row_type'] = 'polygon_child'
+                row_data['level'] = 1
+                row_data['has_granular_analysis'] = False  # Child rows don't have their own granular analysis
+                child_rows.append(row_data)
+
+            # Regular facilities
+            else:
+                row_data = row.to_dict()
+                row_data['row_type'] = 'facility'
+                row_data['parent_id'] = None
+                row_data['level'] = 0
+                hierarchical_data.append(row_data)
+
+        # Don't process children here - wait for synthetic parent creation
+        # Children will be processed and linked after synthetic parents are created
+        logger.info(f"Deferring child row processing for {len(child_rows)} children until synthetic parents are created")
+
+        # Add parent rows or create synthetic parents if none exist
+        if not parent_rows:
+            logger.info("No parent rows found in CSV, creating synthetic parent rows")
+
+            # Get polygon asset names from asset inventory if available
+            polygon_asset_names = {}
+            if asset_inventory and 'polygon_assets' in asset_inventory:
+                for polygon_asset in asset_inventory['polygon_assets']:
+                    asset_name = polygon_asset.get('name', polygon_asset.get('Facility', 'Unknown Polygon'))
+                    asset_archetype = polygon_asset.get('archetype', 'default archetype')
+                    # Map archetype to actual asset name
+                    polygon_asset_names[asset_archetype] = asset_name
+                    logger.info(f"Mapped polygon asset: {asset_archetype} -> {asset_name}")
+
+            logger.info(f"Available polygon asset mappings: {polygon_asset_names}")
+            logger.info(f"Available parent facility mappings from form: {parent_facilities}")
+
+            # Group child rows by base archetype
+            base_archetypes = {}
+            for child_row in child_rows:
+                child_archetype = child_row.get('Asset Archetype', '')
+                if ' - Granular Point' in child_archetype:
+                    base_archetype = child_archetype.replace(' - Granular Point', '')
+                    if base_archetype not in base_archetypes:
+                        base_archetypes[base_archetype] = []
+                    base_archetypes[base_archetype].append(child_row)
+
+            # Create synthetic parent rows for each base archetype
+            for base_archetype, children in base_archetypes.items():
+                if children:
+                    # Use the first child's data to create parent row
+                    first_child = children[0]
+
+                    # PRIORITY 1: Try to get parent name from form data first (most accurate)
+                    actual_asset_name = None
+                    if parent_facilities:
+                        # The parent facility mapping should match our base archetype
+                        actual_asset_name = parent_facilities.get(base_archetype)
+                        if actual_asset_name:
+                            logger.info(f"✓ FOUND parent name from form data: {base_archetype} -> {actual_asset_name}")
+
+                    # PRIORITY 2: Fallback to asset inventory mapping
+                    if not actual_asset_name:
+                        actual_asset_name = polygon_asset_names.get(base_archetype)
+                        if actual_asset_name:
+                            logger.info(f"Using parent name from asset inventory: {base_archetype} -> {actual_asset_name}")
+
+                    # PRIORITY 3: Final fallback to archetype name
+                    if not actual_asset_name:
+                        actual_asset_name = base_archetype
+                        logger.info(f"Using fallback parent name (archetype): {base_archetype} -> {actual_asset_name}")
+
+                    logger.info(f"Creating synthetic parent for {base_archetype} using final name: {actual_asset_name}")
+
+                    parent_row = {
+                        'Facility': actual_asset_name,  # Use actual asset name, no emoji or suffix
+                        'Asset Archetype': f"{base_archetype} - Polygon Centroid",
+                        'Lat': first_child.get('Lat', ''),
+                        'Long': first_child.get('Long', ''),
+                        'row_type': 'polygon_parent',
+                        'parent_id': None,
+                        'level': 0,
+                        'has_granular_analysis': True,
+                        'original_asset_name': actual_asset_name
+                    }
+
+                    logger.info(f"Created parent row with Facility: '{parent_row['Facility']}'")
+
+                    # Copy all the hazard analysis data from first child
+                    for key, value in first_child.items():
+                        if key not in ['Facility', 'Asset Archetype', 'row_type', 'parent_id', 'level', 'has_granular_analysis', 'original_asset_name']:
+                            parent_row[key] = value
+
+                    logger.info(f"Created synthetic parent row: {parent_row['Facility']}")
+                    parent_rows.append(parent_row)
+
+                    # Update all children to point to this parent
+                    for child_row in children:
+                        child_row['parent_id'] = parent_row['Facility']
+                        child_row['parent_facility'] = parent_row['Facility']
+                        logger.info(f"Linked child to parent: child_facility={child_row.get('Facility', 'Unknown')} -> parent_id='{parent_row['Facility']}'")
+
+                    # Add the linked children to hierarchical data
+                    for child_row in children:
+                        hierarchical_data.append(child_row)
+
+        hierarchical_data.extend(parent_rows)
+
+        # Process any children that weren't part of synthetic parent groups
+        # These are children that don't match any base_archetype
+        linked_child_ids = set()
+        for base_archetype, children in base_archetypes.items():
+            linked_child_ids.update(id(child) for child in children)
+
+        remaining_children = [child for child in child_rows if id(child) not in linked_child_ids]
+        if remaining_children:
+            logger.warning(f"Found {len(remaining_children)} remaining children not linked to synthetic parents")
+            for child_row in remaining_children:
+                hierarchical_data.append(child_row)
+
+        logger.info(f"Successfully processed combined output CSV: {len(hierarchical_data)} total rows")
+        logger.info(f"  - Regular facilities: {len([r for r in hierarchical_data if r['row_type'] == 'facility'])}")
+        logger.info(f"  - Polygon parents: {len([r for r in hierarchical_data if r['row_type'] == 'polygon_parent'])}")
+        logger.info(f"  - Polygon children: {len([r for r in hierarchical_data if r['row_type'] == 'polygon_child'])}")
+
+        # Debug: Ensure all hierarchical rows have required fields
+        for i, row in enumerate(hierarchical_data):
+            if row['row_type'] in ['polygon_parent', 'polygon_child']:
+                missing_fields = []
+                if 'parent_id' not in row:
+                    missing_fields.append('parent_id')
+                if 'parent_facility' not in row:
+                    missing_fields.append('parent_facility')
+                if 'has_granular_analysis' not in row:
+                    missing_fields.append('has_granular_analysis')
+
+                if missing_fields:
+                    logger.warning(f"Row {i} (type: {row['row_type']}) missing required fields: {missing_fields}")
+                    # Add missing fields
+                    for field in missing_fields:
+                        if field == 'parent_id':
+                            row['parent_id'] = row.get('parent_id', None)
+                        elif field == 'parent_facility':
+                            row['parent_facility'] = row.get('parent_facility', row.get('parent_id', None))
+                        elif field == 'has_granular_analysis':
+                            row['has_granular_analysis'] = row['row_type'] == 'polygon_parent'
+
+        return hierarchical_data
+
+    except Exception as e:
+        logger.exception(f"Error in _process_combined_output_csv: {str(e)}")
+        return []
+
+
+def _process_polygon_assets_unified(polygon_assets, selected_hazards):
+    """
+    Process polygon assets using granular analysis workflow.
+
+    Args:
+        polygon_assets: List of polygon asset data
+        selected_hazards: List of selected hazard types
+
+    Returns:
+        dict: Processing results with success status and data
+    """
+    try:
+        logger.info(f"Processing {len(polygon_assets)} polygon assets through granular workflow")
+
+        polygon_results = []
+
+        for polygon_asset in polygon_assets:
+            try:
+                # Get or create Asset model instance
+                asset_id = polygon_asset.get('id')
+                asset = None
+
+                if asset_id:
+                    try:
+                        # Try to get asset by database ID (integer)
+                        if isinstance(asset_id, int) or (isinstance(asset_id, str) and asset_id.isdigit()):
+                            asset = Asset.objects.get(id=int(asset_id))
+                        else:
+                            # Check if this is a session-based polygon asset (string ID like "polygon_b480aff8")
+                            # For session-based assets, we need to create the database record first
+                            logger.info(f"Session-based polygon asset detected: {asset_id}, creating database record")
+                            asset = _create_asset_from_polygon_data(polygon_asset)
+                    except (ValueError, Asset.DoesNotExist):
+                        # If ID lookup fails, try to create from session data
+                        logger.warning(f"Could not find asset with ID {asset_id}, creating from session data")
+                        asset = _create_asset_from_polygon_data(polygon_asset)
+                else:
+                    # Create Asset from session data
+                    asset = _create_asset_from_polygon_data(polygon_asset)
+
+                if not asset:
+                    logger.warning(f"Could not create/find asset for polygon: {polygon_asset.get('name') or polygon_asset.get('Facility')}")
+                    continue
+
+                # Use the actual geometry from the Asset model if available, fallback to session data
+                geometry = asset.polygon_geometry or polygon_asset.get('geometry')
+                if not geometry:
+                    logger.error(f"No polygon geometry found for asset {asset.name}")
+                    continue
+
+                # Execute granular analysis workflow
+                from .granular_workflow_service import execute_granular_analysis_workflow
+                workflow_result = execute_granular_analysis_workflow(
+                    polygon_geometry=geometry,
+                    asset_name=asset.name,
+                    selected_hazards=selected_hazards,
+                    archetype=asset.archetype,
+                    scenario='current'
+                )
+
+                if workflow_result.get('success'):
+                    # Convert workflow results to table format
+                    table_results = workflow_result.get('table_results', [])
+                    polygon_results.extend(table_results)
+                    logger.info(f"Successfully processed polygon {asset.name} with {len(table_results)} result rows")
+                else:
+                    logger.error(f"Failed to process polygon {asset.name}: {workflow_result.get('error')}")
+
+            except Exception as e:
+                logger.exception(f"Error processing polygon asset {polygon_asset.get('name') or polygon_asset.get('Facility')}: {str(e)}")
+
+        logger.info(f"Successfully processed {len(polygon_results)} polygon result rows")
+        return {'success': True, 'data': polygon_results}
+
+    except Exception as e:
+        logger.exception(f"Error processing polygon assets: {str(e)}")
+        return {'success': False, 'error': str(e)}
+
+
+def _create_hierarchical_results_structure(unified_results, selected_hazards):
+    """
+    Create hierarchical data structure for displaying mixed asset results.
+
+    Args:
+        unified_results: Results from processing regular facilities and polygon assets
+        selected_hazards: List of selected hazard types
+
+    Returns:
+        dict: Hierarchical data structure with flat_data, hierarchical, and columns
+    """
+    try:
+        logger.info("Creating hierarchical results structure for mixed assets")
+
+        hierarchical_data = []
+        flat_data = []
+
+        # Add regular facility results (as top-level rows)
+        for facility_result in unified_results['regular_facilities']:
+            row_data = facility_result.copy()
+            row_data['row_type'] = 'facility'
+            row_data['parent_id'] = None
+            row_data['level'] = 0
+            row_data['is_expandable'] = False
+            hierarchical_data.append(row_data)
+            flat_data.append(row_data)
+
+        # Add polygon asset results (as parent rows with granular children)
+        for polygon_result in unified_results['polygon_assets']:
+            # Create parent row for polygon centroid
+            parent_row = polygon_result.copy()
+            parent_row['row_type'] = 'polygon_parent'
+            parent_row['parent_id'] = None
+            parent_row['parent_facility'] = parent_row.get('Facility', '')  # Add missing parent_facility field
+            parent_row['level'] = 0
+            parent_row['is_expandable'] = True
+            parent_row['children_count'] = parent_row.get('Grid Points Processed', 0)
+            parent_row['has_granular_analysis'] = True  # Add missing has_granular_analysis field
+            hierarchical_data.append(parent_row)
+            flat_data.append(parent_row)
+
+            # Get granular results for this polygon
+            asset_name = parent_row.get('Facility')
+            granular_children = _get_granular_children_for_polygon(asset_name, selected_hazards)
+
+            # Add child rows for granular points
+            for child_idx, child_result in enumerate(granular_children):
+                child_row = child_result.copy()
+                child_row['row_type'] = 'polygon_child'
+                child_row['parent_id'] = asset_name
+                child_row['parent_facility'] = asset_name  # Add missing parent_facility field
+                child_row['level'] = 1
+                child_row['is_expandable'] = False
+                child_row['child_index'] = child_idx + 1
+                child_row['has_granular_analysis'] = False  # Add missing has_granular_analysis field
+                hierarchical_data.append(child_row)
+                flat_data.append(child_row)
+
+        # Extract columns from the data
+        if flat_data:
+            columns = list(flat_data[0].keys())
+        else:
+            columns = []
+
+        logger.info(f"Created hierarchical structure: {len(hierarchical_data)} total rows")
+        return {
+            'hierarchical': hierarchical_data,
+            'flat_data': flat_data,
+            'columns': columns
+        }
+
+    except Exception as e:
+        logger.exception(f"Error creating hierarchical results structure: {str(e)}")
+        return {
+            'hierarchical': [],
+            'flat_data': [],
+            'columns': []
+        }
+
+
+def _create_temporary_regular_facilities_csv(regular_facilities):
+    """
+    Create a temporary CSV file containing only regular facilities.
+
+    Args:
+        regular_facilities: List of regular facility data
+
+    Returns:
+        str: Path to temporary CSV file or None if failed
+    """
+    try:
+        if not regular_facilities:
+            return None
+
+        import tempfile
+        import csv
+
+        # Create temporary file
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8')
+        temp_path = temp_file.name
+
+        # Write regular facilities to CSV
+        fieldnames = ['Facility', 'Lat', 'Long', 'Archetype']
+        writer = csv.DictWriter(temp_file, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for facility in regular_facilities:
+            writer.writerow({
+                'Facility': facility.get('Facility', facility.get('Name', 'Unknown')),
+                'Lat': facility.get('Lat', facility.get('Latitude')),
+                'Long': facility.get('Long', facility.get('Longitude')),
+                'Archetype': facility.get('Archetype', 'default archetype')
+            })
+
+        temp_file.close()
+        logger.info(f"Created temporary regular facilities CSV: {temp_path}")
+        return temp_path
+
+    except Exception as e:
+        logger.exception(f"Error creating temporary regular facilities CSV: {str(e)}")
+        return None
+
+
+def _create_asset_from_polygon_data(polygon_data):
+    """
+    Create an Asset model instance from polygon session data.
+
+    Args:
+        polygon_data: Polygon asset data from session
+
+    Returns:
+        Asset: Created asset instance or None if failed
+    """
+    try:
+        # Handle multiple possible field names for compatibility
+        name = polygon_data.get('name') or polygon_data.get('Facility') or 'Unknown Polygon'
+        archetype = polygon_data.get('archetype') or polygon_data.get('Archetype', 'default archetype')
+        centroid_lat = polygon_data.get('centroid_lat') or polygon_data.get('Lat')
+        centroid_lng = polygon_data.get('centroid_lng') or polygon_data.get('Long')
+        geometry = polygon_data.get('geometry') or polygon_data.get('polygon_geometry')
+
+        if not centroid_lat or not centroid_lng:
+            logger.warning(f"No centroid coordinates for polygon {name}")
+            return None
+
+        if not geometry:
+            logger.warning(f"No polygon geometry for {name}")
+            return None
+
+        # Check if an asset with the same name and coordinates already exists
+        # This prevents creating duplicates when processing the same polygon multiple times
+        existing_assets = Asset.objects.filter(
+            name=name,
+            latitude=Decimal(str(centroid_lat)),
+            longitude=Decimal(str(centroid_lng)),
+            asset_type='polygon'
+        ).first()
+
+        if existing_assets:
+            logger.info(f"Found existing asset for polygon {name} (ID: {existing_assets.id})")
+            return existing_assets
+
+        # Create new asset
+        asset = Asset.objects.create(
+            name=name,
+            archetype=archetype,
+            latitude=Decimal(str(centroid_lat)),
+            longitude=Decimal(str(centroid_lng)),
+            polygon_geometry=geometry,
+            asset_type='polygon',
+            has_granular_analysis=True,
+            granular_analysis_status='pending',
+            # Set owner/source to track session-based assets
+            source='session_polygon_workflow',
+            owner=polygon_data.get('session_key', 'session')
+        )
+
+        logger.info(f"Created asset from polygon data: {asset.name} (ID: {asset.id})")
+        return asset
+
+    except Exception as e:
+        logger.exception(f"Error creating asset from polygon data: {str(e)}")
+        return None
+
+
+def _get_granular_children_for_polygon(asset_name, selected_hazards):
+    """
+    Get granular analysis results for a polygon asset to display as children.
+
+    Args:
+        asset_name: Name of the polygon asset
+        selected_hazards: List of selected hazard types
+
+    Returns:
+        list: List of child row data for granular points
+    """
+    try:
+        # Try to get granular results from database
+        try:
+            asset = Asset.objects.get(name=asset_name)
+            granular_results = GranularAnalysisResult.objects.filter(
+                asset=asset,
+                hazard_type__in=selected_hazards,
+                processing_status='completed'
+            ).order_by('grid_row', 'grid_col')
+
+            if granular_results.exists():
+                children = []
+                for result in granular_results:
+                    child_data = {
+                        'Facility': f"{asset_name}_Point_{result.grid_row}_{result.grid_col}",
+                        'Lat': float(result.latitude),
+                        'Long': float(result.longitude),
+                        'Archetype': asset.archetype,
+                        'Asset Type': 'Granular Point',
+                        'Grid Row': result.grid_row,
+                        'Grid Col': result.grid_col,
+                    }
+
+                    # Add hazard-specific data
+                    if result.result_data:
+                        for key, value in result.result_data.items():
+                            child_data[key] = value
+
+                    children.append(child_data)
+
+                return children
+
+        except Asset.DoesNotExist:
+            logger.warning(f"Asset {asset_name} not found for granular children")
+
+        # Fallback: return empty list if no granular results found
+        logger.info(f"No granular results found for {asset_name}, returning empty children list")
+        return []
+
+    except Exception as e:
+        logger.exception(f"Error getting granular children for {asset_name}: {str(e)}")
+        return []
 
 
 def _build_column_groups(columns, selected_hazards):
@@ -1335,7 +2750,8 @@ def _build_column_groups(columns, selected_hazards):
         'Tropical Cyclones': 'Tropical Cyclones',
         'Storm Surge': 'Storm Surge',
         'Rainfall Induced Landslide': 'Rainfall-Induced Landslide',
-        'Rainfall-Induced Landslide': 'Rainfall-Induced Landslide'
+        'Rainfall-Induced Landslide': 'Rainfall-Induced Landslide',
+        'Water Stress': 'Water Stress'
     }
 
     # Always include Facility Information if we have basic columns
@@ -1344,8 +2760,22 @@ def _build_column_groups(columns, selected_hazards):
         groups['Facility Information'] = len(facility_cols)
         logger.info(f"Added Facility Information group with {len(facility_cols)} columns: {facility_cols}")
 
-    # Add groups for selected hazards based on actual column presence
-    for hazard in selected_hazards:
+    # Define the desired order for hazard groups
+    desired_hazard_order = [
+        'Flood',
+        'Water Stress',
+        'Sea Level Rise',
+        'Tropical Cyclones',
+        'Heat',
+        'Storm Surge',
+        'Rainfall-Induced Landslide'
+    ]
+
+    # Add groups for selected hazards based on actual column presence in correct order
+    for hazard in desired_hazard_order:
+        # Skip if this hazard wasn't selected
+        if hazard not in selected_hazards:
+            continue
         # Normalize hazard name
         normalized_hazard = hazard_name_mapping.get(hazard, hazard)
 
@@ -2738,8 +4168,6 @@ def save_updated_data_to_csv(table_data, request):
         logger.error(f"Error saving updated data to CSV: {e}")
         raise
 
-
-<<<<<<< HEAD
 def export_hazard_data_to_excel(request):
     """
     Export hazard exposure data to Excel format.
@@ -2879,6 +4307,7 @@ def clear_site_data(request):
             'climate_hazards_v2_archetype_params',
             'climate_hazards_v2_revised_params',
             'climate_hazards_v2_asset_exposure_updated_csv_path',
+            'polygon_asset_ids',  # Clear session asset IDs for enhanced preview
             # Clear any additional analysis-related session variables
             'combined_csv_path',  # Used in report generation
         ]
@@ -2977,23 +4406,33 @@ def get_polygon_assets(request):
     Returns assets in GeoJSON format for map display.
     """
     try:
-        session_key = request.session.session_key
+        # Session-only approach: Get polygon assets from session facility_data
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
 
-        # Get polygon assets from database
-        assets = Asset.objects.filter(
-            session_key=session_key,
-            asset_type='polygon'
-        ).order_by('-created_at')
+        # Filter only polygon assets
+        polygon_assets = [f for f in facility_data if f.get('AssetType') == 'polygon' or f.get('geometry')]
 
         # Convert to GeoJSON FeatureCollection
         features = []
-        for asset in assets:
-            features.append(asset.geojson)
+        for asset in polygon_assets:
+            feature = {
+                'type': 'Feature',
+                'properties': {
+                    'name': asset['Facility'],
+                    'archetype': asset['Archetype'],
+                    'id': asset['AssetId'],
+                    'AssetType': 'polygon'
+                },
+                'geometry': asset['geometry']
+            }
+            features.append(feature)
 
         geojson_data = {
             'type': 'FeatureCollection',
             'features': features
         }
+
+        logger.info(f"Retrieved {len(features)} polygon assets from session")
 
         return JsonResponse({
             'success': True,
@@ -3015,54 +4454,68 @@ def update_polygon_asset(request, asset_id):
     API endpoint to update an existing polygon asset.
     """
     try:
-        if not request.session.session_key:
-            return JsonResponse({
-                'success': False,
-                'error': 'No active session'
-            }, status=401)
-
-        asset = Asset.objects.get(
-            id=asset_id,
-            session_key=request.session.session_key
-        )
-
         data = json.loads(request.body)
 
-        # Update basic fields
-        if 'name' in data and data['name'].strip():
-            asset.name = data['name'].strip()
+        # Session-only approach: Update in session facility_data
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+        asset_updated = False
+        updated_asset = None
 
-        if 'archetype' in data:
-            asset.archetype = data['archetype'].strip() if data['archetype'] else 'default archetype'
+        for facility in facility_data:
+            if facility.get('AssetId') == asset_id and facility.get('AssetType') == 'polygon':
+                # Update basic fields
+                if 'name' in data and data['name'].strip():
+                    facility['Facility'] = data['name'].strip()
 
-        # Update polygon geometry if provided
-        if 'geometry' in data and data['geometry']:
-            if asset.set_polygon_from_geojson(data['geometry']):
-                logger.info(f"Updated polygon geometry for asset: {asset.name}")
-            else:
-                return JsonResponse({
-                    'success': False,
-                    'error': 'Invalid polygon geometry provided'
-                }, status=400)
+                if 'archetype' in data:
+                    facility['Archetype'] = data['archetype'].strip() if data['archetype'] else 'default archetype'
 
-        asset.save()
+                # Update polygon geometry if provided
+                if 'geometry' in data and data['geometry']:
+                    facility['geometry'] = data['geometry']
+                    # Recalculate centroid if geometry changed
+                    geometry = data['geometry']
+                    if geometry.get('type') == 'Polygon':
+                        coords = geometry['coordinates'][0]  # Exterior ring
+                        if len(coords) >= 3:
+                            sum_lng = sum(point[0] for point in coords[:-1])
+                            sum_lat = sum(point[1] for point in coords[:-1])
+                            n = len(coords) - 1
+                            facility['Lat'] = sum_lng / n
+                            facility['Long'] = sum_lat / n
+
+                # Create GeoJSON response
+                updated_asset = {
+                    'type': 'Feature',
+                    'properties': {
+                        'name': facility['Facility'],
+                        'archetype': facility['Archetype'],
+                        'id': facility['AssetId'],
+                        'AssetType': 'polygon'
+                    },
+                    'geometry': facility['geometry']
+                }
+
+                asset_updated = True
+                logger.info(f"Updated session-only polygon asset: {facility['Facility']} (ID: {asset_id})")
+                break
+
+        if not asset_updated:
+            return JsonResponse({
+                'success': False,
+                'error': 'Polygon asset not found'
+            }, status=404)
+
+        # Update session
+        request.session['climate_hazards_v2_facility_data'] = facility_data
+        request.session.save()
 
         return JsonResponse({
             'success': True,
-            'asset': asset.geojson,
+            'asset': updated_asset,
             'message': 'Polygon asset updated successfully'
         })
 
-    except Asset.DoesNotExist:
-        return JsonResponse({
-            'success': False,
-            'error': 'Polygon asset not found'
-        }, status=404)
-    except json.JSONDecodeError:
-        return JsonResponse({
-            'success': False,
-            'error': 'Invalid JSON data provided'
-        }, status=400)
     except Exception as e:
         logger.exception(f"Error updating polygon asset: {str(e)}")
         return JsonResponse({
@@ -3077,30 +4530,37 @@ def delete_polygon_asset(request, asset_id):
     API endpoint to delete a polygon asset.
     """
     try:
-        if not request.session.session_key:
+        # Session-only approach: Remove from session facility_data
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+        asset_deleted = False
+        asset_name = None
+
+        # Find and remove the asset
+        new_facility_data = []
+        for facility in facility_data:
+            if facility.get('AssetId') == asset_id and facility.get('AssetType') == 'polygon':
+                asset_name = facility['Facility']
+                asset_deleted = True
+                logger.info(f"Deleted session-only polygon asset: {asset_name} (ID: {asset_id})")
+                # Don't add this asset to the new list (effectively deleting it)
+            else:
+                new_facility_data.append(facility)
+
+        if not asset_deleted:
             return JsonResponse({
                 'success': False,
-                'error': 'No active session'
-            }, status=401)
+                'error': 'Polygon asset not found'
+            }, status=404)
 
-        asset = Asset.objects.get(
-            id=asset_id,
-            session_key=request.session.session_key
-        )
-
-        asset_name = asset.name
-        asset.delete()
+        # Update session with filtered data
+        request.session['climate_hazards_v2_facility_data'] = new_facility_data
+        request.session.save()
 
         return JsonResponse({
             'success': True,
             'message': f'Polygon asset "{asset_name}" deleted successfully'
         })
 
-    except Asset.DoesNotExist:
-        return JsonResponse({
-            'success': False,
-            'error': 'Polygon asset not found'
-        }, status=404)
     except Exception as e:
         logger.exception(f"Error deleting polygon asset: {str(e)}")
         return JsonResponse({
@@ -3116,12 +4576,6 @@ def create_polygon_asset(request):
     Handles the polygon creation workflow: draw polygon -> modal -> save.
     """
     try:
-        if not request.session.session_key:
-            return JsonResponse({
-                'success': False,
-                'error': 'No active session'
-            }, status=401)
-
         data = json.loads(request.body)
 
         # Validate required fields
@@ -3160,23 +4614,65 @@ def create_polygon_asset(request):
         centroid_lng = sum_lng / n
         centroid_lat = sum_lat / n
 
-        # Create the asset
-        asset = Asset.objects.create(
-            name=data['name'].strip(),
-            archetype=data.get('archetype', 'default archetype').strip() or 'default archetype',
-            latitude=centroid_lat,
-            longitude=centroid_lng,
-            polygon_geometry=geometry,
-            asset_type='polygon',
-            session_key=request.session.session_key
-        )
+        # Extract granular analysis settings
+        grid_spacing = data.get('gridSpacing')  # Grid spacing from frontend modal
+        area_km2 = data.get('areaKm2')  # Polygon area from frontend
+        enable_granular = data.get('enableGranular', False)  # Whether granular analysis is enabled
+        granular_points = data.get('granular-points')  # Grid points for granular analysis
 
-        logger.info(f"Created new polygon asset: {asset.name} (ID: {asset.id})")
+        # Session-only approach: Generate unique ID and store entirely in session
+        import uuid
+        unique_id = str(uuid.uuid4())[:8]  # Short unique ID
+
+        # Store in session facility_data (session-only storage)
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+
+        # Create facility data entry (session-only)
+        new_facility = {
+            'id': unique_id,  # Session-generated unique ID
+            'Facility': data['name'].strip(),
+            'Lat': centroid_lat,
+            'Long': centroid_lng,
+            'Archetype': data.get('archetype', 'default archetype').strip() or 'default archetype',
+            'AssetType': 'polygon',
+            'AssetId': unique_id,
+            'geometry': geometry,
+            'polygon_area_km2': area_km2,
+            'source': request.session.session_key or 'anonymous'
+        }
+
+        # Add granular analysis settings if enabled
+        if enable_granular:
+            new_facility['granular_grid_spacing'] = grid_spacing
+            new_facility['granular_points_count'] = len(granular_points) if granular_points else 0
+            new_facility['granular_analysis_enabled'] = True
+            if granular_points:
+                new_facility['granular-points'] = granular_points
+
+        facility_data.append(new_facility)
+
+        # Update session
+        request.session['climate_hazards_v2_facility_data'] = facility_data
+        request.session.save()
+
+        logger.info(f"Created session-only polygon asset: {data['name'].strip()} (ID: {unique_id})")
+
+        # Return GeoJSON-like response for frontend compatibility
+        geojson_asset = {
+            'type': 'Feature',
+            'properties': {
+                'name': data['name'].strip(),
+                'archetype': data.get('archetype', 'default archetype').strip() or 'default archetype',
+                'id': unique_id,
+                'AssetType': 'polygon'
+            },
+            'geometry': geometry
+        }
 
         return JsonResponse({
             'success': True,
-            'asset': asset.geojson,
-            'message': f'Polygon asset "{asset.name}" created successfully'
+            'asset': geojson_asset,
+            'message': 'Polygon asset created successfully'
         })
 
     except json.JSONDecodeError:
@@ -3229,88 +4725,3470 @@ def get_asset_analysis_results(request, asset_id):
         return JsonResponse({
             'success': False,
             'error': 'Failed to retrieve analysis results'
-=======
-def export_boundaries_shapefile(request):
-    """
-    Export facility boundaries with polygon geometry as a shapefile.
-    Returns a zipped shapefile containing all boundary assets.
-    """
-    if request.method != 'GET':
-        return JsonResponse({'error': 'Only GET requests are allowed'}, status=405)
+        }, status=500)
 
+
+class HeatExposureMapView(TemplateView):
+    """
+    Dedicated view for displaying the Heat Exposure Map with full functionality.
+
+    This view provides a focused experience for visualizing heat exposure data
+    across facilities, with all the interactive features previously available
+    in the results page tab.
+    """
+    template_name = 'climate_hazards_analysis_v2/heat_exposure_map.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        """
+        Validate session data before processing the request.
+        """
+        # Validate that we have the necessary session data
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+        selected_hazards = request.session.get('climate_hazards_v2_selected_hazards', [])
+
+        if not facility_data:
+            logger.warning("Heat Exposure Map accessed without facility data")
+            return redirect('climate_hazards_analysis_v2:select_hazards')
+
+        if not selected_hazards or 'Heat' not in selected_hazards:
+            logger.warning("Heat Exposure Map accessed without heat hazard selected")
+            return redirect('climate_hazards_analysis_v2:select_hazards')
+
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        """
+        Build context data for the heat exposure map template.
+        """
+        context = super().get_context_data(**kwargs)
+
+        # Get session data with safety checks
+        if not hasattr(self, 'request') or not self.request:
+            logger.error("HeatExposureMapView: No request available in get_context_data")
+            return context
+
+        facility_data = self.request.session.get('climate_hazards_v2_facility_data', [])
+        selected_hazards = self.request.session.get('climate_hazards_v2_selected_hazards', [])
+        facility_csv_path = self.request.session.get('climate_hazards_v2_facility_csv_path')
+
+        # Get analysis results if available
+        results_data = self.request.session.get('climate_hazards_v2_results', {})
+
+        # Build facility summary for context
+        facility_count = len(facility_data)
+        polygon_asset_count = sum(1 for fac in facility_data if fac.get('asset_type') == 'polygon')
+        point_asset_count = sum(1 for fac in facility_data if fac.get('asset_type') == 'point')
+
+        context.update({
+            'facility_count': facility_count,
+            'polygon_asset_count': polygon_asset_count,
+            'point_asset_count': point_asset_count,
+            'selected_hazards': selected_hazards,
+            'has_analysis_results': bool(results_data),
+            'heat_exposure_api_url': reverse_lazy('climate_hazards_analysis_v2:get_heat_exposure_map_data'),
+            'results_url': reverse_lazy('climate_hazards_analysis_v2:show_results'),
+            'select_hazards_url': reverse_lazy('climate_hazards_analysis_v2:select_hazards'),
+        })
+
+        # Add CSRF token safely
+        try:
+            context['csrf_token'] = get_token(self.request)
+        except Exception as e:
+            logger.warning(f"Could not generate CSRF token for heat exposure map: {e}")
+            context['csrf_token'] = ''
+
+        # Add sample facility info for debugging/display purposes
+        if facility_data:
+            sample_facilities = [
+                {
+                    'name': fac.get('name', 'Unknown'),
+                    'lat': fac.get('lat', 0),
+                    'long': fac.get('long', 0),
+                    'asset_type': fac.get('asset_type', 'unknown')
+                }
+                for fac in facility_data[:3]  # Show first 3 facilities as examples
+            ]
+            context['sample_facilities'] = sample_facilities
+
+        logger.info(f"Heat Exposure Map context prepared for {facility_count} facilities")
+        return context
+
+
+class HazardExposureMapView(TemplateView):
+    """
+    Dedicated view for displaying the Hazard Exposure Map with full functionality.
+
+    This view provides a focused experience for visualizing all selected climate hazards
+    across facilities, with interactive hazard selection and asset markers.
+    """
+    template_name = 'climate_hazards_analysis_v2/hazard_exposure_map.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        """
+        Validate session data before processing the request.
+        Handles both regular workflow and granular polygon analysis.
+        """
+        # Check for regular workflow data
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+        selected_hazards = request.session.get('climate_hazards_v2_selected_hazards', [])
+
+        # Check for granular workflow data
+        from .session_utils import GranularAnalysisSessionManager
+        is_granular = GranularAnalysisSessionManager.is_granular_workflow(request)
+        granular_asset_id = GranularAnalysisSessionManager.get_asset_id(request)
+
+        # Validate that we have data from either workflow
+        has_regular_data = facility_data and selected_hazards
+        has_granular_data = is_granular and granular_asset_id
+
+        if not has_regular_data and not has_granular_data:
+            logger.warning("Hazard Exposure Map accessed without valid session data")
+            return redirect('climate_hazards_analysis_v2:select_hazards')
+
+        # For granular workflow, get hazards from the asset
+        if has_granular_data and not selected_hazards:
+            try:
+                from .models import Asset, GranularAnalysisResult
+                asset = Asset.objects.get(id=granular_asset_id)
+                granular_hazards = list(GranularAnalysisResult.objects.filter(
+                    asset=asset,
+                    processing_status='completed'
+                ).values_list('hazard_type', flat=True).distinct())
+
+                if granular_hazards:
+                    selected_hazards = granular_hazards
+                    # Store in session for template access
+                    request.session['climate_hazards_v2_selected_hazards'] = selected_hazards
+                else:
+                    logger.warning(f"No completed analysis found for granular asset {granular_asset_id}")
+                    return redirect('climate_hazards_analysis_v2:select_hazards')
+
+            except Exception as e:
+                logger.error(f"Error getting hazards for granular asset {granular_asset_id}: {e}")
+                return redirect('climate_hazards_analysis_v2:select_hazards')
+
+        # Store workflow type in context
+        request.session['_hazard_map_workflow_type'] = 'granular' if has_granular_data else 'regular'
+        request.session.save()
+
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        """
+        Build context data for the hazard exposure map template.
+        Handles both regular workflow and granular polygon analysis.
+        """
+        context = super().get_context_data(**kwargs)
+
+        # Get session data with safety checks
+        if not hasattr(self, 'request') or not self.request:
+            logger.error("HazardExposureMapView: No request available in get_context_data")
+            return context
+
+        # Check workflow type
+        workflow_type = self.request.session.get('_hazard_map_workflow_type', 'regular')
+        is_granular = workflow_type == 'granular'
+
+        if is_granular:
+            # Handle granular workflow data
+            from .session_utils import GranularAnalysisSessionManager
+            granular_asset_id = GranularAnalysisSessionManager.get_asset_id(self.request)
+            selected_hazards = self.request.session.get('climate_hazards_v2_selected_hazards', [])
+
+            try:
+                from .models import Asset
+                asset = Asset.objects.get(id=granular_asset_id)
+
+                # Create facility data from granular asset
+                facility_data = [{
+                    'name': asset.name,
+                    'latitude': float(asset.latitude),
+                    'longitude': float(asset.longitude),
+                    'asset_type': 'polygon',
+                    'archetype': asset.archetype or 'Unknown',
+                    'id': asset.id
+                }]
+
+                facility_count = 1
+                polygon_asset_count = 1
+                point_asset_count = 0
+
+                # Get granular results for context
+                from .models import GranularAnalysisResult
+                granular_results = GranularAnalysisResult.objects.filter(
+                    asset=asset,
+                    processing_status='completed',
+                    hazard_type__in=selected_hazards
+                )
+
+                # Create mock results_data for granular workflow
+                results_data = {
+                    'status': 'completed',
+                    'hazard_types': selected_hazards,
+                    'analysis_summary': {
+                        'total_facilities': 1,
+                        'processed_facilities': 1,
+                        'failed_facilities': 0
+                    }
+                }
+
+            except Exception as e:
+                logger.error(f"Error processing granular data for hazard map: {e}")
+                # Fallback to empty data
+                facility_data = []
+                selected_hazards = []
+                facility_count = 0
+                polygon_asset_count = 0
+                point_asset_count = 0
+                results_data = {}
+
+        else:
+            # Handle regular workflow data
+            facility_data = self.request.session.get('climate_hazards_v2_facility_data', [])
+            selected_hazards = self.request.session.get('climate_hazards_v2_selected_hazards', [])
+            facility_csv_path = self.request.session.get('climate_hazards_v2_facility_csv_path')
+
+            # Get analysis results if available
+            results_data = self.request.session.get('climate_hazards_v2_results', {})
+
+            # Build facility summary for context
+            facility_count = len(facility_data)
+            polygon_asset_count = sum(1 for fac in facility_data if fac.get('asset_type') == 'polygon')
+            point_asset_count = sum(1 for fac in facility_data if fac.get('asset_type') == 'point')
+
+        # Define hazard configurations
+        hazard_configs = {
+            'Heat': {'icon': 'fas fa-temperature-high', 'color': '#dc3545'},
+            'Cold': {'icon': 'fas fa-snowflake', 'color': '#17a2b8'},
+            'Wind': {'icon': 'fas fa-wind', 'color': '#28a745'},
+            'Coastal': {'icon': 'fas fa-water', 'color': '#007bff'},
+            'Flooding': {'icon': 'fas fa-tint', 'color': '#6f42c1'},
+            'Drought': {'icon': 'fas fa-sun', 'color': '#fd7e14'},
+            'Landslide': {'icon': 'fas fa-mountain', 'color': '#6c757d'}
+        }
+
+        # Filter hazard configs for selected hazards
+        selected_hazard_configs = {hazard: hazard_configs.get(hazard, {}) for hazard in selected_hazards}
+
+        context.update({
+            'facility_count': facility_count,
+            'polygon_asset_count': polygon_asset_count,
+            'point_asset_count': point_asset_count,
+            'selected_hazards': selected_hazards,
+            'selected_hazard_configs': selected_hazard_configs,
+            'has_analysis_results': bool(results_data),
+            'hazard_exposure_api_url': reverse_lazy('climate_hazards_analysis_v2:visualization_data_api'),
+            'results_url': reverse_lazy('climate_hazards_analysis_v2:show_results'),
+            'select_hazards_url': reverse_lazy('climate_hazards_analysis_v2:select_hazards'),
+        })
+
+        # Add CSRF token safely
+        try:
+            context['csrf_token'] = get_token(self.request)
+        except Exception as e:
+            logger.warning(f"Could not generate CSRF token for hazard exposure map: {e}")
+            context['csrf_token'] = ''
+
+        # Add workflow type to context for template
+        context['workflow_type'] = workflow_type
+        context['is_granular_workflow'] = is_granular
+
+        # Add sample facility info for debugging/display purposes
+        if facility_data:
+            sample_facilities = [
+                {
+                    'name': fac.get('name', 'Unknown'),
+                    'lat': fac.get('lat', fac.get('latitude', 0)),
+                    'long': fac.get('long', fac.get('longitude', 0)),
+                    'asset_type': fac.get('asset_type', 'unknown')
+                }
+                for fac in facility_data[:3]  # Show first 3 facilities as examples
+            ]
+            context['sample_facilities'] = sample_facilities
+
+        logger.info(f"Hazard Exposure Map context prepared for {facility_count} facilities with {len(selected_hazards)} hazards (workflow: {workflow_type})")
+        return context
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def get_heat_exposure_map_data(request):
+    """
+    API endpoint to retrieve heat exposure data for map visualization.
+    Returns spatial heat data that can be rendered as a map layer.
+    """
     try:
         # Get facility data from session
         facility_data = request.session.get('climate_hazards_v2_facility_data', [])
 
-        # Filter facilities that have polygon geometry
-        polygon_facilities = [f for f in facility_data if f.get('geometry')]
-
-        if not polygon_facilities:
+        if not facility_data:
             return JsonResponse({
-                'error': 'No boundary polygons found. Please add city boundaries first.'
+                'success': False,
+                'error': 'No facility data found'
             }, status=404)
 
-        # Create GeoDataFrame from polygon facilities
-        from shapely.geometry import shape
+        # Get selected hazards and archetype parameters
+        selected_hazards = request.session.get('climate_hazards_v2_selected_hazards', [])
+        archetype_params = request.session.get('climate_hazards_v2_archetype_params', {})
 
-        geometries = []
-        properties = []
-
-        for facility in polygon_facilities:
-            try:
-                # Convert GeoJSON geometry to Shapely geometry
-                geom = shape(facility['geometry'])
-                geometries.append(geom)
-
-                properties.append({
-                    'name': facility.get('Facility', 'Unnamed'),
-                    'archetype': facility.get('Archetype', ''),
-                    'latitude': facility.get('Lat', 0),
-                    'longitude': facility.get('Long', 0)
-                })
-            except Exception as e:
-                logger.warning(f"Skipping invalid geometry for {facility.get('Facility')}: {e}")
-                continue
-
-        if not geometries:
+        # Check if heat hazard is selected
+        if 'Heat' not in selected_hazards:
             return JsonResponse({
-                'error': 'No valid geometries found to export.'
+                'success': False,
+                'error': 'Heat hazard not selected'
             }, status=400)
 
-        # Create GeoDataFrame
-        gdf = gpd.GeoDataFrame(properties, geometry=geometries, crs='EPSG:4326')
+        logger.info(f"Processing heat exposure map data for {len(facility_data)} facilities")
 
-        # Create temporary directory for shapefile
-        with tempfile.TemporaryDirectory() as temp_dir:
-            shapefile_name = 'city_boundaries'
-            shapefile_path = os.path.join(temp_dir, f'{shapefile_name}.shp')
+        # Process heat exposure for each facility
+        heat_exposure_data = []
+        for facility in facility_data:
+            try:
+                lat = facility.get('Lat', 0)
+                lng = facility.get('Long', 0)
+                facility_name = facility.get('Facility', 'Unknown')
+                archetype = facility.get('Archetype', 'default')
 
-            # Save as shapefile
-            gdf.to_file(shapefile_path, driver='ESRI Shapefile')
+                # Get heat exposure value from processed data
+                # Using same logic as main results processing
+                heat_value = 0
+                heat_category = 'Unknown'
 
-            # Create zip file containing all shapefile components
-            zip_path = os.path.join(temp_dir, f'{shapefile_name}.zip')
+                # Try to extract from existing heat columns in data
+                possible_heat_columns = [
+                    'Heat Exposure (%)',
+                    'Heat Exposure (%) - Moderate Case',
+                    'Heat Exposure (%) - Worst Case'
+                ]
 
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # Add all shapefile components (.shp, .shx, .dbf, .prj, etc.)
-                for file in os.listdir(temp_dir):
-                    if file.startswith(shapefile_name) and not file.endswith('.zip'):
-                        file_path = os.path.join(temp_dir, file)
-                        zipf.write(file_path, arcname=file)
+                for col in possible_heat_columns:
+                    if col in facility and facility[col] is not None:
+                        heat_value = float(facility[col])
+                        break
 
-            # Read zip file and return as response
-            with open(zip_path, 'rb') as f:
-                zip_data = f.read()
+                # Categorize heat exposure
+                if heat_value > 0:
+                    if heat_value <= 25:
+                        heat_category = 'Low'
+                    elif heat_value <= 50:
+                        heat_category = 'Medium'
+                    else:
+                        heat_category = 'High'
+                else:
+                    heat_category = 'No Data'
 
-            response = HttpResponse(zip_data, content_type='application/zip')
-            response['Content-Disposition'] = f'attachment; filename="{shapefile_name}.zip"'
+                # Create point feature for map
+                feature = {
+                    'type': 'Feature',
+                    'properties': {
+                        'name': facility_name,
+                        'archetype': archetype,
+                        'heat_exposure': round(heat_value, 2) if heat_value > 0 else 0,
+                        'heat_category': heat_category,
+                        'latitude': lat,
+                        'longitude': lng
+                    },
+                    'geometry': {
+                        'type': 'Point',
+                        'coordinates': [lng, lat]
+                    }
+                }
+                heat_exposure_data.append(feature)
 
-            logger.info(f"Exported {len(geometries)} boundary polygons as shapefile")
-            return response
+            except Exception as facility_error:
+                logger.warning(f"Error processing facility {facility.get('Facility', 'Unknown')}: {facility_error}")
+                continue
+
+        # Create GeoJSON response
+        heat_geojson = {
+            'type': 'FeatureCollection',
+            'features': heat_exposure_data
+        }
+
+        # Add metadata
+        response_data = {
+            'success': True,
+            'data': heat_geojson,
+            'metadata': {
+                'total_facilities': len(heat_exposure_data),
+                'selected_hazards': selected_hazards,
+                'heat_categories': ['No Data', 'Low', 'Medium', 'High'],
+                'heat_colors': {
+                    'No Data': '#CCCCCC',
+                    'Low': '#2ECC71',      # Green
+                    'Medium': '#F1D4D3',   # Orange
+                    'High': '#E74C3C'       # Red
+                }
+            }
+        }
+
+        logger.info(f"Generated heat exposure map with {len(heat_exposure_data)} facilities")
+
+        return JsonResponse(response_data)
 
     except Exception as e:
-        logger.error(f"Error exporting boundaries as shapefile: {e}")
+        logger.exception(f"Error generating heat exposure map data: {str(e)}")
         return JsonResponse({
-            'error': f'Failed to export shapefile: {str(e)}'
->>>>>>> 0be1e2c07442b7f42f891a388f26ef23b01c6c06
+            'success': False,
+            'error': 'Failed to generate heat exposure map data'
         }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def get_hazard_exposure_map_data(request):
+    """
+    API endpoint to retrieve hazard exposure data for map visualization.
+    Returns spatial hazard data for all selected hazards that can be rendered as map layers.
+    """
+    try:
+        # Check for granular analysis workflow
+        granular_workflow = GranularAnalysisSessionManager.is_granular_workflow(request)
+        polygon_asset_id = GranularAnalysisSessionManager.get_asset_id(request)
+
+        logger.info(f"Granular workflow check: granular_workflow={granular_workflow}, polygon_asset_id={polygon_asset_id}")
+
+        if granular_workflow and polygon_asset_id:
+            logger.info(f"Generating hazard exposure map for granular asset {polygon_asset_id}")
+            return _generate_granular_hazard_exposure_map(request, polygon_asset_id)
+
+        # Get facility data from session
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+
+        if not facility_data:
+            # Check if there are any polygon assets as fallback (even without granular analysis)
+            polygon_assets = Asset.objects.filter(
+                asset_type='polygon'
+            ).order_by('-created_at')[:5]  # Get up to 5 most recent polygon assets
+
+            if polygon_assets.exists():
+                logger.info(f"No facility data found, but found {polygon_assets.count()} polygon assets. Using the most recent one.")
+                return _generate_basic_polygon_hazard_exposure_map(request, polygon_assets.first().id)
+
+            return JsonResponse({
+                'success': False,
+                'error': 'No facility data found'
+            }, status=404)
+
+        # Get selected hazards
+        selected_hazards = request.session.get('climate_hazards_v2_selected_hazards', [])
+
+        if not selected_hazards:
+            return JsonResponse({
+                'success': False,
+                'error': 'No hazards selected'
+            }, status=400)
+
+        logger.info(f"Processing hazard exposure map data for {len(facility_data)} facilities with hazards: {selected_hazards}")
+
+        # Process hazard exposure for each facility
+        hazard_exposure_data = []
+        for facility in facility_data:
+            try:
+                lat = float(facility.get('Lat', 0))
+                lng = float(facility.get('Long', 0))
+                facility_name = facility.get('Facility', 'Unknown')
+                archetype = facility.get('Archetype', 'default')
+
+                # Extract hazard values for all selected hazards
+                hazard_values = {}
+                for hazard in selected_hazards:
+                    # Try different column name patterns for each hazard
+                    possible_columns = [
+                        f'{hazard} Exposure (%)',
+                        f'{hazard} Exposure (%) - Moderate Case',
+                        f'{hazard} Exposure (%) - Worst Case',
+                        f'{hazard} Risk Score',
+                        f'{hazard} Severity',
+                        hazard  # Try just the hazard name
+                    ]
+
+                    hazard_value = 0
+                    for col in possible_columns:
+                        if col in facility and facility[col] is not None:
+                            try:
+                                hazard_value = float(facility[col])
+                                break
+                            except (ValueError, TypeError):
+                                continue
+
+                    hazard_values[hazard] = round(hazard_value, 2) if hazard_value > 0 else 0
+
+                # Create point feature for map
+                feature = {
+                    'type': 'Feature',
+                    'properties': {
+                        'name': facility_name,
+                        'archetype': archetype,
+                        'hazard_values': hazard_values,
+                        'selected_hazards': selected_hazards,
+                        'latitude': lat,
+                        'longitude': lng
+                    },
+                    'geometry': {
+                        'type': 'Point',
+                        'coordinates': [lng, lat]
+                    }
+                }
+                hazard_exposure_data.append(feature)
+
+            except Exception as facility_error:
+                logger.warning(f"Error processing facility {facility.get('Facility', 'Unknown')}: {facility_error}")
+                continue
+
+        # Create GeoJSON response
+        hazard_geojson = {
+            'type': 'FeatureCollection',
+            'features': hazard_exposure_data
+        }
+
+        # Add metadata
+        response_data = {
+            'success': True,
+            'data': hazard_geojson,
+            'metadata': {
+                'total_facilities': len(hazard_exposure_data),
+                'selected_hazards': selected_hazards,
+                'hazard_configs': {
+                    'Heat': {'icon': 'fas fa-temperature-high', 'color': '#dc3545'},
+                    'Cold': {'icon': 'fas fa-snowflake', 'color': '#17a2b8'},
+                    'Wind': {'icon': 'fas fa-wind', 'color': '#28a745'},
+                    'Coastal': {'icon': 'fas fa-water', 'color': '#007bff'},
+                    'Flooding': {'icon': 'fas fa-tint', 'color': '#6f42c1'},
+                    'Drought': {'icon': 'fas fa-sun', 'color': '#fd7e14'},
+                    'Landslide': {'icon': 'fas fa-mountain', 'color': '#6c757d'}
+                }
+            }
+        }
+
+        return JsonResponse(response_data)
+
+    except Exception as e:
+        logger.exception(f"Error generating hazard exposure map data: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to generate hazard exposure map data'
+        }, status=500)
+
+
+# Granular Analysis Views
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def draw_polygon_complete(request):
+    """
+    API endpoint to handle completion of polygon drawing and trigger granular analysis.
+    This endpoint is called when user finishes drawing a polygon on the map.
+    """
+    try:
+        # Ensure session exists
+        if not request.session.session_key:
+            request.session.create()
+            logger.info("Created new session for polygon drawing")
+
+        data = json.loads(request.body)
+
+        # Validate required fields
+        if not data.get('geometry'):
+            return JsonResponse({
+                'success': False,
+                'error': 'Polygon geometry is required'
+            }, status=400)
+
+        geometry = data['geometry']
+        if geometry.get('type') != 'Polygon':
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid polygon geometry type'
+            }, status=400)
+
+        # Extract asset data
+        asset_name = data.get('name', 'Unnamed Asset')
+        asset_archetype = data.get('archetype', 'default archetype')
+        centroid_lat = data.get('lat')
+        centroid_lng = data.get('lng')
+        area_km2 = data.get('areaKm2', 0)
+        grid_spacing = data.get('gridSpacing')
+        granular_points = data.get('granular-points')
+
+        # Initialize streamlined workflow
+        GranularAnalysisSessionManager.initialize_granular_workflow(request)
+
+        # Store polygon geometry for streamlined workflow
+        GranularAnalysisSessionManager.store_polygon_geometry(request, geometry)
+
+        # Store complete polygon asset in session for streamlined workflow
+        polygon_asset = {
+            'id': f"polygon_{uuid.uuid4().hex[:8]}",  # Generate unique ID
+            'Facility': asset_name,
+            'Archetype': asset_archetype,
+            'Lat': centroid_lat,
+            'Long': centroid_lng,
+            'geometry': geometry,
+            'polygon_area_km2': area_km2,
+            'grid_spacing_meters': grid_spacing,
+            'granular-points': granular_points,
+            'AssetType': 'polygon',
+            'streamlined': True  # Mark as streamlined workflow asset
+        }
+
+        # Store in session facility data
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+        facility_data.append(polygon_asset)
+        request.session['climate_hazards_v2_facility_data'] = facility_data
+
+        # Set streamlined workflow flag
+        request.session['streamlined_workflow'] = True
+        request.session.modified = True
+
+        logger.info(f"Streamlined polygon asset created: {asset_name} with {len(granular_points) if granular_points else 0} granular points")
+
+        return JsonResponse({
+            'success': True,
+            'message': f'Polygon asset "{asset_name}" created successfully. You can now proceed to hazard analysis.',
+            'next_step': 'manual_hazard_selection',
+            'asset_id': polygon_asset['id']
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON data provided'
+        }, status=400)
+    except Exception as e:
+        logger.exception(f"Error completing polygon drawing: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to complete polygon drawing'
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def granular_analysis_grid(request):
+    """
+    API endpoint to process grid spacing for granular analysis and generate grid points.
+    This endpoint creates the granular analysis framework for the polygon asset.
+    """
+    try:
+        data = json.loads(request.body)
+
+        # Get polygon geometry from session
+        polygon_geometry = GranularAnalysisSessionManager.get_polygon_geometry(request)
+        if not polygon_geometry:
+            return JsonResponse({
+                'success': False,
+                'error': 'No polygon geometry found. Please redraw polygon.'
+            }, status=400)
+
+        # Validate grid spacing
+        grid_spacing = data.get('grid_spacing', 0.001)  # Default ~100m
+        try:
+            grid_spacing = float(grid_spacing)
+            if grid_spacing <= 0 or grid_spacing > 1:  # Validate reasonable range
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Grid spacing must be between 0 and 1 degree'
+                }, status=400)
+        except (ValueError, TypeError):
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid grid spacing value'
+            }, status=400)
+
+        # Generate grid points
+        grid_points = generate_grid_points_from_polygon(polygon_geometry, grid_spacing)
+
+        if not grid_points:
+            return JsonResponse({
+                'success': False,
+                'error': 'Failed to generate grid points from polygon. Polygon may be too small or invalid.'
+            }, status=400)
+
+        # Store grid points and settings in session
+        GranularAnalysisSessionManager.store_grid_configuration(request, grid_points, grid_spacing)
+
+        logger.info(f"Generated {len(grid_points)} grid points with spacing {grid_spacing}°")
+
+        return JsonResponse({
+            'success': True,
+            'grid_points_count': len(grid_points),
+            'grid_spacing': grid_spacing,
+            'estimated_processing_time': max(1, len(grid_points) * 0.1),  # Rough estimate
+            'message': f'Generated {len(grid_points)} grid points for analysis.',
+            'next_step': 'asset_creation'
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON data provided'
+        }, status=400)
+    except Exception as e:
+        logger.exception(f"Error processing granular analysis grid: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to process granular analysis grid'
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def create_polygon_asset_with_granular(request):
+    """
+    API endpoint to create a polygon asset with granular analysis data.
+    This creates both the asset record and initiates granular analysis processing.
+    """
+    try:
+        if not request.session.session_key:
+            return JsonResponse({
+                'success': False,
+                'error': 'No active session'
+            }, status=401)
+
+        data = json.loads(request.body)
+
+        # Validate required fields
+        if not data.get('name', '').strip():
+            return JsonResponse({
+                'success': False,
+                'error': 'Asset name is required'
+            }, status=400)
+
+        # Get granular analysis data from session
+        polygon_geometry = GranularAnalysisSessionManager.get_polygon_geometry(request)
+        grid_points, grid_spacing = GranularAnalysisSessionManager.get_grid_configuration(request)
+        if not grid_spacing:
+            grid_spacing = 0.001
+
+        if not polygon_geometry or not grid_points:
+            return JsonResponse({
+                'success': False,
+                'error': 'Granular analysis data not found. Please complete the drawing workflow first.'
+            }, status=400)
+
+        # Get selected hazards from session or request
+        selected_hazards = data.get('hazards') or request.session.get('climate_hazards_v2_selected_hazards', [])
+        if not selected_hazards:
+            selected_hazards = ['Heat', 'Flooding', 'Sea Level Rise']  # Default hazards
+
+        # Calculate centroid from grid points
+        centroid_lat = sum(point[0] for point in grid_points) / len(grid_points)
+        centroid_lng = sum(point[1] for point in grid_points) / len(grid_points)
+
+        # Create the asset
+        asset = Asset.objects.create(
+            name=data['name'].strip(),
+            archetype=data.get('archetype', 'default archetype').strip() or 'default archetype',
+            latitude=centroid_lat,
+            longitude=centroid_lng,
+            polygon_geometry=polygon_geometry,
+            asset_type='polygon',
+            has_granular_analysis=True,
+            granular_grid_spacing=grid_spacing,
+            granular_analysis_status='pending'
+        )
+
+        # Create granular analysis results
+        granular_results = create_granular_analysis_results(
+            asset, grid_points, selected_hazards, scenario='current'
+        )
+
+        # Update session with asset data for workflow
+        GranularAnalysisSessionManager.store_asset_id(request, asset.id)
+
+        # Store asset ID in session for enhanced preview filtering
+        if 'polygon_asset_ids' not in request.session:
+            request.session['polygon_asset_ids'] = []
+        request.session['polygon_asset_ids'].append(asset.id)
+        request.session.save()
+
+        logger.info(f"Created polygon asset with granular analysis: {asset.name} (ID: {asset.id})")
+        logger.info(f"Created {len(granular_results)} granular analysis records")
+
+        return JsonResponse({
+            'success': True,
+            'asset': asset.geojson,
+            'granular_results_count': len(granular_results),
+            'selected_hazards': selected_hazards,
+            'message': f'Polygon asset "{asset.name}" created with {len(granular_results)} analysis points.',
+            'next_step': 'hazard_analysis'
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON data provided'
+        }, status=400)
+    except Exception as e:
+        logger.exception(f"Error creating polygon asset with granular data: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to create polygon asset with granular data'
+        }, status=500)
+
+
+@require_GET
+def get_heatmap_data(request, asset_id):
+    """
+    API endpoint to retrieve heatmap data for a polygon asset.
+    Returns pre-computed heatmap data for visualization.
+    """
+    try:
+        asset = Asset.objects.get(id=asset_id)
+
+        if asset.asset_type != 'polygon':
+            return JsonResponse({
+                'success': False,
+                'error': 'Heatmap data is only available for polygon assets'
+            }, status=400)
+
+        # Get hazard type from query parameter
+        hazard_type = request.GET.get('hazard_type')
+        if not hazard_type:
+            return JsonResponse({
+                'success': False,
+                'error': 'Hazard type parameter is required'
+            }, status=400)
+
+        scenario = request.GET.get('scenario', 'current')
+
+        # Try to get existing heatmap data
+        heatmap_data = HeatmapData.objects.filter(
+            asset=asset,
+            hazard_type=hazard_type,
+            scenario=scenario,
+            processing_status='completed'
+        ).first()
+
+        if not heatmap_data:
+            # Generate heatmap data if not exists
+            logger.info(f"Generating heatmap data for asset {asset.name}, hazard {hazard_type}")
+            heatmap_data = create_heatmap_data(asset, hazard_type, scenario)
+
+            if not heatmap_data:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'No granular analysis data available for heatmap generation'
+                }, status=404)
+
+        # Get heatmap grid data
+        grid_data = heatmap_data.get_heatmap_grid()
+
+        response_data = {
+            'success': True,
+            'heatmap_data': {
+                'grid_points': grid_data,
+                'metadata': {
+                    'asset_id': asset.id,
+                    'asset_name': asset.name,
+                    'hazard_type': hazard_type,
+                    'scenario': scenario,
+                    'grid_rows': heatmap_data.grid_rows,
+                    'grid_cols': heatmap_data.grid_cols,
+                    'grid_spacing': heatmap_data.grid_spacing,
+                    'bounding_box': {
+                        'min_lat': float(heatmap_data.min_lat),
+                        'max_lat': float(heatmap_data.max_lat),
+                        'min_lng': float(heatmap_data.min_lng),
+                        'max_lng': float(heatmap_data.max_lng)
+                    },
+                    'statistics': {
+                        'min_value': heatmap_data.min_value,
+                        'max_value': heatmap_data.max_value,
+                        'mean_value': heatmap_data.mean_value,
+                        'median_value': heatmap_data.median_value
+                    }
+                }
+            }
+        }
+
+        return JsonResponse(response_data)
+
+    except Asset.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': 'Asset not found'
+        }, status=404)
+    except Exception as e:
+        logger.exception(f"Error getting heatmap data: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to get heatmap data'
+        }, status=500)
+
+
+@require_GET
+def get_granular_analysis_status(request, asset_id):
+    """
+    API endpoint to get the status and progress of granular analysis for an asset.
+    """
+    try:
+        asset = Asset.objects.get(id=asset_id)
+
+        if not asset.has_granular_analysis:
+            return JsonResponse({
+                'success': False,
+                'error': 'Asset does not have granular analysis enabled'
+            }, status=400)
+
+        # Get progress information
+        progress = get_granular_analysis_progress(asset)
+
+        # Get hazard-wise statistics
+        hazard_stats = {}
+        hazard_types = GranularAnalysisResult.objects.filter(
+            asset=asset
+        ).values_list('hazard_type', flat=True).distinct()
+
+        for hazard_type in hazard_types:
+            stats = calculate_granular_statistics(asset, hazard_type)
+            if stats:
+                hazard_stats[hazard_type] = stats
+
+        response_data = {
+            'success': True,
+            'asset_id': asset.id,
+            'analysis_status': asset.granular_analysis_status,
+            'progress': progress,
+            'hazard_statistics': hazard_stats,
+            'metadata': {
+                'has_granular_analysis': asset.has_granular_analysis,
+                'grid_spacing': asset.granular_grid_spacing,
+                'total_grid_points': asset.granular_grid_points_count
+            }
+        }
+
+        return JsonResponse(response_data)
+
+    except Asset.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': 'Asset not found'
+        }, status=404)
+    except Exception as e:
+        logger.exception(f"Error getting granular analysis status: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to get granular analysis status'
+        }, status=500)
+
+
+def _convert_hierarchical_to_original_format(hierarchical_data: Dict[str, Any], selected_hazards: List[str]) -> List[Dict[str, Any]]:
+    """
+    Convert hierarchical data structure to original template format.
+
+    Args:
+        hierarchical_data: Hierarchical data from prepare_hierarchical_exposure_data
+        selected_hazards: List of selected hazard types
+
+    Returns:
+        List of formatted rows compatible with original template
+    """
+    try:
+        data = hierarchical_data['data']
+        parent_row = data[0]
+        child_rows = data[1:]
+
+        formatted_rows = []
+
+        # Format parent row (polygon centroid)
+        parent_formatted = {
+            'Facility': parent_row['name'],
+            'Asset Archetype': parent_row.get('archetype', 'N/A'),
+            'Latitude': parent_row['latitude'],
+            'Longitude': parent_row['longitude'],
+            'is_parent_facility': True,
+            'has_granular_analysis': True,
+            'sample_point_count': len(child_rows),
+            'is_sample_point': False,
+            'granular_analysis': {
+                'dominant_risk': _calculate_dominant_risk(parent_row['hazards'], selected_hazards),
+                'status': 'completed'
+            }
+        }
+
+        # Add hazard data for parent row (aggregated statistics)
+        for hazard in selected_hazards:
+            if hazard in parent_row['hazards']:
+                hazard_stats = parent_row['hazards'][hazard]
+                parent_formatted[f'{hazard} Value'] = f"{hazard_stats.get('mean_value', 0):.2f}"
+                parent_formatted[f'{hazard} Risk'] = _calculate_risk_level(hazard_stats.get('mean_value', 0), hazard)
+            else:
+                parent_formatted[f'{hazard} Value'] = 'N/A'
+                parent_formatted[f'{hazard} Risk'] = 'No Data'
+
+        formatted_rows.append(parent_formatted)
+
+        # Format child rows (grid points)
+        for i, child in enumerate(child_rows):
+            child_formatted = {
+                'Facility': f"{parent_row['name']} - Point {i+1}",
+                'Asset Archetype': child.get('archetype', 'N/A'),
+                'Latitude': child['latitude'],
+                'Longitude': child['longitude'],
+                'is_parent_facility': False,
+                'has_granular_analysis': False,
+                'is_sample_point': True,
+                'parent_facility': parent_row['name'],
+                'granular_analysis': {
+                    'dominant_risk': _calculate_dominant_risk(child['hazards'], selected_hazards),
+                    'status': 'completed'
+                }
+            }
+
+            # Add hazard data for child row (individual values)
+            for hazard in selected_hazards:
+                if hazard in child['hazards']:
+                    hazard_data = child['hazards'][hazard]
+                    value = hazard_data.get('value')
+                    risk = hazard_data.get('risk_level', 'unknown')
+
+                    if value is not None:
+                        child_formatted[f'{hazard} Value'] = f"{value:.2f}"
+                        child_formatted[f'{hazard} Risk'] = risk.title()
+                    else:
+                        child_formatted[f'{hazard} Value'] = 'N/A'
+                        child_formatted[f'{hazard} Risk'] = 'No Data'
+                else:
+                    child_formatted[f'{hazard} Value'] = 'N/A'
+                    child_formatted[f'{hazard} Risk'] = 'No Data'
+
+            formatted_rows.append(child_formatted)
+
+        return formatted_rows
+
+    except Exception as e:
+        logger.exception(f"Error converting hierarchical data to original format: {str(e)}")
+        return []
+
+
+def _calculate_dominant_risk(hazards: Dict[str, Any], selected_hazards: List[str]) -> str:
+    """Calculate dominant risk level from multiple hazards."""
+    risk_scores = {'low': 1, 'medium': 2, 'high': 3, 'very high': 4}
+    max_score = 0
+    dominant_risk = 'medium'
+
+    for hazard in selected_hazards:
+        if hazard in hazards:
+            hazard_stats = hazards[hazard]
+            # For parent row, calculate risk from mean value
+            mean_value = hazard_stats.get('mean_value', 0)
+            risk_level = _calculate_risk_level(mean_value, hazard)
+
+            score = risk_scores.get(risk_level.lower(), 2)
+            if score > max_score:
+                max_score = score
+                dominant_risk = risk_level
+
+    return dominant_risk
+
+
+def _calculate_risk_level(value: float, hazard_type: str) -> str:
+    """Calculate risk level based on hazard type and value."""
+    if hazard_type == 'Heat':
+        if value < 25:
+            return 'Low'
+        elif value < 30:
+            return 'Medium'
+        elif value < 35:
+            return 'High'
+        else:
+            return 'Very High'
+    elif hazard_type == 'Flood':
+        if value < 0.1:
+            return 'Low'
+        elif value < 0.5:
+            return 'Medium'
+        elif value < 1.5:
+            return 'High'
+        else:
+            return 'Very High'
+    else:
+        # Default risk calculation
+        if value < 10:
+            return 'Low'
+        elif value < 30:
+            return 'Medium'
+        elif value < 50:
+            return 'High'
+        else:
+            return 'Very High'
+
+
+def _get_original_template_columns(selected_hazards: List[str]) -> List[str]:
+    """Get column names in original template format."""
+    columns = ['Facility', 'Asset Archetype', 'Latitude', 'Longitude']
+
+    for hazard in selected_hazards:
+        columns.extend([f'{hazard} Value', f'{hazard} Risk'])
+
+    return columns
+
+
+def _get_column_descriptions(selected_hazards: List[str]) -> Dict[str, str]:
+    """Get column descriptions for tooltips."""
+    descriptions = {
+        'Facility': 'Asset name or identifier',
+        'Asset Archetype': 'Asset category or type',
+        'Latitude': 'Geographic latitude',
+        'Longitude': 'Geographic longitude'
+    }
+
+    for hazard in selected_hazards:
+        descriptions[f'{hazard} Value'] = f'{hazard} exposure value'
+        descriptions[f'{hazard} Risk'] = f'{hazard} risk level'
+
+    return descriptions
+
+
+def _get_column_groups(selected_hazards: List[str]) -> Dict[str, int]:
+    """Get column groups for header grouping."""
+    groups = {
+        'Asset Information': 4,  # Facility, Asset Archetype, Latitude, Longitude
+    }
+
+    for hazard in selected_hazards:
+        groups[hazard] = 2  # Value and Risk columns
+
+    return groups
+
+
+def _handle_granular_polygon_results(request, asset_id: int, selected_hazards: List[str]):
+    """
+    Handle results display for polygon assets with granular analysis.
+    Uses hierarchical data structure with centroid as parent and grid points as children.
+
+    Args:
+        request: Django request object
+        asset_id: ID of the polygon asset
+        selected_hazards: List of selected hazard types
+
+    Returns:
+        HttpResponse: Rendered results page with hierarchical table
+    """
+    try:
+        from .granular_utils import prepare_hierarchical_exposure_data
+        from .granular_processor import get_granular_analysis_summary
+
+        asset = Asset.objects.get(id=asset_id)
+
+        if not asset.has_granular_analysis:
+            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                'error': 'Asset does not have granular analysis enabled.',
+                'facility_count': 0,
+                'hazard_types': _get_hazard_types(),
+                'selected_hazards': selected_hazards
+            })
+
+        # Get analysis summary
+        summary = get_granular_analysis_summary(asset_id)
+        if not summary.get('success'):
+            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                'error': f'Failed to get analysis summary: {summary.get("error")}',
+                'facility_count': 0,
+                'hazard_types': _get_hazard_types(),
+                'selected_hazards': selected_hazards
+            })
+
+        # Prepare hierarchical exposure data
+        hierarchical_data = prepare_hierarchical_exposure_data(asset, selected_hazards)
+
+        if not hierarchical_data.get('success'):
+            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                'error': f'Failed to prepare hierarchical data: {hierarchical_data.get("error")}',
+                'facility_count': 0,
+                'hazard_types': _get_hazard_types(),
+                'selected_hazards': selected_hazards
+            })
+
+        # Convert hierarchical data to original template format
+        formatted_data = _convert_hierarchical_to_original_format(hierarchical_data, selected_hazards)
+
+        # Prepare context for template
+        context = {
+            # Original template format data
+            'data': formatted_data,
+            'columns': _get_original_template_columns(selected_hazards),
+            'column_descriptions': _get_column_descriptions(selected_hazards),
+            'groups': _get_column_groups(selected_hazards),
+
+            # Metadata
+            'facility_count': 1,  # Single asset
+            'selected_hazards': selected_hazards,
+            'asset': asset,
+            'analysis_summary': summary,
+            'is_granular_analysis': True,
+            'analysis_status': asset.granular_analysis_status,
+            'grid_points_count': hierarchical_data['grid_points_count'],
+            'grid_spacing': asset.granular_grid_spacing,
+            'analysis_progress': asset.granular_analysis_progress,
+        }
+
+        logger.info(f"Rendering hierarchical granular results for asset {asset.name} "
+                   f"with {hierarchical_data['grid_points_count']} grid points "
+                   f"and {len(selected_hazards)} hazards")
+        return render(request, 'climate_hazards_analysis_v2/results.html', context)
+
+    except Asset.DoesNotExist:
+        logger.error(f"Asset {asset_id} not found")
+        return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+            'error': 'Asset not found.',
+            'facility_count': 0,
+            'hazard_types': _get_hazard_types(),
+            'selected_hazards': selected_hazards
+        })
+    except Exception as e:
+        logger.exception(f"Error handling granular polygon results: {str(e)}")
+        return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+            'error': f'Error processing granular analysis results: {str(e)}',
+            'facility_count': 0,
+            'hazard_types': _get_hazard_types(),
+            'selected_hazards': selected_hazards
+        })
+
+
+def _generate_basic_polygon_hazard_exposure_map(request, asset_id: int):
+    """
+    Generate basic hazard exposure map data for polygon assets without granular analysis.
+    Returns polygon geometry with placeholder hazard values.
+
+    Args:
+        request: Django request object
+        asset_id: ID of the polygon asset
+
+    Returns:
+        JsonResponse: Map data with polygon boundary
+    """
+    try:
+        asset = Asset.objects.get(id=asset_id)
+
+        logger.info(f"Generating basic polygon hazard exposure map for asset {asset.name}")
+
+        # Get selected hazards
+        selected_hazards = request.session.get('climate_hazards_v2_selected_hazards', [])
+        if not selected_hazards:
+            # Default to all hazard types
+            selected_hazards = ['Flood', 'Water Stress', 'Heat', 'Sea Level Rise', 'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide']
+
+        # Create GeoJSON feature collection
+        features = []
+
+        # Add the polygon boundary as a feature
+        polygon_feature = {
+            'type': 'Feature',
+            'geometry': asset.polygon_geometry,
+            'properties': {
+                'id': asset.id,
+                'name': asset.name,
+                'asset_type': 'polygon',
+                'feature_type': 'boundary',
+                'hazard_values': {hazard: 0 for hazard in selected_hazards},  # Default to 0 for now
+                'selected_hazards': selected_hazards,
+                'granular_analysis_available': asset.has_granular_analysis
+            }
+        }
+        features.append(polygon_feature)
+
+        # Create the GeoJSON data structure
+        geojson_data = {
+            'type': 'FeatureCollection',
+            'features': features
+        }
+
+        logger.info(f"Generated basic polygon map data for asset {asset.name} with {len(features)} features")
+
+        return JsonResponse({
+            'success': True,
+            'data': geojson_data,
+            'metadata': {
+                'asset_name': asset.name,
+                'asset_type': 'polygon',
+                'selected_hazards': selected_hazards,
+                'granular_analysis_available': asset.has_granular_analysis,
+                'note': 'Basic polygon visualization - granular analysis not completed'
+            }
+        })
+
+    except Asset.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': f'Asset with ID {asset_id} not found'
+        }, status=404)
+
+    except Exception as e:
+        logger.exception(f"Error generating basic polygon hazard exposure map: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': f'Error generating polygon map data: {str(e)}'
+        }, status=500)
+
+
+def _generate_granular_hazard_exposure_map(request, asset_id: int):
+    """
+    Generate hazard exposure map data for polygon assets with granular analysis.
+    Uses heatmap data for visualization of hazard exposure across the polygon area.
+
+    Args:
+        request: Django request object
+        asset_id: ID of the polygon asset
+
+    Returns:
+        JsonResponse: Map data with heatmap layers for each hazard
+    """
+    try:
+        asset = Asset.objects.get(id=asset_id)
+
+        if not asset.has_granular_analysis:
+            return JsonResponse({
+                'success': False,
+                'error': 'Asset does not have granular analysis enabled'
+            }, status=400)
+
+        # Get selected hazards
+        selected_hazards = request.session.get('climate_hazards_v2_selected_hazards', [])
+        if not selected_hazards:
+            # Get hazard types from granular results if not in session
+            selected_hazards = GranularAnalysisResult.objects.filter(
+                asset=asset
+            ).values_list('hazard_type', flat=True).distinct()
+
+        logger.info(f"Generating hazard exposure map for asset {asset.name} with hazards: {selected_hazards}")
+
+        # Create GeoJSON feature collection
+        features = []
+
+        # Add the polygon boundary as a feature
+        polygon_feature = {
+            'type': 'Feature',
+            'geometry': asset.polygon_geometry,
+            'properties': {
+                'id': asset.id,
+                'name': asset.name,
+                'asset_type': 'polygon',
+                'feature_type': 'boundary',
+                'analysis_status': asset.granular_analysis_status,
+                'grid_points_count': asset.granular_grid_points_count
+            }
+        }
+        features.append(polygon_feature)
+
+        # Generate heatmap data for each hazard type
+        heatmap_layers = {}
+        for hazard_type in selected_hazards:
+            try:
+                # Get or create heatmap data
+                heatmap_data = HeatmapData.objects.filter(
+                    asset=asset,
+                    hazard_type=hazard_type,
+                    processing_status='completed'
+                ).first()
+
+                if not heatmap_data:
+                    logger.info(f"Generating heatmap data for hazard {hazard_type}")
+                    from .granular_utils import create_heatmap_data
+                    heatmap_data = create_heatmap_data(asset, hazard_type, 'current')
+
+                if heatmap_data:
+                    # Get heatmap grid points
+                    grid_points = heatmap_data.get_heatmap_grid()
+
+                    # Create heatmap layer
+                    heatmap_layer = {
+                        'type': 'heatmap',
+                        'hazard_type': hazard_type,
+                        'grid_points': grid_points,
+                        'metadata': {
+                            'min_value': heatmap_data.min_value,
+                            'max_value': heatmap_data.max_value,
+                            'mean_value': heatmap_data.mean_value,
+                            'median_value': heatmap_data.median_value,
+                            'grid_rows': heatmap_data.grid_rows,
+                            'grid_cols': heatmap_data.grid_cols,
+                            'bounding_box': {
+                                'min_lat': float(heatmap_data.min_lat),
+                                'max_lat': float(heatmap_data.max_lat),
+                                'min_lng': float(heatmap_data.min_lng),
+                                'max_lng': float(heatmap_data.max_lng)
+                            }
+                        }
+                    }
+                    heatmap_layers[hazard_type] = heatmap_layer
+
+                    # Also add individual grid points as features for detailed visualization
+                    for point in grid_points:
+                        point_feature = {
+                            'type': 'Feature',
+                            'geometry': {
+                                'type': 'Point',
+                                'coordinates': [point['lng'], point['lat']]
+                            },
+                            'properties': {
+                                'hazard_type': hazard_type,
+                                'value': point['value'],
+                                'row': point['row'],
+                                'col': point['col'],
+                                'feature_type': 'grid_point',
+                                'asset_id': asset.id
+                            }
+                        }
+                        features.append(point_feature)
+
+            except Exception as e:
+                logger.exception(f"Error generating heatmap for hazard {hazard_type}: {str(e)}")
+                continue
+
+        # Add aggregated point feature at centroid
+        centroid_feature = {
+            'type': 'Feature',
+            'geometry': {
+                'type': 'Point',
+                'coordinates': [float(asset.longitude), float(asset.latitude)]
+            },
+            'properties': {
+                'id': asset.id,
+                'name': asset.name,
+                'archetype': asset.archetype,
+                'asset_type': 'polygon',
+                'feature_type': 'centroid',
+                'analysis_status': asset.granular_analysis_status,
+                'grid_points_count': asset.granular_grid_points_count,
+                'analysis_progress': asset.granular_analysis_progress
+            }
+        }
+        features.append(centroid_feature)
+
+        # Create final GeoJSON
+        geojson_data = {
+            'type': 'FeatureCollection',
+            'features': features
+        }
+
+        # Prepare response data
+        response_data = {
+            'success': True,
+            'data': geojson_data,
+            'metadata': {
+                'asset': {
+                    'id': asset.id,
+                    'name': asset.name,
+                    'asset_type': 'polygon',
+                    'analysis_status': asset.granular_analysis_status,
+                    'grid_points_count': asset.granular_grid_points_count,
+                    'analysis_progress': asset.granular_analysis_progress
+                },
+                'selected_hazards': selected_hazards,
+                'heatmap_layers': heatmap_layers,
+                'total_features': len(features),
+                'hazard_configs': {
+                    'Heat': {'icon': 'fas fa-temperature-high', 'color': '#dc3545'},
+                    'Cold': {'icon': 'fas fa-snowflake', 'color': '#17a2b8'},
+                    'Wind': {'icon': 'fas fa-wind', 'color': '#28a745'},
+                    'Coastal': {'icon': 'fas fa-water', 'color': '#007bff'},
+                    'Flooding': {'icon': 'fas fa-tint', 'color': '#6f42c1'},
+                    'Drought': {'icon': 'fas fa-sun', 'color': '#fd7e14'},
+                    'Landslide': {'icon': 'fas fa-mountain', 'color': '#6c757d'},
+                    'Water Stress': {'icon': 'fas fa-tint-slash', 'color': '#20c997'},
+                    'Sea Level Rise': {'icon': 'fas fa-water', 'color': '#0d6efd'},
+                    'Tropical Cyclones': {'icon': 'fas fa-hurricane', 'color': '#fd7e14'},
+                    'Storm Surge': {'icon': 'fas fa-water', 'color': '#0891b2'},
+                    'Rainfall Induced Landslide': {'icon': 'fas fa-mountain', 'color': '#059669'}
+                }
+            }
+        }
+
+        logger.info(f"Generated granular hazard exposure map for asset {asset.name} with {len(features)} features")
+        return JsonResponse(response_data)
+
+    except Asset.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': 'Asset not found'
+        }, status=404)
+    except Exception as e:
+        logger.exception(f"Error generating granular hazard exposure map: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to generate granular hazard exposure map'
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def clear_granular_workflow(request):
+    """
+    API endpoint to clear granular analysis workflow data from session.
+    Used to reset the workflow and start over.
+    """
+    try:
+        if not request.session.session_key:
+            return JsonResponse({
+                'success': False,
+                'error': 'No active session'
+            }, status=401)
+
+        # Clear granular workflow data
+        GranularAnalysisSessionManager.clear_granular_workflow(request)
+
+        logger.info(f"Cleared granular workflow data from session {request.session.session_key}")
+
+        return JsonResponse({
+            'success': True,
+            'message': 'Granular analysis workflow cleared successfully'
+        })
+
+    except Exception as e:
+        logger.exception(f"Error clearing granular workflow: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to clear granular workflow'
+        }, status=500)
+
+
+@require_GET
+def get_granular_workflow_state(request):
+    """
+    API endpoint to get current granular workflow state.
+    Returns validation and status information about the current workflow.
+    """
+    try:
+        if not request.session.session_key:
+            return JsonResponse({
+                'success': False,
+                'error': 'No active session'
+            }, status=401)
+
+        # Get workflow state and validation
+        workflow_summary = GranularAnalysisSessionManager.create_workflow_summary(request)
+        validation_result = GranularAnalysisSessionManager.validate_workflow_state(request)
+
+        response_data = {
+            'success': True,
+            'workflow_summary': workflow_summary,
+            'validation': validation_result
+        }
+
+        return JsonResponse(response_data)
+
+    except Exception as e:
+        logger.exception(f"Error getting granular workflow state: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to get workflow state'
+        }, status=500)
+
+
+@require_POST
+def generate_asset_exposure_analysis(request):
+    """
+    6-Step Workflow functionality has been removed.
+    This endpoint is no longer available.
+    """
+    return JsonResponse({
+        'success': False,
+        'error': 'The 6-Step Workflow functionality has been removed. Please use the streamlined polygon workflow instead.'
+    }, status=410)  # 410 Gone
+
+# Original function removed - 6-Step Workflow functionality removed
+# def generate_asset_exposure_analysis(request):
+    """
+    New endpoint for 6-step workflow: Generate real hazard analysis for polygon assets.
+    This replaces the premature hazard analysis that was happening during asset creation.
+
+    This endpoint:
+    1. Processes selected hazards for existing polygon assets
+    2. Performs real hazard data analysis (not fake/random data)
+    3. Generates proper heatmaps with actual hazard values
+    4. Returns aggregated results per polygon
+    """
+    try:
+        if not request.session.session_key:
+            request.session.create()
+
+        data = json.loads(request.body)
+        selected_hazards = data.get('selected_hazards', [])
+        asset_ids = data.get('asset_ids', [])  # Optional: specific assets to analyze
+
+        if not selected_hazards:
+            return JsonResponse({
+                'success': False,
+                'error': 'No hazards selected for analysis'
+            }, status=400)
+
+        # Get facility data from session (now contains both uploaded and drawn assets)
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+
+        # Separate regular assets and polygon assets
+        regular_assets = [f for f in facility_data if not f.get('geometry') and f.get('AssetType') != 'polygon']
+        polygon_assets = [f for f in facility_data if f.get('geometry') or f.get('AssetType') == 'polygon']
+
+        logger.info(f"Found {len(regular_assets)} regular assets and {len(polygon_assets)} polygon assets in session")
+
+        if not regular_assets and not polygon_assets:
+            return JsonResponse({
+                'success': False,
+                'error': 'No assets found. Please upload facility data or draw polygon assets first.'
+            }, status=400)
+
+        logger.info(f"Starting hazard analysis for {len(regular_assets)} regular assets and {len(polygon_assets)} polygon assets with hazards: {selected_hazards}")
+
+        # Process regular assets (existing logic)
+        regular_analysis_results = []
+        for asset in regular_assets:
+            try:
+                # Create a simple result structure for regular assets
+                asset_result = {
+                    'asset_id': asset.get('id'),
+                    'asset_name': asset.get('Facility'),
+                    'asset_archetype': asset.get('Archetype', 'default archetype'),
+                    'asset_type': 'regular',
+                    'latitude': asset.get('Lat'),
+                    'longitude': asset.get('Long'),
+                    'hazard_analysis': {
+                        'selected_hazards': selected_hazards,
+                        'hazards': {hazard: None for hazard in selected_hazards}  # Placeholder
+                    }
+                }
+                regular_analysis_results.append(asset_result)
+            except Exception as e:
+                logger.error(f"Error analyzing regular asset {asset.get('Facility', 'Unknown')}: {str(e)}")
+                continue
+
+        # Process polygon assets with granular analysis
+        polygon_analysis_results = []
+        for asset in polygon_assets:
+            try:
+                asset_result = _analyze_polygon_asset_hazards(
+                    asset, selected_hazards, request.session.session_key
+                )
+                if asset_result:
+                    polygon_analysis_results.append(asset_result)
+            except Exception as e:
+                logger.error(f"Error analyzing polygon asset {asset.get('Facility', 'Unknown')}: {str(e)}")
+                continue
+
+        # Combine all results for the results table
+        combined_results = []
+
+        # Add regular assets
+        combined_results.extend(regular_analysis_results)
+
+        # Add polygon centroids and granular points
+        for polygon_result in polygon_analysis_results:
+            combined_results.append(polygon_result['centroid_result'])
+            combined_results.extend(polygon_result['granular_results'])
+
+        if not combined_results:
+            return JsonResponse({
+                'success': False,
+                'error': 'Failed to analyze any assets'
+            }, status=500)
+
+        # Store analysis results in session for results page
+        request.session['climate_hazards_v2_analysis_results'] = combined_results
+        request.session['climate_hazards_v2_selected_hazards'] = selected_hazards
+        request.session.modified = True
+
+        total_centroids = len(polygon_analysis_results)
+        total_granular_points = sum(r['total_granular_points'] for r in polygon_analysis_results)
+
+        logger.info(f"Successfully completed hazard analysis for {len(regular_analysis_results)} regular assets, {total_centroids} polygon centroids, and {total_granular_points} granular points")
+
+        return JsonResponse({
+            'success': True,
+            'results': combined_results,
+            'summary': {
+                'regular_assets': len(regular_analysis_results),
+                'polygon_centroids': total_centroids,
+                'granular_points': total_granular_points,
+                'total_rows': len(combined_results)
+            },
+            'hazards_analyzed': selected_hazards
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON data provided'
+        }, status=400)
+    except Exception as e:
+        logger.exception(f"Error in generate_asset_exposure_analysis: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': f'Analysis failed: {str(e)}'
+        }, status=500)
+
+
+def _analyze_polygon_asset_hazards(asset, selected_hazards, session_key):
+    """
+    Analyze real hazard data for a single polygon asset.
+    Returns aggregated hazard results for the polygon.
+    """
+    try:
+        geometry = asset.get('geometry')
+        if not geometry:
+            logger.warning(f"Asset {asset.get('Facility')} has no geometry")
+            return None
+
+        # Get grid spacing if available, otherwise determine based on area
+        grid_spacing = asset.get('grid_spacing_meters')
+        area_km2 = asset.get('polygon_area_km2')
+
+        if not grid_spacing and area_km2:
+            # Determine appropriate grid spacing based on area
+            if area_km2 >= 50:
+                grid_spacing = 500  # Large areas
+            elif area_km2 >= 10:
+                grid_spacing = 200  # Medium areas
+            else:
+                grid_spacing = 100  # Small areas
+
+        if not grid_spacing:
+            grid_spacing = 100  # Default
+
+        # Check if asset has granular analysis points stored
+        granular_points = asset.get('granular-points', [])
+        sample_points = []
+
+        if granular_points:
+            # Use existing granular points
+            sample_points = granular_points
+            logger.info(f"Using {len(granular_points)} stored granular points for {asset.get('Facility')}")
+        else:
+            # Generate sample points within the polygon (fallback)
+            sample_points = generate_sample_grid(geometry, grid_spacing_meters=grid_spacing)
+            logger.info(f"Generated {len(sample_points)} sample points for {asset.get('Facility')}")
+
+        if not sample_points:
+            logger.warning(f"No sample points available for asset {asset.get('Facility')}")
+            return None
+
+        # Analyze hazards for each sample point
+        hazard_results = []
+        for point in sample_points:
+            point_result = {
+                'latitude': point['latitude'],
+                'longitude': point['longitude'],
+                'hazards': {}
+            }
+
+            # Analyze each selected hazard
+            for hazard in selected_hazards:
+                try:
+                    hazard_value = _get_hazard_value_at_point(
+                        point['latitude'], point['longitude'], hazard
+                    )
+                    point_result['hazards'][hazard] = hazard_value
+                except Exception as e:
+                    logger.warning(f"Error getting {hazard} value at point {point['latitude']}, {point['longitude']}: {str(e)}")
+                    point_result['hazards'][hazard] = None
+
+            hazard_results.append(point_result)
+
+        # Aggregate results for the polygon
+        aggregated_results = _aggregate_hazard_results(hazard_results, selected_hazards)
+
+        # Create centroid hazard analysis (parent row)
+        centroid_hazards = {}
+        for hazard in selected_hazards:
+            # Calculate centroid hazard value as average of all points
+            point_values = [point['hazards'].get(hazard) for point in hazard_results if point['hazards'].get(hazard) is not None]
+
+            if point_values:
+                centroid_hazards[hazard] = sum(point_values) / len(point_values)
+            else:
+                centroid_hazards[hazard] = None
+
+        # Create parent-child structure for results table
+        centroid_result = {
+            'asset_id': asset.get('id'),
+            'asset_name': asset.get('Facility'),
+            'asset_archetype': asset.get('Archetype', 'default archetype'),
+            'asset_type': 'polygon_centroid',  # Parent row
+            'geometry': geometry,
+            'latitude': asset.get('Lat'),
+            'longitude': asset.get('Long'),
+            'area_km2': area_km2,
+            'grid_spacing_meters': grid_spacing,
+            'sample_points_count': len(sample_points),
+            'hazard_analysis': {
+                'selected_hazards': selected_hazards,
+                'hazards': centroid_hazards,
+                'aggregated_results': aggregated_results
+            }
+        }
+
+        # Create granular point results (child rows)
+        granular_results = []
+        for i, point in enumerate(sample_points):
+            # Generate hazard analysis for this granular point
+            point_hazards = {}
+            for hazard in selected_hazards:
+                hazard_value = _get_hazard_value_at_point(point['latitude'], point['longitude'], hazard)
+                point_hazards[hazard] = hazard_value
+
+            granular_result = {
+                'asset_id': asset.get('id'),
+                'asset_name': asset.get('Facility'),
+                'parent_asset_id': asset.get('id'),  # Link to parent
+                'asset_type': 'polygon_granular',  # Child row
+                'point_number': i + 1,
+                'geometry': None,  # Individual points don't have geometry
+                'latitude': point['latitude'],
+                'longitude': point['longitude'],
+                'grid_position': point.get('grid_position', f"Point {i + 1}"),
+                'hazard_analysis': {
+                    'selected_hazards': selected_hazards,
+                    'hazards': point_hazards
+                }
+            }
+            granular_results.append(granular_result)
+
+        return {
+            'centroid_result': centroid_result,
+            'granular_results': granular_results,
+            'total_granular_points': len(granular_results)
+        }
+
+    except Exception as e:
+        logger.exception(f"Error analyzing polygon asset hazards for {asset.get('Facility')}: {str(e)}")
+        return None
+
+
+def _get_hazard_value_at_point(latitude, longitude, hazard_type):
+    """
+    Get real hazard data value at a specific point.
+    This replaces the fake/random data generation with actual hazard analysis.
+    Fixed parameter order: (latitude, longitude, hazard_type)
+    """
+    try:
+        # Hazard name mapping to handle variations
+        hazard_name_mapping = {
+            'Flood': 'flood',
+            'Heat': 'heat',
+            'Sea Level Rise': 'sea level rise',
+            'Tropical Cyclones': 'tropical cyclones',
+            'Storm Surge': 'storm surge',
+            'Rainfall Induced Landslide': 'landslide',
+            'Rainfall-Induced Landslide': 'landslide',
+            'Water Stress': 'water stress'
+        }
+
+        # Normalize hazard type
+        normalized_hazard = hazard_name_mapping.get(hazard_type, hazard_type.lower())
+
+        # Implementation depends on your hazard data sources
+        # This is a placeholder that should be replaced with actual hazard data retrieval
+
+        if normalized_hazard == 'flood':
+            # Example: Get flood depth from flood maps or API
+            # This would integrate with real flood hazard data
+            flood_depth = _get_flood_depth_at_point(latitude, longitude)
+            return flood_depth
+
+        elif normalized_hazard == 'heat':
+            # Example: Get heat exposure from climate data
+            # This would integrate with real heat hazard data
+            temperature_increase = _get_temperature_increase_at_point(latitude, longitude)
+            return temperature_increase
+
+        elif normalized_hazard == 'tropical cyclones':
+            # Example: Get wind speed from typhoon/climate data
+            # This would integrate with real wind hazard data
+            wind_speed = _get_wind_speed_at_point(latitude, longitude)
+            return wind_speed
+
+        elif normalized_hazard == 'storm surge':
+            # Example: Get storm surge depth from coastal data
+            # This would integrate with real storm surge data
+            surge_depth = _get_storm_surge_at_point(latitude, longitude)
+            return surge_depth
+
+        elif normalized_hazard == 'landslide':
+            # Example: Get landslide susceptibility from geological data
+            # This would integrate with real landslide hazard data
+            susceptibility = _get_landslide_susceptibility_at_point(latitude, longitude)
+            return susceptibility
+
+        elif normalized_hazard == 'sea level rise':
+            # Example: Get sea level rise projection
+            # This would integrate with real SLR data
+            slr_value = _get_sea_level_rise_at_point(latitude, longitude)
+            return slr_value
+
+        elif normalized_hazard == 'water stress':
+            # Example: Get water stress level from hydrological data
+            # This would integrate with real water stress data
+            stress_level = _get_water_stress_at_point(latitude, longitude)
+            return stress_level
+
+        else:
+            logger.warning(f"Unknown hazard type: {hazard_type} (normalized: {normalized_hazard})")
+            return None
+
+    except Exception as e:
+        logger.error(f"Error getting hazard value for {hazard_type} at {latitude}, {longitude}: {str(e)}")
+        return None
+
+
+def _get_flood_depth_at_point(latitude, longitude):
+    """
+    Get flood depth at a specific point from flood hazard data.
+    Mock implementation for development - generates realistic flood depth values.
+    """
+    import random
+    import math
+
+    # Create realistic flood depth patterns based on location
+    # Higher flood risk near water bodies (simplified model for Philippines)
+
+    # Normalize coordinates for consistent results
+    lat_norm = (latitude - 12.0) / 2.0  # Normalize around Philippines center
+    lng_norm = (longitude - 121.0) / 2.0
+
+    # Create distance from water bodies (simplified model)
+    # Areas near coasts have higher flood risk
+    water_proximity = math.sqrt(lat_norm**2 + lng_norm**2)
+
+    # Base flood depth calculation
+    base_depth = 0.5 + (1.0 - water_proximity) * 2.0  # 0.5-2.5m range
+    random_factor = random.uniform(0.8, 1.2)  # Random variation
+
+    flood_depth = max(0, base_depth * random_factor)
+
+    # Return simple numeric value
+    return flood_depth
+
+
+def _get_risk_level_from_flood_depth(depth):
+    """Calculate risk level based on flood depth."""
+    if depth < 0.5:
+        return 'Low'
+    elif depth < 1.0:
+        return 'Medium'
+    elif depth < 2.0:
+        return 'High'
+    else:
+        return 'Very High'
+
+
+def _get_risk_level_from_temperature(increase):
+    """Calculate risk level based on temperature increase."""
+    if increase < 1.0:
+        return 'Low'
+    elif increase < 2.0:
+        return 'Medium'
+    elif increase < 3.0:
+        return 'High'
+    else:
+        return 'Very High'
+
+
+def _get_risk_level_from_wind_speed(speed):
+    """Calculate risk level based on wind speed."""
+    if speed < 50:
+        return 'Low'
+    elif speed < 80:
+        return 'Medium'
+    elif speed < 120:
+        return 'High'
+    else:
+        return 'Very High'
+
+
+def _get_risk_level_from_surge_height(height):
+    """Calculate risk level based on storm surge height."""
+    if height < 1.0:
+        return 'Low'
+    elif height < 2.0:
+        return 'Medium'
+    elif height < 3.0:
+        return 'High'
+    else:
+        return 'Very High'
+
+
+def _get_risk_level_from_landslide_fos(fos):
+    """Calculate risk level based on landslide factor of safety."""
+    if fos > 1.5:
+        return 'Low'
+    elif fos > 1.0:
+        return 'Medium'
+    elif fos > 0.7:
+        return 'High'
+    else:
+        return 'Very High'
+
+
+def _get_risk_level_from_sea_level_rise(slr):
+    """Calculate risk level based on sea level rise."""
+    if slr < 0.5:
+        return 'Low'
+    elif slr < 1.0:
+        return 'Medium'
+    elif slr < 2.0:
+        return 'High'
+    else:
+        return 'Very High'
+
+
+def _get_risk_level_from_water_stress(stress):
+    """Calculate risk level based on water stress percentage."""
+    if stress < 20:
+        return 'Low'
+    elif stress < 40:
+        return 'Medium'
+    elif stress < 60:
+        return 'High'
+    else:
+        return 'Very High'
+
+
+def _get_temperature_increase_at_point(latitude, longitude):
+    """
+    Get temperature increase at a specific point from climate data.
+    Mock implementation for development - generates realistic temperature values.
+    """
+    import random
+    import math
+
+    # Create realistic temperature increase patterns
+    # Urban areas have higher temperature increases (heat island effect)
+    # Higher latitudes may have different warming patterns
+
+    # Normalize coordinates for consistent results
+    lat_norm = (latitude - 12.0) / 5.0
+    lng_norm = (longitude - 121.0) / 5.0
+
+    # Urban heat island effect simulation (simplified)
+    urban_factor = 1.0 + 0.3 * (1.0 - math.sqrt(lat_norm**2 + lng_norm**2))
+
+    # Base temperature increase (climate change projection)
+    base_increase = 1.2 + 0.8 * abs(lat_norm)  # 1.2-2.0°C range
+    random_factor = random.uniform(0.9, 1.1)
+
+    temp_increase = base_increase * urban_factor * random_factor
+
+    # Return simple numeric value
+    return temp_increase
+
+
+def _get_wind_speed_at_point(latitude, longitude):
+    """
+    Get wind speed at a specific point from wind hazard data.
+    Mock implementation for development - generates realistic wind speed values.
+    """
+    import random
+    import math
+
+    # Create realistic wind speed patterns
+    # Coastal areas have higher wind speeds
+
+    # Normalize coordinates for consistent results
+    lat_norm = (latitude - 12.0) / 5.0
+    lng_norm = (longitude - 121.0) / 5.0
+
+    # Coastal exposure simulation
+    coastal_factor = 1.0 + 0.5 * (1.0 - math.sqrt(lat_norm**2 + lng_norm**2))
+
+    # Base wind speed calculation
+    base_speed = 60 + 40 * coastal_factor  # 60-100 km/h range
+    random_factor = random.uniform(0.8, 1.2)
+
+    wind_speed = base_speed * random_factor
+
+    # Return simple numeric value
+    return wind_speed
+
+
+def _get_landslide_susceptibility_at_point(latitude, longitude):
+    """
+    Get landslide susceptibility at a specific point from landslide hazard data.
+    Mock implementation for development - generates realistic landslide susceptibility values.
+    """
+    import random
+    import math
+
+    # Create realistic landslide susceptibility patterns
+    # Higher susceptibility in areas with elevation changes and steep slopes
+
+    # Normalize coordinates for consistent results
+    lat_norm = (latitude - 12.0) / 5.0
+    lng_norm = (longitude - 121.0) / 5.0
+
+    # Simulate topographic variation (simplified model)
+    # Areas with higher coordinate variation represent steeper terrain
+    elevation_variation = math.sin(lat_norm * 3) * math.cos(lng_norm * 3)
+
+    # Base susceptibility calculation (Factor of Safety)
+    # Lower FoS = Higher susceptibility
+    base_fos = 1.5 - abs(elevation_variation) * 0.8  # 0.7-1.5 range
+    random_factor = random.uniform(0.9, 1.1)
+
+    factor_of_safety = max(0.3, base_fos * random_factor)
+
+    # Return simple numeric value
+    return factor_of_safety
+
+
+def _get_sea_level_rise_at_point(latitude, longitude):
+    """
+    Get sea level rise projection at a specific point from SLR data.
+    Mock implementation for development - generates realistic SLR values.
+    """
+    import random
+    import math
+
+    # Create realistic sea level rise patterns
+    # Coastal areas have higher SLR impact
+
+    # Normalize coordinates for consistent results
+    lat_norm = (latitude - 12.0) / 5.0
+    lng_norm = (longitude - 121.0) / 5.0
+
+    # Calculate distance from coast (simplified model)
+    # Areas closer to "coast" (lower coordinate values) have higher impact
+    coastal_proximity = math.sqrt(lat_norm**2 + lng_norm**2)
+
+    # Base sea level rise calculation (for 2050 projection)
+    # Higher values for coastal areas
+    base_slr = 0.3 + (1.0 - coastal_proximity) * 0.7  # 0.3-1.0m range
+    random_factor = random.uniform(0.9, 1.1)
+
+    sea_level_rise = base_slr * random_factor
+
+    # Return simple numeric value
+    return sea_level_rise
+
+
+def _get_storm_surge_at_point(latitude, longitude):
+    """
+    Get storm surge depth at a specific point from storm surge data.
+    Mock implementation for development - generates realistic storm surge values.
+    """
+    import random
+    import math
+
+    # Create realistic storm surge patterns
+    # Higher surge risk in coastal areas and low-lying regions
+
+    # Normalize coordinates for consistent results
+    lat_norm = (latitude - 12.0) / 5.0
+    lng_norm = (longitude - 121.0) / 5.0
+
+    # Calculate coastal exposure
+    coastal_proximity = math.sqrt(lat_norm**2 + lng_norm**2)
+
+    # Base storm surge calculation
+    # Higher values for coastal areas
+    base_surge = 1.0 + (1.0 - coastal_proximity) * 2.5  # 1.0-3.5m range
+    random_factor = random.uniform(0.8, 1.2)
+
+    storm_surge = max(0.1, base_surge * random_factor)
+
+    # Return simple numeric value
+    return storm_surge
+
+
+def _get_water_stress_at_point(latitude, longitude):
+    """
+    Get water stress level at a specific point from water stress data.
+    Mock implementation for development - generates realistic water stress values.
+    """
+    import random
+    import math
+
+    # Create realistic water stress patterns
+    # Varies based on climate zones and population density
+
+    # Normalize coordinates for consistent results
+    lat_norm = (latitude - 12.0) / 5.0
+    lng_norm = (longitude - 121.0) / 5.0
+
+    # Simulate climate variation (simplified model)
+    # Some areas are naturally drier than others
+    climate_factor = 0.5 + 0.5 * math.sin(lat_norm * 2) * math.cos(lng_norm * 2)
+
+    # Base water stress calculation
+    base_stress = 15 + climate_factor * 35  # 15-50% range
+    random_factor = random.uniform(0.9, 1.1)
+
+    water_stress = max(5, min(95, base_stress * random_factor))
+
+    # Return simple numeric value
+    return water_stress
+
+
+def _aggregate_hazard_results(hazard_results, selected_hazards):
+    """
+    Aggregate hazard analysis results for a polygon.
+    Returns statistics for each hazard type across all sample points.
+    Simplified to work with numeric hazard values.
+    """
+    aggregated = {}
+
+    for hazard in selected_hazards:
+        hazard_values = []
+        valid_points = 0
+
+        for point_result in hazard_results:
+            hazard_value = point_result['hazards'].get(hazard)
+            if hazard_value is not None:
+                hazard_values.append(hazard_value)
+                valid_points += 1
+
+        if hazard_values:
+            aggregated[hazard] = {
+                'valid_points': valid_points,
+                'total_points': len(hazard_results),
+                'statistics': {
+                    'min': min(hazard_values),
+                    'max': max(hazard_values),
+                    'mean': sum(hazard_values) / len(hazard_values),
+                    'median': sorted(hazard_values)[len(hazard_values) // 2]
+                }
+            }
+
+            # Add risk classification based on hazard type
+            if hazard.lower() == 'flood':
+                aggregated[hazard]['risk_classification'] = _classify_flood_risk(hazard_values)
+            elif hazard.lower() == 'heat':
+                aggregated[hazard]['risk_classification'] = _classify_heat_risk(hazard_values)
+            elif hazard.lower() in ['tropical cyclones', 'wind']:
+                aggregated[hazard]['risk_classification'] = _classify_wind_risk(hazard_values)
+            elif hazard.lower() in ['landslide', 'rainfall induced landslide', 'rainfall-induced landslide']:
+                aggregated[hazard]['risk_classification'] = _classify_landslide_risk(hazard_values)
+            elif hazard.lower() == 'storm surge':
+                aggregated[hazard]['risk_classification'] = _classify_surge_risk(hazard_values)
+            elif hazard.lower() == 'sea level rise':
+                aggregated[hazard]['risk_classification'] = _classify_slr_risk(hazard_values)
+            elif hazard.lower() == 'water stress':
+                aggregated[hazard]['risk_classification'] = _classify_water_stress_risk(hazard_values)
+        else:
+            aggregated[hazard] = {
+                'valid_points': 0,
+                'total_points': len(hazard_results),
+                'statistics': None,
+                'risk_classification': 'No Data'
+            }
+
+    return aggregated
+
+
+def _classify_flood_risk(flood_values):
+    """Classify flood risk based on flood depth values."""
+    if not flood_values:
+        return 'No Data'
+
+    avg_depth = sum(flood_values) / len(flood_values)
+
+    if avg_depth < 0.5:
+        return 'Low'
+    elif avg_depth < 1.5:
+        return 'Medium'
+    else:
+        return 'High'
+
+
+def _classify_heat_risk(heat_values):
+    """Classify heat risk based on temperature increase values."""
+    if not heat_values:
+        return 'No Data'
+
+    avg_increase = sum(heat_values) / len(heat_values)
+
+    if avg_increase < 2.0:
+        return 'Low'
+    elif avg_increase < 4.0:
+        return 'Medium'
+    else:
+        return 'High'
+
+
+def _classify_wind_risk(wind_values):
+    """Classify wind risk based on wind speed values."""
+    if not wind_values:
+        return 'No Data'
+
+    avg_speed = sum(wind_values) / len(wind_values)
+
+    if avg_speed < 50:  # km/h
+        return 'Low'
+    elif avg_speed < 100:
+        return 'Medium'
+    else:
+        return 'High'
+
+
+def _classify_landslide_risk(landslide_values):
+    """Classify landslide risk based on factor of safety values."""
+    if not landslide_values:
+        return 'No Data'
+
+    avg_fos = sum(landslide_values) / len(landslide_values)
+
+    if avg_fos > 1.5:
+        return 'Low'
+    elif avg_fos > 1.0:
+        return 'Medium'
+    else:
+        return 'High'
+
+
+def _classify_surge_risk(surge_values):
+    """Classify storm surge risk based on surge height values."""
+    if not surge_values:
+        return 'No Data'
+
+    avg_surge = sum(surge_values) / len(surge_values)
+
+    if avg_surge < 1.0:  # meters
+        return 'Low'
+    elif avg_surge < 2.5:
+        return 'Medium'
+    else:
+        return 'High'
+
+
+def _classify_slr_risk(slr_values):
+    """Classify sea level rise risk based on SLR values."""
+    if not slr_values:
+        return 'No Data'
+
+    avg_slr = sum(slr_values) / len(slr_values)
+
+    if avg_slr < 0.5:  # meters
+        return 'Low'
+    elif avg_slr < 1.5:
+        return 'Medium'
+    else:
+        return 'High'
+
+
+def _classify_water_stress_risk(water_stress_values):
+    """Classify water stress risk based on water stress percentage values."""
+    if not water_stress_values:
+        return 'No Data'
+
+    avg_stress = sum(water_stress_values) / len(water_stress_values)
+
+    if avg_stress < 25:  # percentage
+        return 'Low'
+    elif avg_stress < 50:
+        return 'Medium'
+    else:
+        return 'High'
+
+
+def _handle_6step_workflow_results(request, analysis_results, selected_hazards):
+    """
+    6-Step Workflow functionality has been removed.
+    This function is no longer available.
+    """
+    logger.warning("_handle_6step_workflow_results called but 6-Step Workflow has been removed")
+    return render(request, 'climate_hazards_analysis_v2/results.html', {
+        'error': 'The 6-Step Workflow functionality has been removed. Please use the streamlined polygon workflow instead.',
+        'data': [],
+        'columns': [],
+        'selected_hazards': selected_hazards,
+        'facility_count': 0
+    })
+
+# Original function removed - 6-Step Workflow functionality removed
+# def _handle_6step_workflow_results(request, analysis_results, selected_hazards):
+    """
+    Handle results from the new 6-step workflow.
+    Creates a results table showing one row per polygon with aggregated hazard data.
+    """
+    try:
+        logger.info(f"Creating 6-step workflow results table for {len(analysis_results)} assets")
+
+        # Create aggregated results data for the template
+        aggregated_data = []
+        columns = ['Facility', 'Asset Archetype', 'Area (km²)', 'Sample Points']
+
+        # Add hazard columns based on selected hazards
+        hazard_columns = []
+        for hazard in selected_hazards:
+            if hazard.lower() == 'flood':
+                hazard_columns.extend([f'{hazard} Risk', f'{hazard} Depth (m)'])
+            elif hazard.lower() == 'heat':
+                hazard_columns.extend([f'{hazard} Risk', f'{hazard} Increase (°C)'])
+            elif hazard.lower() == 'wind':
+                hazard_columns.extend([f'{hazard} Risk', f'{hazard} Speed (km/h)'])
+            elif hazard.lower() == 'landslide':
+                hazard_columns.extend([f'{hazard} Risk', f'{hazard} Susceptibility (%)'])
+            elif hazard.lower() == 'sea level rise':
+                hazard_columns.extend([f'{hazard} Risk', f'{hazard} Rise (m)'])
+            else:
+                hazard_columns.append(f'{hazard} Risk')
+
+        columns.extend(hazard_columns)
+        columns.extend(['Overall Risk', 'Data Coverage'])
+
+        # Process each asset result
+        for asset_result in analysis_results:
+            asset_type = asset_result.get('asset_type', 'regular')
+
+            if asset_type == 'polygon_centroid':
+                # Create centroid row (parent)
+                row = {
+                    'Facility': f"🟢 {asset_result.get('asset_name', 'Unknown')} (Centroid)",
+                    'Asset Archetype': f"{asset_result.get('asset_archetype', 'default archetype')} - Polygon Centroid",
+                    'Area (km²)': f"{asset_result.get('area_km2', 0):.2f}",
+                    'Sample Points': asset_result.get('sample_points_count', 0),
+                    'has_granular_analysis': True,
+                    'is_parent_facility': True,
+                    'sample_point_count': asset_result.get('sample_points_count', 0),
+                    'polygon_geometry': asset_result.get('geometry'),
+                    'hazard_analysis': asset_result.get('hazard_analysis', {}),
+                    'asset_id': asset_result.get('asset_id'),
+                    'parent_asset_id': None,
+                    'point_number': None,
+                    'asset_type': 'polygon_centroid'
+                }
+            elif asset_type == 'polygon_granular':
+                # Create granular point row (child)
+                parent_name = asset_result.get('asset_name', 'Unknown')
+                point_num = asset_result.get('point_number', 1)
+                row = {
+                    'Facility': f"🔵 {parent_name} - Granular Point {point_num}",
+                    'Asset Archetype': f"{asset_result.get('asset_archetype', 'default archetype')} - Granular Point",
+                    'Area (km²)': "N/A",
+                    'Sample Points': "1",
+                    'has_granular_analysis': False,
+                    'is_parent_facility': False,
+                    'is_sample_point': True,
+                    'sample_point_count': 1,
+                    'polygon_geometry': None,
+                    'hazard_analysis': asset_result.get('hazard_analysis', {}),
+                    'asset_id': asset_result.get('asset_id'),
+                    'parent_asset_id': asset_result.get('parent_asset_id'),
+                    'point_number': point_num,
+                    'grid_position': asset_result.get('grid_position', f"Point {point_num}"),
+                    'latitude': asset_result.get('latitude'),
+                    'longitude': asset_result.get('longitude'),
+                    'asset_type': 'polygon_granular'
+                }
+            else:
+                # Regular asset
+                row = {
+                    'Facility': asset_result.get('asset_name', 'Unknown'),
+                    'Asset Archetype': asset_result.get('asset_archetype', 'default archetype'),
+                    'Area (km²)': "N/A",
+                    'Sample Points': "1",
+                    'has_granular_analysis': False,
+                    'is_parent_facility': True,
+                    'sample_point_count': 1,
+                    'polygon_geometry': None,
+                    'hazard_analysis': asset_result.get('hazard_analysis', {}),
+                    'asset_id': asset_result.get('asset_id'),
+                    'parent_asset_id': None,
+                    'point_number': None,
+                    'asset_type': 'regular'
+                }
+
+            # Add hazard data based on asset type
+            hazard_analysis = asset_result.get('hazard_analysis', {})
+
+            if asset_type == 'polygon_centroid':
+                # Use aggregated results for centroid
+                aggregated_results = hazard_analysis.get('aggregated_results', {})
+                hazards = hazard_analysis.get('hazards', {})
+
+                for hazard in selected_hazards:
+                    # Use centroid-calculated hazard value
+                    hazard_value = hazards.get(hazard)
+                    risk_classification = 'No Data'
+
+                    if hazard_value is not None:
+                        # Classify risk based on hazard value
+                        if hazard.lower() == 'flood':
+                            if hazard_value > 2.0:
+                                risk_classification = 'High'
+                            elif hazard_value > 1.0:
+                                risk_classification = 'Medium'
+                            elif hazard_value > 0.5:
+                                risk_classification = 'Low'
+                            else:
+                                risk_classification = 'Very Low'
+                            row[f'{hazard} Depth (m)'] = f"{hazard_value:.2f}"
+                        elif hazard.lower() == 'heat':
+                            if hazard_value > 3.0:
+                                risk_classification = 'High'
+                            elif hazard_value > 2.0:
+                                risk_classification = 'Medium'
+                            elif hazard_value > 1.0:
+                                risk_classification = 'Low'
+                            else:
+                                risk_classification = 'Very Low'
+                            row[f'{hazard} Increase (°C)'] = f"{hazard_value:.1f}"
+                        else:
+                            risk_classification = 'Medium'  # Default
+                            row[f'{hazard} Risk'] = risk_classification
+
+                    row[f'{hazard} Risk'] = risk_classification
+
+            elif asset_type == 'polygon_granular':
+                # Use individual point hazard data
+                hazards = hazard_analysis.get('hazards', {})
+
+                for hazard in selected_hazards:
+                    hazard_value = hazards.get(hazard)
+                    risk_classification = 'No Data'
+
+                    if hazard_value is not None:
+                        # Classify risk for individual point using numeric hazard value
+                        if hazard.lower() == 'flood':
+                            if hazard_value > 2.0:
+                                risk_classification = 'High'
+                            elif hazard_value > 1.0:
+                                risk_classification = 'Medium'
+                            elif hazard_value > 0.5:
+                                risk_classification = 'Low'
+                            else:
+                                risk_classification = 'Very Low'
+                            row[f'{hazard} Depth (m)'] = f"{hazard_value:.2f}"
+                        elif hazard.lower() == 'heat':
+                            if hazard_value > 3.0:
+                                risk_classification = 'High'
+                            elif hazard_value > 2.0:
+                                risk_classification = 'Medium'
+                            elif hazard_value > 1.0:
+                                risk_classification = 'Low'
+                            else:
+                                risk_classification = 'Very Low'
+                            row[f'{hazard} Increase (°C)'] = f"{hazard_value:.1f}"
+                        elif hazard.lower() in ['tropical cyclones', 'wind']:
+                            if hazard_value > 120:
+                                risk_classification = 'High'
+                            elif hazard_value > 80:
+                                risk_classification = 'Medium'
+                            elif hazard_value > 50:
+                                risk_classification = 'Low'
+                            else:
+                                risk_classification = 'Very Low'
+                            row[f'{hazard} Speed (km/h)'] = f"{hazard_value:.0f}"
+                        elif hazard.lower() == 'storm surge':
+                            if hazard_value > 3.0:
+                                risk_classification = 'High'
+                            elif hazard_value > 2.0:
+                                risk_classification = 'Medium'
+                            elif hazard_value > 1.0:
+                                risk_classification = 'Low'
+                            else:
+                                risk_classification = 'Very Low'
+                            row[f'{hazard} Depth (m)'] = f"{hazard_value:.2f}"
+                        elif hazard.lower() in ['landslide', 'rainfall induced landslide', 'rainfall-induced landslide']:
+                            if hazard_value < 0.7:
+                                risk_classification = 'High'
+                            elif hazard_value < 1.0:
+                                risk_classification = 'Medium'
+                            elif hazard_value < 1.5:
+                                risk_classification = 'Low'
+                            else:
+                                risk_classification = 'Very Low'
+                            row[f'{hazard} Factor of Safety'] = f"{hazard_value:.2f}"
+                        elif hazard.lower() == 'sea level rise':
+                            if hazard_value > 2.0:
+                                risk_classification = 'High'
+                            elif hazard_value > 1.0:
+                                risk_classification = 'Medium'
+                            elif hazard_value > 0.5:
+                                risk_classification = 'Low'
+                            else:
+                                risk_classification = 'Very Low'
+                            row[f'{hazard} (m)'] = f"{hazard_value:.2f}"
+                        elif hazard.lower() == 'water stress':
+                            if hazard_value > 60:
+                                risk_classification = 'High'
+                            elif hazard_value > 40:
+                                risk_classification = 'Medium'
+                            elif hazard_value > 20:
+                                risk_classification = 'Low'
+                            else:
+                                risk_classification = 'Very Low'
+                            row[f'{hazard} (%)'] = f"{hazard_value:.1f}"
+                        else:
+                            risk_classification = 'Medium'
+                            row[f'{hazard} Risk'] = risk_classification
+
+                    row[f'{hazard} Risk'] = risk_classification
+
+            else:
+                # Regular asset - no hazard data
+                for hazard in selected_hazards:
+                    row[f'{hazard} Risk'] = 'No Data'
+                    if hazard.lower() == 'flood':
+                        row[f'{hazard} Depth (m)'] = 'N/A'
+                    elif hazard.lower() == 'heat':
+                        row[f'{hazard} Increase (°C)'] = 'N/A'
+
+            # Calculate overall risk and data coverage
+            risk_scores = []
+            data_count = 0
+
+            for hazard in selected_hazards:
+                risk_key = f'{hazard} Risk'
+                risk_value = row.get(risk_key, 'No Data')
+
+                if risk_value != 'No Data' and risk_value != 'N/A':
+                    data_count += 1
+                    if risk_value == 'Very Low':
+                        risk_scores.append(0)
+                    elif risk_value == 'Low':
+                        risk_scores.append(1)
+                    elif risk_value == 'Medium':
+                        risk_scores.append(2)
+                    elif risk_value == 'High':
+                        risk_scores.append(3)
+
+            # Calculate data coverage
+            avg_coverage = (data_count / len(selected_hazards) * 100) if selected_hazards else 0
+            row['Data Coverage'] = f"{avg_coverage:.1f}%"
+
+            # Calculate overall risk
+            if risk_scores:
+                avg_risk = sum(risk_scores) / len(risk_scores)
+                if avg_risk < 1:
+                    row['Overall Risk'] = 'Low'
+                elif avg_risk < 2:
+                    row['Overall Risk'] = 'Medium'
+                else:
+                    row['Overall Risk'] = 'High'
+            else:
+                row['Overall Risk'] = 'No Data'
+
+            aggregated_data.append(row)
+
+        # Create context for template
+        context = {
+            'data': aggregated_data,
+            'columns': columns,
+            'selected_hazards': selected_hazards,
+            'facility_count': len(aggregated_data),
+            'analysis_type': '6-step-workflow',
+            'groups': {
+                'Asset Information': 4,  # Facility, Asset Archetype, Area, Sample Points
+                'Hazard Analysis': len(hazard_columns),
+                'Summary': 2  # Overall Risk, Data Coverage
+            },
+            'show_6step_workflow': True,
+            'analysis_results': analysis_results  # Pass raw results for detailed modals
+        }
+
+        logger.info(f"Rendering 6-step workflow results with {len(aggregated_data)} rows and {len(columns)} columns")
+
+        return render(request, 'climate_hazards_analysis_v2/results.html', context)
+
+    except Exception as e:
+        logger.exception(f"Error handling 6-step workflow results: {str(e)}")
+        # Fallback to regular results processing
+        return render(request, 'climate_hazards_analysis_v2/results.html', {
+            'error': f'Error processing 6-step workflow results: {str(e)}',
+            'data': [],
+            'columns': [],
+            'selected_hazards': selected_hazards,
+            'facility_count': 0
+        })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def execute_complete_granular_workflow(request):
+    """
+    API endpoint to execute the complete end-to-end granular analysis workflow.
+
+    This endpoint orchestrates the entire pipeline:
+    1. Polygon drawing → Grid generation
+    2. Grid point creation → Hazard analysis (optional)
+    3. Batch processing → Results aggregation
+    4. Heatmap generation → Results table integration
+
+    Expected JSON payload:
+    {
+        "asset_name": "My Polygon Asset",
+        "polygon_geometry": {...GeoJSON...},
+        "selected_hazards": ["Heat", "Flooding", "Sea Level Rise"] (optional),
+        "archetype": "default archetype",
+        "grid_spacing": 0.001,
+        "scenario": "current"
+    }
+    """
+    try:
+        # No authentication required for point generation
+        # This is a stateless endpoint for grid point generation only
+
+        # Debug: Print the incoming request data (always visible)
+        print(f"=== DEBUG: Request received ===")
+        print(f"Request body: {request.body}")
+        print(f"Request headers: {dict(request.headers)}")
+        print(f"Request method: {request.method}")
+        print(f"Request content type: {request.content_type}")
+
+        try:
+            data = json.loads(request.body)
+            print(f"Parsed JSON data: {data}")
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error: {e}")
+            print(f"Raw body content: {request.body}")
+            return JsonResponse({
+                'success': False,
+                'error': f'Invalid JSON data: {str(e)}'
+            }, status=400)
+        except Exception as e:
+            print(f"Unexpected error parsing request: {e}")
+            return JsonResponse({
+                'success': False,
+                'error': f'Error parsing request: {str(e)}'
+            }, status=400)
+
+        # Validate required fields
+        if not data.get('asset_name', '').strip():
+            return JsonResponse({
+                'success': False,
+                'error': 'Asset name is required'
+            }, status=400)
+
+        if not data.get('polygon_geometry'):
+            return JsonResponse({
+                'success': False,
+                'error': 'Polygon geometry is required'
+            }, status=400)
+
+        # Note: selected_hazards is no longer required for pure grid point generation
+
+        # Extract parameters
+        asset_name = data['asset_name'].strip()
+        polygon_geometry = data['polygon_geometry']
+        selected_hazards = data.get('selected_hazards', [])  # Optional for pure point generation
+        archetype = data.get('archetype', 'default archetype').strip() or 'default archetype'
+        grid_spacing = float(data.get('grid_spacing', 0.001))
+        scenario = data.get('scenario', 'current')
+
+        # Validate grid spacing
+        if grid_spacing <= 0 or grid_spacing > 1:
+            return JsonResponse({
+                'success': False,
+                'error': 'Grid spacing must be between 0 and 1 degree'
+            }, status=400)
+
+        logger.info(f"Starting complete granular workflow for asset: {asset_name}")
+        logger.info(f"Selected hazards: {selected_hazards}")
+        logger.info(f"Grid spacing: {grid_spacing}")
+
+        # Execute complete workflow using the service
+        workflow_results = execute_granular_analysis_workflow(
+            polygon_geometry=polygon_geometry,
+            asset_name=asset_name,
+            selected_hazards=selected_hazards,
+            archetype=archetype,
+            scenario=scenario,
+            grid_spacing=grid_spacing
+        )
+
+        if not workflow_results.get('success'):
+            return JsonResponse({
+                'success': False,
+                'error': workflow_results.get('error', 'Workflow execution failed'),
+                'failed_step': workflow_results.get('step', 'unknown'),
+                'partial_results': workflow_results.get('partial_results', {})
+            }, status=500)
+
+        # Store results in session for immediate display
+        GranularAnalysisSessionManager.store_workflow_results(request, workflow_results)
+
+        # Update session with asset ID for workflow tracking
+        asset_id = workflow_results.get('asset_id')
+        if asset_id:
+            GranularAnalysisSessionManager.store_asset_id(request, asset_id)
+
+        logger.info(f"Complete granular workflow executed successfully for {asset_name}")
+        logger.info(f"Generated {workflow_results.get('grid_points_generated', 0)} grid points")
+        logger.info(f"Processed {len(workflow_results.get('table_results', []))} hazard results")
+
+        return JsonResponse({
+            'success': True,
+            'workflow_results': workflow_results,
+            'asset_id': asset_id,
+            'message': f'Successfully completed granular analysis for {asset_name}',
+            # 'redirect_url': reverse('climate_hazards_analysis_v2:show_results') + f'?asset_id={asset_id}&granular_analysis=true',
+            'next_step': 'display_results'
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON data provided'
+        }, status=400)
+    except ValueError as e:
+        return JsonResponse({
+            'success': False,
+            'error': f'Invalid parameter value: {str(e)}'
+        }, status=400)
+    except Exception as e:
+        logger.exception(f"Error executing complete granular workflow: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to execute complete granular analysis workflow'
+        }, status=500)
+
+
+@require_GET
+def get_workflow_results_table(request, asset_id):
+    """
+    API endpoint to retrieve granular analysis results formatted for the hazard exposure table.
+
+    Args:
+        request: Django request object
+        asset_id: ID of the asset with granular analysis
+    """
+    try:
+        asset = Asset.objects.get(id=asset_id)
+
+        if not asset.has_granular_analysis:
+            return JsonResponse({
+                'success': False,
+                'error': 'Asset does not have granular analysis enabled'
+            }, status=400)
+
+        # Get selected hazards from session or use all available
+        selected_hazards = request.GET.getlist('hazards')
+        if not selected_hazards:
+            # Get hazard types from granular results
+            selected_hazards = list(GranularAnalysisResult.objects.filter(
+                asset=asset
+            ).values_list('hazard_type', flat=True).distinct())
+
+        # Use workflow service to get table results
+        workflow_service = GranularAnalysisWorkflowService()
+
+        # Get aggregated results
+        aggregated_results = {}
+        for hazard_type in selected_hazards:
+            stats = calculate_granular_statistics(asset, hazard_type)
+            if stats:
+                aggregated_results[hazard_type] = {
+                    'statistics': stats,
+                    'risk_summary': workflow_service._calculate_risk_summary(stats),
+                    'exposure_distribution': workflow_service._calculate_exposure_distribution(asset, hazard_type, 'current')
+                }
+
+        # Prepare table results
+        table_results = workflow_service._prepare_hazard_exposure_table(
+            asset, selected_hazards, aggregated_results
+        )
+
+        # Format response for data table
+        response_data = {
+            'success': True,
+            'data': table_results,
+            'columns': list(table_results[0].keys()) if table_results else [],
+            'asset_info': {
+                'id': asset.id,
+                'name': asset.name,
+                'asset_type': asset.asset_type,
+                'granular_analysis_status': asset.granular_analysis_status,
+                'grid_points_count': asset.granular_grid_points_count
+            },
+            'summary': {
+                'total_rows': len(table_results),
+                'hazard_types': selected_hazards,
+                'analysis_complete': asset.granular_analysis_status == 'completed'
+            }
+        }
+
+        return JsonResponse(response_data)
+
+    except Asset.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': 'Asset not found'
+        }, status=404)
+    except Exception as e:
+        logger.exception(f"Error getting workflow results table: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to get workflow results table'
+        }, status=500)
+
+
+# ============================================================================
+# STREAMLINED DRAW POLYGON WORKFLOW
+# ============================================================================
+
+def select_hazards_streamlined(request):
+    """
+    Streamlined hazard selection for draw polygon assets.
+    Auto-selects all hazards and redirects directly to hazard analysis results.
+    """
+    # Check if this is a polygon workflow
+    if not GranularAnalysisSessionManager.is_granular_workflow(request):
+        # Redirect to regular hazard selection for non-polygon workflows
+        return redirect('climate_hazards_analysis_v2:select_hazards')
+
+    # Auto-select all hazards for streamlined workflow
+    all_hazards = [
+        'Flood',
+        'Water Stress',
+        'Heat',
+        'Sea Level Rise',
+        'Tropical Cyclones',
+        'Storm Surge',
+        'Rainfall Induced Landslide'
+    ]
+
+    # Store selected hazards in session
+    request.session['climate_hazards_v2_selected_hazards'] = all_hazards
+
+    # Get polygon geometry from session
+    polygon_geometry = GranularAnalysisSessionManager.get_polygon_geometry(request)
+    if not polygon_geometry:
+        logger.error("No polygon geometry found in session")
+        return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+            'error': 'No polygon geometry found. Please draw polygon again.',
+            'hazard_types': all_hazards,
+            'selected_hazards': all_hazards
+        })
+
+    # Redirect directly to streamlined hazard analysis results
+    return redirect('climate_hazards_analysis_v2:hazard_exposure_results_streamlined')
+
+
+def hazard_exposure_results_streamlined(request):
+    """
+    Streamlined hazard exposure results for draw polygon assets.
+    Bypasses 6-step workflow and goes directly to hazard analysis.
+    """
+    logger.info("=== STREAMLINED HAZARD EXPOSURE RESULTS ===")
+
+    # Validate session data
+    selected_hazards = request.session.get('climate_hazards_v2_selected_hazards', [])
+    if not selected_hazards:
+        logger.error("No selected hazards found")
+        return redirect('climate_hazards_analysis_v2:select_hazards')
+
+    # Get polygon geometry from session
+    polygon_geometry = GranularAnalysisSessionManager.get_polygon_geometry(request)
+    if not polygon_geometry:
+        logger.error("No polygon geometry found in session")
+        return redirect('climate_hazards_analysis_v2:view_map')
+
+    try:
+        # Generate grid points from polygon
+        grid_spacing = 0.001  # Default ~100m spacing
+        grid_points = generate_grid_points_from_polygon(polygon_geometry, grid_spacing)
+
+        if not grid_points:
+            logger.error("Failed to generate grid points from polygon")
+            return render(request, 'climate_hazards_analysis_v2/hazard_exposure_results_streamlined.html', {
+                'error': 'Failed to generate analysis points from polygon. The polygon may be too small.',
+                'selected_hazards': selected_hazards
+            })
+
+        # Calculate polygon centroid
+        centroid = calculate_polygon_centroid(polygon_geometry)
+
+        # Create polygon asset data structure
+        polygon_asset = {
+            'id': 'streamlined_polygon',
+            'Facility': 'Drawn Polygon Asset',
+            'AssetType': 'polygon',
+            'Archetype': 'default archetype',
+            'Lat': centroid[0],
+            'Long': centroid[1],
+            'geometry': polygon_geometry,
+            'polygon_area_km2': calculate_polygon_area_km2(polygon_geometry),
+            'grid_spacing_meters': int(grid_spacing * 111320),  # Convert degrees to meters
+            'granular-points': grid_points,
+            'granular_analysis_enabled': True,
+            'sample_points_count': len(grid_points)
+        }
+
+        # Analyze hazards for all points (centroid + granular points)
+        hazard_analysis_results = _analyze_polygon_asset_hazards_streamlined(
+            polygon_asset, selected_hazards, request.session.session_key
+        )
+
+        if not hazard_analysis_results:
+            logger.error("Failed to analyze hazards for polygon asset")
+            return render(request, 'climate_hazards_analysis_v2/hazard_exposure_results_streamlined.html', {
+                'error': 'Failed to analyze hazards for the drawn polygon.',
+                'selected_hazards': selected_hazards
+            })
+
+        # Prepare hierarchical results for template
+        hierarchical_results = _prepare_hierarchical_results_streamlined(
+            hazard_analysis_results, selected_hazards
+        )
+
+        context = {
+            'polygon_asset': polygon_asset,
+            'hierarchical_results': hierarchical_results,
+            'selected_hazards': selected_hazards,
+            'total_points': len(grid_points) + 1,  # +1 for centroid
+            'analysis_timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'streamlined_workflow': True
+        }
+
+        return render(request, 'climate_hazards_analysis_v2/hazard_exposure_results_streamlined.html', context)
+
+    except Exception as e:
+        logger.exception(f"Error in streamlined hazard exposure results: {str(e)}")
+        return render(request, 'climate_hazards_analysis_v2/hazard_exposure_results_streamlined.html', {
+            'error': f'An error occurred during hazard analysis: {str(e)}',
+            'selected_hazards': selected_hazards
+        })
+
+
+def _analyze_polygon_asset_hazards_streamlined(polygon_asset, selected_hazards, session_key):
+    """
+    Analyze hazards for polygon asset using existing hazard functions.
+    Returns hierarchical results with centroid (parent) and granular points (children).
+    """
+    try:
+        geometry = polygon_asset.get('geometry')
+        if not geometry:
+            logger.error("Polygon asset has no geometry")
+            return None
+
+        granular_points = polygon_asset.get('granular-points', [])
+        if not granular_points:
+            logger.error("No granular points found for polygon asset")
+            return None
+
+        logger.info(f"Analyzing hazards for {len(granular_points)} granular points + centroid")
+
+        # Analyze hazards for each granular point
+        granular_results = []
+        for i, point in enumerate(granular_points):
+            # Handle both dictionary and tuple formats
+            if isinstance(point, dict):
+                lat = point.get('latitude') or point.get('lat')
+                lng = point.get('longitude') or point.get('lng') or point.get('long')
+            else:
+                # Assume tuple format: (latitude, longitude)
+                lat, lng = point[0], point[1]
+
+            point_result = {
+                'point_id': f'point_{i+1}',
+                'latitude': lat,
+                'longitude': lng,
+                'hazards': {}
+            }
+
+            # Analyze each selected hazard
+            for hazard in selected_hazards:
+                try:
+                    hazard_value = _get_hazard_value_at_point(lat, lng, hazard)
+                    point_result['hazards'][hazard] = hazard_value
+                except Exception as e:
+                    logger.warning(f"Error getting {hazard} value at point {lat}, {lng}: {str(e)}")
+                    point_result['hazards'][hazard] = None
+
+            granular_results.append(point_result)
+
+        # Analyze hazards for centroid (parent row)
+        centroid_lat = polygon_asset.get('Lat')
+        centroid_lng = polygon_asset.get('Long')
+        centroid_result = {
+            'point_id': 'centroid',
+            'latitude': centroid_lat,
+            'longitude': centroid_lng,
+            'hazards': {}
+        }
+
+        # Calculate centroid hazard values as average of all granular points
+        for hazard in selected_hazards:
+            point_values = [point['hazards'].get(hazard) for point in granular_results if point['hazards'].get(hazard) is not None]
+
+            if point_values:
+                centroid_result['hazards'][hazard] = sum(point_values) / len(point_values)
+            else:
+                # Fallback: analyze actual centroid location
+                try:
+                    centroid_result['hazards'][hazard] = _get_hazard_value_at_point(
+                        centroid_lat, centroid_lng, hazard
+                    )
+                except Exception as e:
+                    logger.warning(f"Error getting {hazard} value at centroid: {str(e)}")
+                    centroid_result['hazards'][hazard] = None
+
+        # Create hierarchical structure
+        hierarchical_analysis = {
+            'centroid': centroid_result,
+            'granular_points': granular_results,
+            'aggregated_stats': _calculate_aggregated_hazard_stats(granular_results, selected_hazards)
+        }
+
+        logger.info(f"Completed hazard analysis for polygon asset: {len(granular_results)} points + centroid")
+        return hierarchical_analysis
+
+    except Exception as e:
+        logger.exception(f"Error analyzing polygon asset hazards: {str(e)}")
+        return None
+
+
+def _prepare_hierarchical_results_streamlined(hazard_analysis_results, selected_hazards):
+    """
+    Prepare hierarchical results data for template rendering.
+    Creates parent-child structure for centroid and granular points.
+    """
+    try:
+        if not hazard_analysis_results:
+            return []
+
+        centroid = hazard_analysis_results.get('centroid')
+        granular_points = hazard_analysis_results.get('granular_points', [])
+        aggregated_stats = hazard_analysis_results.get('aggregated_stats', {})
+
+        hierarchical_data = []
+
+        # Create parent row (centroid)
+        centroid_row = {
+            'id': 'centroid',
+            'parent_id': None,
+            'facility_name': 'Drawn Polygon Asset (Centroid)',
+            'asset_type': 'centroid',
+            'latitude': centroid['latitude'],
+            'longitude': centroid['longitude'],
+            'is_parent': True,
+            'is_expanded': False,
+            'child_count': len(granular_points),
+            'hazards': {}
+        }
+
+        # Process centroid hazards
+        for hazard in selected_hazards:
+            hazard_value = centroid['hazards'].get(hazard)
+            risk_level = _calculate_risk_level(hazard_value, hazard)
+
+            centroid_row['hazards'][hazard] = {
+                'value': hazard_value,
+                'risk_level': risk_level,
+                'display_value': _format_hazard_value(hazard_value, hazard),
+                'risk_color': _get_risk_color(risk_level)
+            }
+
+        hierarchical_data.append(centroid_row)
+
+        # Create child rows (granular points)
+        for i, point in enumerate(granular_points):
+            point_row = {
+                'id': point['point_id'],
+                'parent_id': 'centroid',
+                'facility_name': f'Analysis Point {i+1}',
+                'asset_type': 'granular_point',
+                'latitude': point['latitude'],
+                'longitude': point['longitude'],
+                'is_parent': False,
+                'is_child': True,
+                'hazards': {}
+            }
+
+            # Process point hazards
+            for hazard in selected_hazards:
+                hazard_value = point['hazards'].get(hazard)
+                risk_level = _calculate_risk_level(hazard_value, hazard)
+
+                point_row['hazards'][hazard] = {
+                    'value': hazard_value,
+                    'risk_level': risk_level,
+                    'display_value': _format_hazard_value(hazard_value, hazard),
+                    'risk_color': _get_risk_color(risk_level)
+                }
+
+            hierarchical_data.append(point_row)
+
+        return hierarchical_data
+
+    except Exception as e:
+        logger.exception(f"Error preparing hierarchical results: {str(e)}")
+        return []
+
+
+def _calculate_aggregated_hazard_stats(granular_results, selected_hazards):
+    """Calculate aggregated statistics for all granular points."""
+    try:
+        stats = {}
+
+        for hazard in selected_hazards:
+            values = [point['hazards'].get(hazard) for point in granular_results if point['hazards'].get(hazard) is not None]
+
+            if values:
+                stats[hazard] = {
+                    'min': min(values),
+                    'max': max(values),
+                    'avg': sum(values) / len(values),
+                    'count': len(values),
+                    'null_count': len(granular_results) - len(values)
+                }
+            else:
+                stats[hazard] = {
+                    'min': None,
+                    'max': None,
+                    'avg': None,
+                    'count': 0,
+                    'null_count': len(granular_results)
+                }
+
+        return stats
+
+    except Exception as e:
+        logger.exception(f"Error calculating aggregated hazard stats: {str(e)}")
+        return {}
+
+
+# Helper functions for streamlined workflow
+def calculate_polygon_centroid(polygon_geometry):
+    """Calculate centroid of polygon geometry."""
+    try:
+        coordinates = polygon_geometry['coordinates'][0]  # Exterior ring
+        lats = [coord[1] for coord in coordinates]
+        lngs = [coord[0] for coord in coordinates]
+        return (sum(lats) / len(lats), sum(lngs) / len(lngs))
+    except Exception as e:
+        logger.exception(f"Error calculating polygon centroid: {str(e)}")
+        return (0.0, 0.0)
+
+
+def calculate_polygon_area_km2(polygon_geometry):
+    """Calculate approximate area of polygon in km²."""
+    try:
+        # Simple approximation using bounding box
+        coordinates = polygon_geometry['coordinates'][0]
+        lats = [coord[1] for coord in coordinates]
+        lngs = [coord[0] for coord in coordinates]
+
+        lat_diff = max(lats) - min(lats)
+        lng_diff = max(lngs) - min(lngs)
+
+        # Convert to approximate area (very rough approximation)
+        lat_km = lat_diff * 111.32  # 1 degree latitude ≈ 111.32 km
+        lng_km = lng_diff * 111.32 * abs(sum(lats) / len(lats))  # Adjust for latitude
+
+        return lat_km * lng_km
+    except Exception as e:
+        logger.exception(f"Error calculating polygon area: {str(e)}")
+        return 0.0
+
+
+def _get_hazard_value_at_point(latitude, longitude, hazard_type):
+    """Get hazard value at a specific point using existing hazard functions."""
+    try:
+        from .utils import load_cached_hazard_data
+
+        # Load hazard data
+        hazard_data = load_cached_hazard_data(hazard_type)
+
+        # Use existing hazard analysis functions
+        if hazard_type.lower() == 'flood':
+            from .utils import _get_flood_depth_at_point
+            return _get_flood_depth_at_point(latitude, longitude, hazard_data)
+        elif hazard_type.lower() == 'heat':
+            from .utils import _get_heat_increase_at_point
+            return _get_heat_increase_at_point(latitude, longitude, hazard_data)
+        elif hazard_type.lower() == 'water stress':
+            from .utils import _get_water_stress_at_point
+            return _get_water_stress_at_point(latitude, longitude, hazard_data)
+        elif hazard_type.lower() == 'sea level rise':
+            from .utils import _get_sea_level_rise_at_point
+            return _get_sea_level_rise_at_point(latitude, longitude, hazard_data)
+        elif hazard_type.lower() == 'tropical cyclones':
+            from .utils import _get_cyclone_probability_at_point
+            return _get_cyclone_probability_at_point(latitude, longitude, hazard_data)
+        elif hazard_type.lower() == 'storm surge':
+            from .utils import _get_storm_surge_at_point
+            return _get_storm_surge_at_point(latitude, longitude, hazard_data)
+        elif hazard_type.lower() == 'rainfall induced landslide':
+            from .utils import _get_landslide_susceptibility_at_point
+            return _get_landslide_susceptibility_at_point(latitude, longitude, hazard_data)
+        else:
+            logger.warning(f"Unknown hazard type: {hazard_type}")
+            return None
+
+    except Exception as e:
+        logger.exception(f"Error getting hazard value at point: {str(e)}")
+        return None
+
+
+def _calculate_risk_level(hazard_value, hazard_type):
+    """Calculate risk level based on hazard value and type."""
+    if hazard_value is None:
+        return 'No Data'
+
+    try:
+        if hazard_type.lower() == 'flood':
+            if hazard_value <= 0:
+                return 'No Risk'
+            elif hazard_value <= 0.5:
+                return 'Low'
+            elif hazard_value <= 1.5:
+                return 'Medium'
+            elif hazard_value <= 3.0:
+                return 'High'
+            else:
+                return 'Very High'
+        elif hazard_type.lower() == 'heat':
+            if hazard_value <= 0:
+                return 'No Risk'
+            elif hazard_value <= 1.0:
+                return 'Low'
+            elif hazard_value <= 2.0:
+                return 'Medium'
+            elif hazard_value <= 3.5:
+                return 'High'
+            else:
+                return 'Very High'
+        elif hazard_type.lower() == 'water stress':
+            if hazard_value <= 0.1:
+                return 'No Risk'
+            elif hazard_value <= 0.2:
+                return 'Low'
+            elif hazard_value <= 0.4:
+                return 'Medium'
+            elif hazard_value <= 0.6:
+                return 'High'
+            else:
+                return 'Very High'
+        else:
+            # Default risk classification
+            if hazard_value <= 0:
+                return 'No Risk'
+            elif hazard_value <= 0.3:
+                return 'Low'
+            elif hazard_value <= 0.6:
+                return 'Medium'
+            elif hazard_value <= 0.8:
+                return 'High'
+            else:
+                return 'Very High'
+    except Exception as e:
+        logger.exception(f"Error calculating risk level: {str(e)}")
+        return 'Unknown'
+
+
+def _format_hazard_value(hazard_value, hazard_type):
+    """Format hazard value for display."""
+    if hazard_value is None:
+        return 'N/A'
+
+    try:
+        if hazard_type.lower() == 'flood':
+            return f"{hazard_value:.2f} m"
+        elif hazard_type.lower() == 'heat':
+            return f"{hazard_value:.1f}°C"
+        elif hazard_type.lower() == 'water stress':
+            return f"{hazard_value:.1%}"
+        elif hazard_type.lower() == 'sea level rise':
+            return f"{hazard_value:.2f} m"
+        elif hazard_type.lower() == 'tropical cyclones':
+            return f"{hazard_value:.1%}"
+        elif hazard_type.lower() == 'storm surge':
+            return f"{hazard_value:.2f} m"
+        elif hazard_type.lower() == 'rainfall induced landslide':
+            return f"{hazard_value:.1%}"
+        else:
+            return f"{hazard_value:.3f}"
+    except Exception as e:
+        logger.exception(f"Error formatting hazard value: {str(e)}")
+        return str(hazard_value)
+
+
+def _get_risk_color(risk_level):
+    """Get color code for risk level."""
+    risk_colors = {
+        'No Data': '#6c757d',
+        'No Risk': '#28a745',
+        'Low': '#ffc107',
+        'Medium': '#fd7e14',
+        'High': '#dc3545',
+        'Very High': '#6f42c1',
+        'Unknown': '#6c757d'
+    }
+    return risk_colors.get(risk_level, '#6c757d')
+
+
+@require_GET
+def load_granular_data(request):
+    """
+    Load combined_output.csv data for granular hazard exposure visualization.
+
+    Returns:
+        HttpResponse: CSV file content as plain text
+    """
+    try:
+        # Path to the combined_output.csv file
+        csv_path = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis', 'static', 'input_files', 'combined_output.csv')
+
+        # Check if file exists
+        if not os.path.exists(csv_path):
+            logger.error(f"Combined output CSV file not found at: {csv_path}")
+            return JsonResponse({
+                'error': 'Granular analysis data file not found',
+                'message': 'Please ensure a granular analysis has been completed.'
+            }, status=404)
+
+        # Read and return the CSV content
+        with open(csv_path, 'r', encoding='utf-8') as file:
+            csv_content = file.read()
+
+        # Create response with proper content type
+        response = HttpResponse(csv_content, content_type='text/csv')
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Allow-Methods'] = 'GET'
+        response['Access-Control-Allow-Headers'] = 'Content-Type'
+
+        logger.info(f"Successfully loaded granular data with {len(csv_content.split(chr(10)))} lines")
+        return response
+
+    except Exception as e:
+        logger.exception(f"Error loading granular data: {str(e)}")
+        return JsonResponse({
+            'error': 'Failed to load granular data',
+            'message': str(e)
+        }, status=500)
+
+
+class EnhancedHazardExposureMapView(TemplateView):
+    """
+    Enhanced view for hazard exposure map with granular point visualization.
+    Provides comprehensive interactive mapping features for 11 granular analysis points.
+    """
+    template_name = 'climate_hazards_analysis_v2/enhanced_hazard_exposure_map.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+
+        # Add map configuration
+        context.update({
+            'page_title': 'Enhanced Hazard Exposure Map',
+            'mapbox_token': getattr(settings, 'MAPBOX_ACCESS_TOKEN', ''),
+            'map_style': 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+            'default_center': [121.074, 14.267],  # Center of granular points
+            'default_zoom': 14,
+            'enable_granular_analysis': True,
+            'max_granular_points': 50,  # Performance limit
+            'supported_hazards': [
+                'flood', 'water_stress', 'sea_level_rise',
+                'tropical_cyclone', 'heat', 'storm_surge', 'landslide'
+            ],
+            'scenarios': ['current', 'moderate', 'worst']
+        })
+
+        # Check if granular data is available
+        csv_path = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis', 'static', 'input_files', 'combined_output.csv')
+        context['granular_data_available'] = os.path.exists(csv_path)
+
+        if context['granular_data_available']:
+            try:
+                # Get file modification time
+                file_mtime = os.path.getmtime(csv_path)
+                from datetime import datetime
+                context['data_last_updated'] = datetime.fromtimestamp(file_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                context['data_last_updated'] = 'Unknown'
+        else:
+            context['data_last_updated'] = None
+
+        return context

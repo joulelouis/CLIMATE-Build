@@ -1,0 +1,685 @@
+{% extends "base.html" %}
+{% load static %}
+{% load common_filters %}
+
+{% block title %}
+    Hazard Exposure Results - Draw Polygon Analysis
+{% endblock %}
+
+{% block content %}
+<style>
+    /* === Main Container Styles === */
+    .results-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+
+    .workflow-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 12px;
+        margin-bottom: 30px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+
+    .workflow-title {
+        font-size: 28px;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+
+    .workflow-subtitle {
+        font-size: 16px;
+        opacity: 0.9;
+        margin-bottom: 20px;
+    }
+
+    .workflow-stats {
+        display: flex;
+        gap: 30px;
+        flex-wrap: wrap;
+    }
+
+    .stat-item {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .stat-label {
+        font-size: 12px;
+        opacity: 0.8;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .stat-value {
+        font-size: 24px;
+        font-weight: bold;
+    }
+
+    /* === Hierarchical Table Styles === */
+    .hazard-table-container {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        overflow: hidden;
+        margin-bottom: 30px;
+    }
+
+    .hazard-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+
+    .hazard-table thead {
+        background: #f8f9fa;
+        border-bottom: 2px solid #dee2e6;
+    }
+
+    .hazard-table th {
+        padding: 15px 12px;
+        text-align: left;
+        font-weight: 600;
+        color: #495057;
+        border-bottom: 2px solid #dee2e6;
+        white-space: nowrap;
+    }
+
+    .hazard-table td {
+        padding: 12px;
+        border-bottom: 1px solid #e9ecef;
+        vertical-align: middle;
+    }
+
+    /* === Parent Row Styles === */
+    .parent-row {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .parent-row:hover {
+        background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+    }
+
+    .parent-row td {
+        border-bottom: 2px solid #dee2e6;
+    }
+
+    .expand-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-right: 10px;
+        transition: all 0.3s ease;
+        font-size: 14px;
+    }
+
+    .expand-button:hover {
+        background: #5a6fd8;
+        transform: scale(1.1);
+    }
+
+    .expand-button.expanded {
+        background: #764ba2;
+    }
+
+    /* === Child Row Styles === */
+    .child-row {
+        background: #ffffff;
+        font-size: 13px;
+        opacity: 0;
+        transform: translateY(-10px);
+        transition: all 0.3s ease;
+    }
+
+    .child-row.visible {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    .child-row td {
+        padding-left: 40px;
+        border-bottom: 1px solid #f1f3f4;
+    }
+
+    .child-row:hover {
+        background: #f8f9fa;
+    }
+
+    .child-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        background: #667eea;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
+
+    /* === Risk Badge Styles === */
+    .risk-badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        min-width: 60px;
+        text-align: center;
+    }
+
+    .risk-no-data { background: #6c757d; color: white; }
+    .risk-no-risk { background: #28a745; color: white; }
+    .risk-low { background: #ffc107; color: #212529; }
+    .risk-medium { background: #fd7e14; color: white; }
+    .risk-high { background: #dc3545; color: white; }
+    .risk-very-high { background: #6f42c1; color: white; }
+
+    /* === Hazard Value Styles === */
+    .hazard-value {
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    .hazard-unit {
+        font-size: 11px;
+        opacity: 0.7;
+        margin-left: 2px;
+    }
+
+    /* === Action Buttons === */
+    .action-buttons {
+        display: flex;
+        gap: 15px;
+        justify-content: center;
+        margin-top: 30px;
+        flex-wrap: wrap;
+    }
+
+    .btn-action {
+        padding: 12px 24px;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+
+    .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+
+    .btn-secondary:hover {
+        background: #5a6268;
+        transform: translateY(-2px);
+    }
+
+    /* === Summary Section === */
+    .summary-section {
+        background: white;
+        border-radius: 12px;
+        padding: 25px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        margin-bottom: 30px;
+    }
+
+    .summary-title {
+        font-size: 20px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        color: #495057;
+    }
+
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+    }
+
+    .summary-item {
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+    }
+
+    .summary-label {
+        font-size: 12px;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 5px;
+    }
+
+    .summary-value {
+        font-size: 18px;
+        font-weight: bold;
+        color: #495057;
+    }
+
+    /* === Loading and Error States === */
+    .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s ease;
+    }
+
+    .loading-overlay.active {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    .loading-content {
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        text-align: center;
+    }
+
+    .error-message {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #f5c6cb;
+        margin-bottom: 20px;
+    }
+
+    /* === Responsive Design === */
+    @media (max-width: 768px) {
+        .results-container {
+            padding: 10px;
+        }
+
+        .workflow-stats {
+            gap: 15px;
+        }
+
+        .hazard-table {
+            font-size: 12px;
+        }
+
+        .hazard-table th,
+        .hazard-table td {
+            padding: 8px 6px;
+        }
+
+        .child-row td {
+            padding-left: 20px;
+        }
+
+        .action-buttons {
+            flex-direction: column;
+            align-items: stretch;
+        }
+    }
+
+    /* === Animations === */
+    @keyframes slideDown {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .child-row.visible {
+        animation: slideDown 0.3s ease forwards;
+    }
+
+    /* === Expand/Collapse Animation === */
+    .expand-icon {
+        transition: transform 0.3s ease;
+    }
+
+    .expand-icon.rotated {
+        transform: rotate(90deg);
+    }
+</style>
+
+<div class="results-container">
+    <!-- Workflow Header -->
+    <div class="workflow-header">
+        <div class="workflow-title">
+            🗺️ Draw Polygon Hazard Analysis Results
+        </div>
+        <div class="workflow-subtitle">
+            Streamlined climate hazard exposure analysis for your drawn polygon asset
+        </div>
+        <div class="workflow-stats">
+            <div class="stat-item">
+                <div class="stat-label">Analysis Points</div>
+                <div class="stat-value">{{ total_points }}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Hazard Types</div>
+                <div class="stat-value">{{ selected_hazards|length }}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Polygon Area</div>
+                <div class="stat-value">{{ polygon_asset.polygon_area_km2|floatformat:2 }} km²</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Analysis Time</div>
+                <div class="stat-value">{{ analysis_timestamp }}</div>
+            </div>
+        </div>
+    </div>
+
+    {% if error %}
+        <div class="error-message">
+            <strong>Error:</strong> {{ error }}
+        </div>
+    {% endif %}
+
+    <!-- Summary Section -->
+    <div class="summary-section">
+        <div class="summary-title">📊 Analysis Summary</div>
+        <div class="summary-grid">
+            <div class="summary-item">
+                <div class="summary-label">Parent Asset</div>
+                <div class="summary-value">{{ polygon_asset.Facility }}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Grid Spacing</div>
+                <div class="summary-value">{{ polygon_asset.grid_spacing_meters }}m</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Granular Points</div>
+                <div class="summary-value">{{ polygon_asset.sample_points_count }}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Hazard Analysis</div>
+                <div class="summary-value">Complete ✓</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hierarchical Results Table -->
+    <div class="hazard-table-container">
+        <table class="hazard-table" id="hazardResultsTable">
+            <thead>
+                <tr>
+                    <th style="width: 30px;"></th>
+                    <th style="width: 200px;">Location</th>
+                    <th style="width: 100px;">Coordinates</th>
+                    {% for hazard in selected_hazards %}
+                        <th style="width: 120px;">
+                            {{ hazard }}<br>
+                            <small style="font-weight: normal; opacity: 0.7;">Risk / Value</small>
+                        </th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for result in hierarchical_results %}
+                    <tr class="{% if result.is_parent %}parent-row{% else %}child-row{% endif %}"
+                        data-id="{{ result.id }}"
+                        data-parent-id="{{ result.parent_id }}"
+                        {% if result.is_child %}style="display: none;"{% endif %}>
+
+                        <td>
+                            {% if result.is_parent %}
+                                <button class="expand-button" onclick="toggleChildren('{{ result.id }}')" title="Show/Hide granular points">
+                                    <span class="expand-icon">▶</span>
+                                </button>
+                            {% else %}
+                                <span class="child-indicator"></span>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <strong>{{ result.facility_name }}</strong>
+                            {% if result.is_parent %}
+                                <br><small style="opacity: 0.7;">{{ result.child_count }} analysis points</small>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <small>
+                                {{ result.latitude|floatformat:4 }}, {{ result.longitude|floatformat:4 }}
+                            </small>
+                        </td>
+
+                        {% for hazard in selected_hazards %}
+                            <td>
+                                {% with hazard_data=result.hazards|lookup:hazard %}
+                                    <div class="risk-badge risk-{{ hazard_data.risk_level|lower|slugify }}">
+                                        {{ hazard_data.risk_level }}
+                                    </div>
+                                    <div class="hazard-value">
+                                        {{ hazard_data.display_value }}
+                                    </div>
+                                {% endwith %}
+                            </td>
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="action-buttons">
+        <a href="{% url 'climate_hazards_analysis_v2:view_map' %}" class="btn-action btn-primary">
+            🗺️ Draw New Polygon
+        </a>
+        <button onclick="exportResults()" class="btn-action btn-secondary">
+            📊 Export Results
+        </button>
+        <button onclick="printResults()" class="btn-action btn-secondary">
+            🖨️ Print Report
+        </button>
+        <a href="{% url 'climate_hazards_analysis_v2:clear_site_data' %}" class="btn-action btn-secondary">
+            🗑️ Clear Data
+        </a>
+    </div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-content">
+        <h3>Processing...</h3>
+        <p>Please wait while we process your request.</p>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Streamlined hazard results page loaded');
+
+    // Initialize any interactive elements
+    initializeTableInteractions();
+    initializeExportFunctionality();
+});
+
+function toggleChildren(parentId) {
+    const parentRow = document.querySelector(`tr[data-id="${parentId}"]`);
+    const childRows = document.querySelectorAll(`tr[data-parent-id="${parentId}"]`);
+    const expandButton = parentRow.querySelector('.expand-button');
+    const expandIcon = expandButton.querySelector('.expand-icon');
+
+    // Toggle child visibility
+    childRows.forEach((row, index) => {
+        setTimeout(() => {
+            if (row.style.display === 'none') {
+                row.style.display = '';
+                setTimeout(() => {
+                    row.classList.add('visible');
+                }, 10);
+            } else {
+                row.classList.remove('visible');
+                setTimeout(() => {
+                    row.style.display = 'none';
+                }, 300);
+            }
+        }, index * 50); // Staggered animation
+    });
+
+    // Toggle button state
+    expandButton.classList.toggle('expanded');
+    expandIcon.classList.toggle('rotated');
+}
+
+function initializeTableInteractions() {
+    // Add hover effects to rows
+    const rows = document.querySelectorAll('.hazard-table tbody tr');
+    rows.forEach(row => {
+        row.addEventListener('mouseenter', function() {
+            this.style.transition = 'all 0.2s ease';
+        });
+    });
+
+    // Add keyboard navigation
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            // Collapse all expanded rows
+            const expandedButtons = document.querySelectorAll('.expand-button.expanded');
+            expandedButtons.forEach(button => {
+                const row = button.closest('tr');
+                const parentId = row.dataset.id;
+                if (parentId) {
+                    toggleChildren(parentId);
+                }
+            });
+        }
+    });
+}
+
+function initializeExportFunctionality() {
+    // Export functionality will be implemented here
+    console.log('Export functionality initialized');
+}
+
+function exportResults() {
+    showLoading();
+
+    // Gather table data
+    const table = document.getElementById('hazardResultsTable');
+    const rows = table.querySelectorAll('tr');
+    let csvContent = 'Location,Coordinates,' + '{{ selected_hazards|join:"," }}\n';
+
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length > 0) {
+            const rowData = [];
+            cells.forEach((cell, index) => {
+                if (index === 0) return; // Skip expand button column
+
+                let text = cell.textContent.trim();
+                // Clean up text for CSV
+                text = text.replace(/(\r\n|\n|\r)/gm, ' ');
+                text = text.replace(/,/g, ';');
+                rowData.push(text);
+            });
+            csvContent += rowData.join(',') + '\n';
+        }
+    });
+
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.setAttribute('hidden', '');
+    a.setAttribute('href', url);
+    a.setAttribute('download', `hazard_analysis_results_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    hideLoading();
+}
+
+function printResults() {
+    window.print();
+}
+
+function showLoading() {
+    document.getElementById('loadingOverlay').classList.add('active');
+}
+
+function hideLoading() {
+    document.getElementById('loadingOverlay').classList.remove('active');
+}
+
+// Auto-expand first parent row for better UX
+document.addEventListener('DOMContentLoaded', function() {
+    const firstParentRow = document.querySelector('.parent-row');
+    if (firstParentRow) {
+        const parentId = firstParentRow.dataset.id;
+        if (parentId) {
+            setTimeout(() => {
+                toggleChildren(parentId);
+            }, 500);
+        }
+    }
+});
+</script>
+
+<!-- Print Styles -->
+<style>
+@media print {
+    .action-buttons,
+    .expand-button {
+        display: none !important;
+    }
+
+    .child-row {
+        display: table-row !important;
+        opacity: 1 !important;
+        transform: none !important;
+    }
+
+    .workflow-header {
+        background: #667eea !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    .risk-badge {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+</style>
+{% endblock %}
