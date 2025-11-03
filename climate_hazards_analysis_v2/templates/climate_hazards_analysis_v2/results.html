@@ -2835,7 +2835,34 @@ function performReset() {
     });
 }
 
-// Proceed to sensitivity parameters function removed - 6-Step Workflow functionality removed
+// Proceed to sensitivity parameters function
+function proceedToSensitivityParameters() {
+    console.log('Proceeding to sensitivity parameters...');
+
+    // Get the current session data if needed
+    const sessionId = getSessionId();
+
+    // Navigate to the sensitivity parameters page with correct app prefix
+    window.location.href = '/climate-hazards-analysis-v2/sensitivity-parameters/';
+}
+
+// Helper function to get session ID
+function getSessionId() {
+    // Try to get session ID from various sources
+    const sessionIdElement = document.getElementById('session-id');
+    if (sessionIdElement) {
+        return sessionIdElement.value || sessionIdElement.textContent;
+    }
+
+    // Try to get from meta tag
+    const metaSessionId = document.querySelector('meta[name="session-id"]');
+    if (metaSessionId) {
+        return metaSessionId.content;
+    }
+
+    // Return empty string if not found
+    return '';
+}
 
 // highlightHeaders function removed - 6-Step Workflow functionality removed
 
