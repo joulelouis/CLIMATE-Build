@@ -207,15 +207,7 @@ Climate Hazard Analysis Results
         margin-left: 4px;
     }
 
-    .mixed-assets-indicator {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        color: #155724;
-        padding: 8px 12px;
-        border-radius: 6px;
-        margin-bottom: 16px;
-    }
-
+    
     .custom-table td {
         border: none;
         padding: 12px 10px;
@@ -3397,12 +3389,12 @@ function displayHeatStatistics(data) {
 
 // Initialize hierarchical table functionality
 $(document).ready(function() {
-    // Check if we have mixed assets and initialize hierarchical features
+    // Initialize hierarchical features if needed
     const hasMixedAssets = {{ has_mixed_assets|default:'false'|yesno:'true,false' }};
     const requiresHierarchicalDisplay = {{ requires_hierarchical_display|default:'false'|yesno:'true,false' }};
 
     if (hasMixedAssets || requiresHierarchicalDisplay) {
-        console.log('Initializing hierarchical table for mixed assets');
+        console.log('Initializing hierarchical table');
         initializeHierarchicalTable();
     }
 });
@@ -3580,53 +3572,6 @@ function reinitializeHierarchicalTable() {
     initializeHierarchicalTable();
 }
 
-// Add mixed assets indicator if needed
-function addMixedAssetsIndicator() {
-    const hasMixedAssets = {{ has_mixed_assets|default:'false'|yesno:'true,false' }};
-    const facilityCount = {{ facility_count|default:0 }};
-    const polygonAssetsCount = {{ polygon_assets_count|default:0 }};
-    const granularPointsCount = {{ granular_points_count|default:0 }};
-
-    // Show indicator for mixed assets OR polygon-only assets
-    if (hasMixedAssets || polygonAssetsCount > 0) {
-        const indicator = document.createElement('div');
-        indicator.className = 'mixed-assets-indicator';
-        // Dynamic message based on asset types
-        let analysisType = "Mixed Asset Analysis";
-        let analysisDescription = `This analysis includes ${facilityCount} regular facilities and ${polygonAssetsCount} polygon assets`;
-
-        if (facilityCount === 0 && polygonAssetsCount > 0) {
-            analysisType = "Polygon Asset Analysis";
-            analysisDescription = `This analysis includes ${polygonAssetsCount} polygon assets`;
-        } else if (polygonAssetsCount === 0 && facilityCount > 0) {
-            analysisType = "Regular Facility Analysis";
-            analysisDescription = `This analysis includes ${facilityCount} regular facilities`;
-        }
-
-        if (granularPointsCount > 0) {
-            analysisDescription += ` with ${granularPointsCount} granular analysis points.`;
-        } else {
-            analysisDescription += ".";
-        }
-
-        indicator.innerHTML = `
-            <strong>🔄 ${analysisType}</strong><br>
-            ${analysisDescription}
-            ${polygonAssetsCount > 0 ? 'Polygon assets are shown as parent rows with expandable child points.' : ''}
-        `;
-
-        // Insert before the table
-        const tableContainer = document.querySelector('.table-responsive');
-        if (tableContainer) {
-            tableContainer.parentNode.insertBefore(indicator, tableContainer);
-        }
-    }
-}
-
-// Initialize mixed assets indicator on page load
-$(document).ready(function() {
-    addMixedAssetsIndicator();
-});
 
 </script>
 
