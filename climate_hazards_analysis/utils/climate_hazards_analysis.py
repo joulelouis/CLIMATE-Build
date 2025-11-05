@@ -727,6 +727,18 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
                 df_fac = pd.read_csv(facility_csv_path, encoding='cp1252')
                 logger.warning(f"Facility CSV read with cp1252 encoding")
         
+        # Enhanced logging before standardization
+        logger.info(f"[CLIMATE_ANALYSIS_DEBUG] Before standardization:")
+        logger.info(f"[CLIMATE_ANALYSIS_DEBUG] Facility CSV path: {facility_csv_path}")
+        logger.info(f"[CLIMATE_ANALYSIS_DEBUG] Original DataFrame shape: {df_fac.shape}")
+        logger.info(f"[CLIMATE_ANALYSIS_DEBUG] Original columns: {df_fac.columns.tolist()}")
+        if 'Lat' in df_fac.columns:
+            logger.info(f"[CLIMATE_ANALYSIS_DEBUG] Lat column sample: {df_fac['Lat'].head().tolist()}")
+            logger.info(f"[CLIMATE_ANALYSIS_DEBUG] Lat NaN count: {df_fac['Lat'].isna().sum()}")
+        if 'Long' in df_fac.columns:
+            logger.info(f"[CLIMATE_ANALYSIS_DEBUG] Long column sample: {df_fac['Long'].head().tolist()}")
+            logger.info(f"[CLIMATE_ANALYSIS_DEBUG] Long NaN count: {df_fac['Long'].isna().sum()}")
+
         df_fac = standardize_facility_dataframe(df_fac)
         logger.info(f"Loaded facility data with {len(df_fac)} facilities")
         logger.info(f"Facility DataFrame columns: {df_fac.columns.tolist()}")

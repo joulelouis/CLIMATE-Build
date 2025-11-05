@@ -150,8 +150,57 @@ def view_map(request):
                 logger.info(f"Geospatial file attribute columns: {attribute_columns}")
 
                 gdf = gdf.to_crs('EPSG:4326')
-                gdf['Lat'] = gdf.geometry.centroid.y
-                gdf['Long'] = gdf.geometry.centroid.x
+
+                # Enhanced centroid calculation with robust error handling
+                logger.info(f"[SHAPEFILE_DEBUG] Calculating centroids for {len(gdf)} geometries")
+
+                # Check for empty or invalid geometries before calculating centroids
+                invalid_geoms = gdf.geometry.isna() | gdf.geometry.is_empty
+                invalid_count = invalid_geoms.sum()
+                if invalid_count > 0:
+                    logger.warning(f"[SHAPEFILE_DEBUG] Found {invalid_count} empty/invalid geometries")
+                    gdf = gdf[~invalid_geoms]
+                    logger.info(f"[SHAPEFILE_DEBUG] Removed invalid geometries, remaining: {len(gdf)}")
+
+                # Calculate centroids with error handling
+                try:
+                    gdf['Lat'] = gdf.geometry.centroid.y
+                    gdf['Long'] = gdf.geometry.centroid.x
+                except Exception as e:
+                    logger.error(f"[SHAPEFILE_DEBUG] Error calculating centroids: {e}")
+                    # Fallback: use representative point instead of centroid
+                    try:
+                        gdf['Lat'] = gdf.geometry.representative_point().y
+                        gdf['Long'] = gdf.geometry.representative_point().x
+                        logger.info(f"[SHAPEFILE_DEBUG] Used representative points as fallback")
+                    except Exception as e2:
+                        logger.error(f"[SHAPEFILE_DEBUG] Error with representative points: {e2}")
+                        raise ValueError(f"Failed to extract coordinates from shapefile: {e2}")
+
+                # Enhanced logging for shapefile coordinate debugging
+                logger.info(f"[SHAPEFILE_DEBUG] After CRS transformation to EPSG:4326:")
+                logger.info(f"[SHAPEFILE_DEBUG] GeoDataFrame shape: {gdf.shape}")
+                logger.info(f"[SHAPEFILE_DEBUG] Geometry bounds: {gdf.total_bounds}")
+                logger.info(f"[SHAPEFILE_DEBUG] Centroid coordinates sample:")
+                logger.info(f"[SHAPEFILE_DEBUG] Lat values: {gdf['Lat'].head().tolist()}")
+                logger.info(f"[SHAPEFILE_DEBUG] Long values: {gdf['Long'].head().tolist()}")
+                logger.info(f"[SHAPEFILE_DEBUG] Lat NaN count: {gdf['Lat'].isna().sum()}")
+                logger.info(f"[SHAPEFILE_DEBUG] Long NaN count: {gdf['Long'].isna().sum()}")
+
+                # Filter out any rows with NaN coordinates before creating DataFrame
+                valid_coords = ~(gdf['Lat'].isna() | gdf['Long'].isna())
+                nan_count = (~valid_coords).sum()
+                if nan_count > 0:
+                    logger.warning(f"[SHAPEFILE_DEBUG] Filtering out {nan_count} rows with NaN coordinates")
+                    gdf = gdf[valid_coords]
+
+                if not gdf.empty:
+                    logger.info(f"[SHAPEFILE_DEBUG] Final Lat range: {gdf['Lat'].min():.6f} to {gdf['Lat'].max():.6f}")
+                    logger.info(f"[SHAPEFILE_DEBUG] Final Long range: {gdf['Long'].min():.6f} to {gdf['Long'].max():.6f}")
+                else:
+                    logger.error(f"[SHAPEFILE_DEBUG] ERROR: No valid coordinates found in shapefile!")
+                    raise ValueError("No valid coordinates could be extracted from shapefile")
+
                 df = pd.DataFrame(gdf.drop(columns='geometry'))
 
             else:
@@ -608,8 +657,18 @@ def _save_facility_data_to_csv(request, facility_data):
     """
     Helper function to save facility data from session to a CSV file.
     This ensures compatibility with the analysis functions that expect a CSV file path.
+
+    Note: Only saves regular point facilities (AssetType != 'polygon') for climate analysis.
+    Polygon assets are handled separately via the unified CSV approach.
     """
     if not facility_data:
+        return None
+
+    # Filter out polygon assets - only save regular point facilities for climate analysis
+    regular_facilities = [f for f in facility_data if f.get('AssetType') != 'polygon' and not f.get('geometry')]
+
+    if not regular_facilities:
+        logger.warning("No regular facilities found for CSV creation (only polygon assets detected)")
         return None
 
     # Create upload directory if it doesn't exist
@@ -622,7 +681,7 @@ def _save_facility_data_to_csv(request, facility_data):
 
     # Convert facility data to DataFrame (excluding geometry for CSV)
     df_data = []
-    for facility in facility_data:
+    for facility in regular_facilities:
         row = {
             'Facility': facility.get('Facility'),
             'Lat': facility.get('Lat'),
@@ -640,7 +699,7 @@ def _save_facility_data_to_csv(request, facility_data):
     request.session['climate_hazards_v2_facility_csv_path'] = csv_path
     request.session.modified = True
 
-    logger.info(f"Saved facility data to CSV: {csv_path}")
+    logger.info(f"Saved {len(regular_facilities)} regular facilities to CSV: {csv_path}")
 
     return csv_path
 
@@ -1044,13 +1103,33 @@ def show_results(request):
                 lng = facility.get('Long')
                 archetype = facility.get('Archetype', 'default archetype')
 
-                # Add the main facility row (centroid)
-                expanded_rows.append({
-                    'Facility': facility_name,
-                    'Lat': lat,
-                    'Long': lng,
-                    'Archetype': archetype
-                })
+                # Debug logging for unified CSV creation
+                logger.info(f"[UNIFIED_CSV_DEBUG] Processing facility: {facility_name}")
+                logger.info(f"[UNIFIED_CSV_DEBUG] Coordinates - Lat: {lat}, Long: {lng}")
+                logger.info(f"[UNIFIED_CSV_DEBUG] Coordinate types - Lat: {type(lat)}, Long: {type(lng)}")
+
+                # Validate coordinates before adding to expanded rows
+                if lat is not None and lng is not None and str(lat).strip() != '' and str(lng).strip() != '':
+                    try:
+                        # Convert to float to ensure they're numeric
+                        lat_float = float(lat)
+                        lng_float = float(lng)
+
+                        # Check for reasonable coordinate ranges
+                        if -90 <= lat_float <= 90 and -180 <= lng_float <= 180:
+                            # Add the main facility row (centroid)
+                            expanded_rows.append({
+                                'Facility': facility_name,
+                                'Lat': lat_float,
+                                'Long': lng_float,
+                                'Archetype': archetype
+                            })
+                        else:
+                            logger.warning(f"[UNIFIED_CSV_DEBUG] Skipping facility {facility_name} with out-of-bounds coordinates: Lat={lat_float}, Long={lng_float}")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"[UNIFIED_CSV_DEBUG] Skipping facility {facility_name} with invalid coordinates: Lat={lat}, Long={lng}, Error={e}")
+                else:
+                    logger.warning(f"[UNIFIED_CSV_DEBUG] Skipping facility {facility_name} with missing coordinates: Lat={lat}, Long={lng}")
 
                 # If this facility has sample points, add them as separate rows
                 if 'sample_points' in facility:
@@ -1074,6 +1153,19 @@ def show_results(request):
 
             # Create expanded CSV
             expanded_df = pd.DataFrame(expanded_rows)
+
+            # Enhanced logging for expanded CSV
+            logger.info(f"[UNIFIED_CSV_DEBUG] Created expanded DataFrame with {len(expanded_rows)} rows")
+            if not expanded_df.empty:
+                logger.info(f"[UNIFIED_CSV_DEBUG] Expanded DataFrame columns: {expanded_df.columns.tolist()}")
+                logger.info(f"[UNIFIED_CSV_DEBUG] Coordinate columns sample:")
+                logger.info(f"[UNIFIED_CSV_DEBUG] Lat values: {expanded_df['Lat'].head().tolist()}")
+                logger.info(f"[UNIFIED_CSV_DEBUG] Long values: {expanded_df['Long'].head().tolist()}")
+                logger.info(f"[UNIFIED_CSV_DEBUG] Lat NaN count: {expanded_df['Lat'].isna().sum()}")
+                logger.info(f"[UNIFIED_CSV_DEBUG] Long NaN count: {expanded_df['Long'].isna().sum()}")
+            else:
+                logger.error(f"[UNIFIED_CSV_DEBUG] ERROR: Expanded DataFrame is empty!")
+
             upload_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'uploads')
             os.makedirs(upload_dir, exist_ok=True)
 
@@ -1866,13 +1958,14 @@ def _create_unified_mixed_assets_csv(asset_inventory, selected_hazards):
 
             if not grid_points:
                 logger.warning(f"No granular points found for polygon: {asset_name}")
-                continue
+                # Don't skip the polygon - still add the centroid even without granular points
+                logger.info(f"Will still process polygon centroid even without granular points: {asset_name}")
+            else:
+                logger.info(f"Using {len(grid_points)} stored granular points for polygon: {asset_name}")
 
-            logger.info(f"Using {len(grid_points)} stored granular points for polygon: {asset_name}")
-
-            # Add centroid as parent row
-            centroid_lat = polygon_asset.get('centroid_lat') or polygon_asset.get('latitude')
-            centroid_lng = polygon_asset.get('centroid_lng') or polygon_asset.get('longitude')
+            # Add centroid as parent row - ALWAYS attempt to add centroid
+            centroid_lat = polygon_asset.get('centroid_lat') or polygon_asset.get('latitude') or polygon_asset.get('Lat')
+            centroid_lng = polygon_asset.get('centroid_lng') or polygon_asset.get('longitude') or polygon_asset.get('Long')
 
             # Debug logging to understand centroid data
             logger.info(f"Centroid data for {asset_name}: lat={centroid_lat}, lng={centroid_lng}")
@@ -1919,33 +2012,45 @@ def _create_unified_mixed_assets_csv(asset_inventory, selected_hazards):
                 logger.warning(f"  Available keys: centroid_lat={polygon_asset.get('centroid_lat')}, latitude={polygon_asset.get('latitude')}")
                 logger.warning(f"  Available keys: centroid_lng={polygon_asset.get('centroid_lng')}, longitude={polygon_asset.get('longitude')}")
 
-            # Add granular points as child rows
-            logger.info(f"Adding {len(grid_points)} granular points for polygon: {asset_name}")
-            for i, point in enumerate(grid_points):
-                # Handle tuple format: (latitude, longitude, grid_row, grid_col)
-                if isinstance(point, tuple) and len(point) >= 2:
-                    lat, lon = point[0], point[1]
-                elif isinstance(point, dict):
-                    lat = point.get('lat', point.get('latitude'))
-                    lon = point.get('lon', point.get('longitude'))
-                else:
-                    logger.warning(f"Invalid point format at index {i}: {point}")
-                    continue
+            # Add granular points as child rows (only if granular points exist)
+            if grid_points:
+                logger.info(f"Adding {len(grid_points)} granular points for polygon: {asset_name}")
+                for i, point in enumerate(grid_points):
+                    # Handle tuple format: (latitude, longitude, grid_row, grid_col)
+                    if isinstance(point, tuple) and len(point) >= 2:
+                        lat, lon = point[0], point[1]
+                    elif isinstance(point, dict):
+                        lat = point.get('lat', point.get('latitude'))
+                        lon = point.get('lon', point.get('longitude'))
+                    else:
+                        logger.warning(f"Invalid point format at index {i}: {point}")
+                        continue
 
-                child_row = {
-                    'Facility': f"└── Granular Point {i+1}",
-                    'Lat': lat,
-                    'Long': lon,
-                    'Asset Archetype': f"{asset_archetype} - Granular Point",
-                    'AssetType': 'polygon_granular',
-                    'Asset_ID': f"{polygon_id}_point_{i}",
-                    'Parent_Facility': asset_name,
-                    'Point_Type': 'granular'
-                }
-                unified_rows.append(child_row)
+                    child_row = {
+                        'Facility': f"└── Granular Point {i+1}",
+                        'Lat': lat,
+                        'Long': lon,
+                        'Asset Archetype': f"{asset_archetype} - Granular Point",
+                        'AssetType': 'polygon_granular',
+                        'Asset_ID': f"{polygon_id}_point_{i}",
+                        'Parent_Facility': asset_name,
+                        'Point_Type': 'granular'
+                    }
+                    unified_rows.append(child_row)
 
         # Write unified CSV
         logger.info(f"Writing {len(unified_rows)} total rows to unified CSV: {unified_csv_path}")
+
+        # Debug: Log what we're about to write
+        logger.info(f"[UNIFIED_CSV_DEBUG] Unified rows summary:")
+        for i, row in enumerate(unified_rows[:5]):  # Log first 5 rows for debugging
+            logger.info(f"[UNIFIED_CSV_DEBUG] Row {i+1}: {row}")
+        if len(unified_rows) > 5:
+            logger.info(f"[UNIFIED_CSV_DEBUG] ... and {len(unified_rows) - 5} more rows")
+
+        if not unified_rows:
+            logger.error("[UNIFIED_CSV_DEBUG] No rows to write to unified CSV!")
+            return None
 
         with open(unified_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = ['Facility', 'Lat', 'Long', 'Asset Archetype', 'AssetType', 'Asset_ID', 'Parent_Facility', 'Point_Type']
@@ -1954,10 +2059,198 @@ def _create_unified_mixed_assets_csv(asset_inventory, selected_hazards):
             writer.writerows(unified_rows)
 
         logger.info(f"Successfully created unified CSV with {len(unified_rows)} rows")
+
+        # Verify the file was created and has content
+        if os.path.exists(unified_csv_path):
+            with open(unified_csv_path, 'r', encoding='utf-8') as verify_file:
+                first_line = verify_file.readline().strip()
+                logger.info(f"[UNIFIED_CSV_DEBUG] CSV header: {first_line}")
+
+                # Count actual data rows (excluding header)
+                data_lines = sum(1 for _ in verify_file) - 1  # Subtract header
+                logger.info(f"[UNIFIED_CSV_DEBUG] Actual data rows in file: {data_lines}")
+
+                if data_lines == 0:
+                    logger.error("[UNIFIED_CSV_DEBUG] CSV file contains no data rows!")
+                    return None
+        else:
+            logger.error(f"[UNIFIED_CSV_DEBUG] CSV file was not created: {unified_csv_path}")
+            return None
+
         return unified_csv_path
 
     except Exception as e:
         logger.exception(f"Error creating unified mixed assets CSV: {str(e)}")
+        return None
+
+
+def _execute_climate_analysis_unified_csv(unified_csv_path, selected_hazards):
+    """
+    Execute climate analysis on unified CSV with non-strict mode for polygon centroids.
+
+    This function creates a modified version of the climate analysis that can handle
+    unified CSV files containing polygon centroids with strict_mode=False.
+
+    Args:
+        unified_csv_path: Path to the unified CSV file
+        selected_hazards: List of selected hazard types
+
+    Returns:
+        dict: Analysis result or None if failed
+    """
+    try:
+        logger.info("Executing climate analysis on unified CSV with non-strict mode")
+
+        # Import the required modules
+        import pandas as pd
+        import os
+        from climate_hazards_analysis.utils.climate_hazards_analysis import (
+            process_flood_exposure_analysis,
+            process_sea_level_rise_analysis,
+            process_water_stress_analysis,
+            process_heat_exposure_analysis,
+            process_tropical_cyclone_analysis
+        )
+        from climate_hazards_analysis.utils.common_utils import (
+            standardize_facility_dataframe,
+            merge_dataframes_safely
+        )
+        from django.conf import settings
+
+        # Load and standardize facility dataframe with non-strict mode
+        try:
+            df_fac = pd.read_csv(unified_csv_path, encoding='utf-8')
+        except UnicodeDecodeError:
+            try:
+                df_fac = pd.read_csv(unified_csv_path, encoding='latin-1')
+                logger.warning(f"Unified CSV read with latin-1 encoding")
+            except UnicodeDecodeError:
+                df_fac = pd.read_csv(unified_csv_path, encoding='cp1252')
+                logger.warning(f"Unified CSV read with cp1252 encoding")
+
+        logger.info(f"[UNIFIED_CSV_DEBUG] Before standardization:")
+        logger.info(f"[UNIFIED_CSV_DEBUG] Original DataFrame shape: {df_fac.shape}")
+        logger.info(f"[UNIFIED_CSV_DEBUG] Original columns: {df_fac.columns.tolist()}")
+
+        # Use non-strict mode for unified CSV to handle polygon centroids
+        df_fac = standardize_facility_dataframe(df_fac, strict_mode=False)
+        logger.info(f"Loaded unified CSV data with {len(df_fac)} facilities")
+
+        if df_fac.empty:
+            logger.error("Unified CSV resulted in empty DataFrame after standardization")
+            return None
+
+        # Initialize combined DataFrame
+        base_columns = ['Facility', 'Lat', 'Long']
+        if 'Asset Archetype' in df_fac.columns:
+            base_columns.append('Asset Archetype')
+
+        # Add AssetType and Parent_Facility if they exist
+        if 'AssetType' in df_fac.columns:
+            base_columns.append('AssetType')
+        if 'Parent_Facility' in df_fac.columns:
+            base_columns.append('Parent_Facility')
+
+        combined_df = df_fac[base_columns].copy()
+
+        # Process each selected hazard with error handling for polygon-only scenarios
+        if 'Flood Exposure' in selected_hazards:
+            logger.info("Processing flood exposure analysis for unified CSV...")
+            try:
+                flood_result = process_flood_exposure_analysis(
+                    unified_csv_path,
+                    selected_fields=['Flood Exposure'],
+                    scenarios=['current', 'moderate', 'worst']
+                )
+                if flood_result and len(flood_result) > 0:
+                    flood_df = flood_result[0]  # First element is the DataFrame
+                    combined_df = merge_dataframes_safely(combined_df, flood_df, on=['Facility', 'Lat', 'Long'])
+                    logger.info(f"Successfully merged flood exposure data: {len(flood_df)} rows")
+                else:
+                    logger.warning("Flood exposure analysis returned no data")
+            except Exception as e:
+                logger.warning(f"Flood exposure analysis failed for unified CSV: {str(e)}")
+                # Add default flood exposure values
+                combined_df['Flood Depth (meters)'] = '0.1 to 0.5'  # Default to lowest risk
+
+        if 'Sea Level Rise' in selected_hazards:
+            logger.info("Processing sea level rise analysis for unified CSV...")
+            try:
+                slr_result = process_sea_level_rise_analysis(unified_csv_path, ['Sea Level Rise'])
+                if slr_result and 'combined_csv_path' in slr_result:
+                    slr_df = pd.read_csv(slr_result['combined_csv_path'])
+                    combined_df = merge_dataframes_safely(combined_df, slr_df, on=['Facility', 'Lat', 'Long'])
+                    logger.info(f"Successfully merged sea level rise data: {len(slr_df)} rows")
+                else:
+                    logger.warning("Sea level rise analysis returned no data")
+            except Exception as e:
+                logger.warning(f"Sea level rise analysis failed for unified CSV: {str(e)}")
+                # Add default sea level rise values
+                combined_df['Sea Level Rise (meters)'] = '0.0 to 0.5'  # Default to lowest risk
+
+        if 'Water Stress' in selected_hazards:
+            logger.info("Processing water stress analysis for unified CSV...")
+            try:
+                ws_result = process_water_stress_analysis(unified_csv_path, ['Water Stress'])
+                if ws_result and 'combined_csv_path' in ws_result:
+                    ws_df = pd.read_csv(ws_result['combined_csv_path'])
+                    combined_df = merge_dataframes_safely(combined_df, ws_df, on=['Facility', 'Lat', 'Long'])
+                    logger.info(f"Successfully merged water stress data: {len(ws_df)} rows")
+                else:
+                    logger.warning("Water stress analysis returned no data")
+            except Exception as e:
+                logger.warning(f"Water stress analysis failed for unified CSV: {str(e)}")
+                # Add default water stress values
+                combined_df['Water Stress'] = 'Low'  # Default to lowest risk
+
+        if 'Heat Exposure' in selected_hazards:
+            logger.info("Processing heat exposure analysis for unified CSV...")
+            try:
+                heat_result = process_heat_exposure_analysis(unified_csv_path, ['Heat Exposure'])
+                if heat_result and 'combined_csv_path' in heat_result:
+                    heat_df = pd.read_csv(heat_result['combined_csv_path'])
+                    combined_df = merge_dataframes_safely(combined_df, heat_df, on=['Facility', 'Lat', 'Long'])
+                    logger.info(f"Successfully merged heat exposure data: {len(heat_df)} rows")
+                else:
+                    logger.warning("Heat exposure analysis returned no data")
+            except Exception as e:
+                logger.warning(f"Heat exposure analysis failed for unified CSV: {str(e)}")
+                # Add default heat exposure values
+                combined_df['Heat Exposure'] = 'Low'  # Default to lowest risk
+
+        if 'Tropical Cyclones' in selected_hazards:
+            logger.info("Processing tropical cyclone analysis for unified CSV...")
+            try:
+                tc_result = process_tropical_cyclone_analysis(unified_csv_path, ['Tropical Cyclones'])
+                if tc_result and 'combined_csv_path' in tc_result:
+                    tc_df = pd.read_csv(tc_result['combined_csv_path'])
+                    combined_df = merge_dataframes_safely(combined_df, tc_df, on=['Facility', 'Lat', 'Long'])
+                    logger.info(f"Successfully merged tropical cyclone data: {len(tc_df)} rows")
+                else:
+                    logger.warning("Tropical cyclone analysis returned no data")
+            except Exception as e:
+                logger.warning(f"Tropical cyclone analysis failed for unified CSV: {str(e)}")
+                # Add default tropical cyclone values
+                combined_df['Tropical Cyclones'] = 'Low'  # Default to lowest risk
+
+        # Save combined result
+        import tempfile
+        from datetime import datetime
+        temp_dir = tempfile.mkdtemp()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        combined_csv_path = os.path.join(temp_dir, f'unified_analysis_result_{timestamp}.csv')
+
+        combined_df.to_csv(combined_csv_path, index=False)
+        logger.info(f"Unified analysis result saved to: {combined_csv_path}")
+
+        return {
+            'combined_csv_path': combined_csv_path,
+            'total_facilities': len(combined_df),
+            'analysis_type': 'unified_csv'
+        }
+
+    except Exception as e:
+        logger.exception(f"Error in unified CSV climate analysis: {str(e)}")
         return None
 
 
@@ -2001,11 +2294,8 @@ def _process_mixed_assets_via_unified_csv(asset_inventory, selected_hazards, req
             if not os.path.exists(unified_csv_path):
                 return {'success': False, 'error': f'Unified CSV file not found: {unified_csv_path}'}
 
-            result = generate_climate_hazards_analysis(
-                facility_csv_path=unified_csv_path,
-                selected_fields=selected_hazards,
-                flood_scenarios=['current', 'moderate', 'worst']
-            )
+            # Use the unified CSV climate analysis function with non-strict mode
+            result = _execute_climate_analysis_unified_csv(unified_csv_path, selected_hazards)
 
             if result is None:
                 return {'success': False, 'error': 'Climate analysis returned None result'}

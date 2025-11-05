@@ -117,9 +117,21 @@ def standardize_facility_dataframe(df: pd.DataFrame,
             if lat_col in missing or lon_col in missing:
                 raise ValueError(f"Missing coordinate columns: {', '.join(missing)}. Cannot continue without Lat/Long.")
 
+    # Enhanced logging for coordinate debugging
+    logger.info(f"[COORD_DEBUG] Before coordinate processing:")
+    logger.info(f"[COORD_DEBUG] DataFrame shape: {df.shape}")
+    logger.info(f"[COORD_DEBUG] Columns: {df.columns.tolist()}")
+    logger.info(f"[COORD_DEBUG] {lat_col} column sample: {df[lat_col].head().tolist() if lat_col in df.columns else 'MISSING'}")
+    logger.info(f"[COORD_DEBUG] {lon_col} column sample: {df[lon_col].head().tolist() if lon_col in df.columns else 'MISSING'}")
+
     # Convert coordinates to numeric and drop invalid
     df[lat_col] = pd.to_numeric(df[lat_col], errors='coerce')
     df[lon_col] = pd.to_numeric(df[lon_col], errors='coerce')
+
+    logger.info(f"[COORD_DEBUG] After numeric conversion:")
+    logger.info(f"[COORD_DEBUG] {lat_col} column sample: {df[lat_col].head().tolist()}")
+    logger.info(f"[COORD_DEBUG] {lon_col} column sample: {df[lon_col].head().tolist()}")
+    logger.info(f"[COORD_DEBUG] NaN counts - {lat_col}: {df[lat_col].isna().sum()}, {lon_col}: {df[lon_col].isna().sum()}")
 
     # Drop rows with invalid coordinates
     initial_count = len(df)
@@ -128,10 +140,36 @@ def standardize_facility_dataframe(df: pd.DataFrame,
 
     if dropped_count > 0:
         logger.warning(f"Dropped {dropped_count} rows with invalid coordinates")
+        logger.info(f"[COORD_DEBUG] After dropping NaN rows: {df.shape} rows remaining")
 
-    # Validate coordinate ranges (Philippines bounds - can be overridden if needed)
-    # This is optional and can be adjusted for different regions
+    # Enhanced coordinate validation for reasonable geographic ranges
+    # This is more permissive than just Philippines bounds
+    if not df.empty:
+        # Check for reasonable coordinate ranges (world bounds)
+        valid_lat_mask = df[lat_col].between(-90, 90)
+        valid_lon_mask = df[lon_col].between(-180, 180)
+        valid_coords_mask = valid_lat_mask & valid_lon_mask
+
+        out_of_bounds_count = (~valid_coords_mask).sum()
+        if out_of_bounds_count > 0:
+            logger.warning(f"Found {out_of_bounds_count} facilities with coordinates outside world bounds")
+            if strict_mode:
+                logger.info(f"Dropping {out_of_bounds_count} out-of-bounds facilities in strict mode")
+                df = df[valid_coords_mask]
+            else:
+                logger.warning(f"Keeping out-of-bounds facilities in non-strict mode (values: Lat={df[~valid_lat_mask][lat_col].tolist()}, Lon={df[~valid_lon_mask][lon_col].tolist()})")
+
+    # Final check for empty dataframe
     if df.empty:
+        logger.error(f"[COORD_DEBUG] DataFrame is empty after coordinate processing!")
+        logger.error(f"[COORD_DEBUG] Initial count: {initial_count}, Dropped: {dropped_count}")
+        logger.error(f"[COORD_DEBUG] strict_mode: {strict_mode}")
+
+        # In non-strict mode, provide a more helpful error message
+        if not strict_mode:
+            logger.error(f"[COORD_DEBUG] This suggests all coordinates were invalid or out of bounds.")
+            logger.error(f"[COORD_DEBUG] Please check the source data for valid coordinate values.")
+
         raise ValueError("No valid facility locations after processing coordinates.")
 
     # Optional coordinate validation for Philippines
@@ -147,7 +185,17 @@ def standardize_facility_dataframe(df: pd.DataFrame,
         # Settings not configured, skip coordinate validation
         pass
 
-    logger.info(f"Standardized facility dataframe: {len(df)} facilities with columns: {df.columns.tolist()}")
+    # Final validation and logging
+    if not df.empty:
+        logger.info(f"Standardized facility dataframe: {len(df)} facilities with columns: {df.columns.tolist()}")
+        logger.info(f"[COORD_DEBUG] Final coordinate ranges:")
+        logger.info(f"[COORD_DEBUG] Lat: {df[lat_col].min():.6f} to {df[lat_col].max():.6f}")
+        logger.info(f"[COORD_DEBUG] Lon: {df[lon_col].min():.6f} to {df[lon_col].max():.6f}")
+        logger.info(f"[COORD_DEBUG] Valid coordinate count: {len(df)}")
+    else:
+        logger.error(f"[COORD_DEBUG] ERROR: DataFrame is empty after all processing!")
+        raise ValueError("No valid facility locations after processing coordinates.")
+
     return df
 
 
