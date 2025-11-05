@@ -374,7 +374,7 @@ def preview_enhanced_facilities(request):
             polygon_data = {
                 'id': asset.get('AssetId'),
                 'name': asset['Facility'],
-                'archetype': asset['Archetype'],
+                'archetype': asset.get('Archetype', 'default archetype'),
                 'latitude': float(asset['Lat']),
                 'longitude': float(asset['Long']),
                 'area_km2': asset.get('polygon_area_km2'),
@@ -4467,7 +4467,7 @@ def get_polygon_assets(request):
                 'type': 'Feature',
                 'properties': {
                     'name': asset['Facility'],
-                    'archetype': asset['Archetype'],
+                    'archetype': asset.get('Archetype', 'default archetype'),
                     'id': asset['AssetId'],
                     'AssetType': 'polygon'
                 },
