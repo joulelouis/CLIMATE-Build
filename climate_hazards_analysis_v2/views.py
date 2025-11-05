@@ -172,6 +172,9 @@ def view_map(request):
                     elif geom.geom_type in ['Polygon', 'MultiPolygon']:
                         record['geometry'] = geom.__geo_interface__
 
+                    # Mark shapefile/geopackage records as polygon assets to prevent double counting
+                    record['AssetType'] = 'polygon'
+
                     facility_data.append(record)
             else:
                 facility_data = df.to_dict(orient='records')
