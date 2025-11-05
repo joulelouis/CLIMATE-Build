@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect
 from django.http import JsonResponse, HttpResponse
+from django.contrib import messages
 from django.urls import reverse
 from django.utils import timezone
 import os
@@ -187,13 +188,46 @@ def view_map(request):
             # Save facility data to CSV (creates standardized CSV file)
             csv_path = _save_facility_data_to_csv(request, facility_data)
 
-            # Store uploaded filename in session for display
+            # Generate unique file ID and track file in session
+            file_id = str(uuid.uuid4())
+
+            # Get file type from MIME type or extension
+            file_type = mimetypes.guess_type(file.name)[0] or 'unknown'
+            if file_type == 'unknown':
+                ext = os.path.splitext(file.name)[1].lower()
+                type_map = {
+                    '.csv': 'text/csv',
+                    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    '.xls': 'application/vnd.ms-excel',
+                    '.shp': 'application/octet-stream',
+                    '.zip': 'application/zip',
+                    '.gpkg': 'application/geopackage+sqlite3'
+                }
+                file_type = type_map.get(ext, 'unknown')
+
+            # Prepare file metadata
+            file_metadata = {
+                'id': file_id,
+                'name': file.name,
+                'size': file.size,
+                'type': file_type,
+                'record_count': len(facility_data),
+                'upload_time': timezone.now().isoformat(),
+                'file_path': file_path,
+                'csv_path': csv_path,
+                'extension': ext
+            }
+
+            # Add file to session tracking
+            _add_file_to_session(request, file_id, file_metadata)
+
+            # Store uploaded filename in session for display (backward compatibility)
             request.session['climate_hazards_v2_uploaded_filename'] = file.name
             request.session.modified = True
 
             # Add success message to context
             total_facilities = len(facility_data)
-            uploaded_count = len(facility_data)
+            uploaded_count = len(facility_data) - len(existing_facility_data)
             existing_count = len(existing_facility_data)
 
             if existing_count > 0:
@@ -8192,3 +8226,247 @@ class EnhancedHazardExposureMapView(TemplateView):
             context['data_last_updated'] = None
 
         return context
+
+
+# ============================================================================
+# FILE MANAGEMENT SYSTEM
+# ============================================================================
+
+def _init_uploaded_files_session(request):
+    """
+    Initialize the uploaded files tracking in session if it doesn't exist.
+    """
+    if 'climate_hazards_v2_uploaded_files' not in request.session:
+        request.session['climate_hazards_v2_uploaded_files'] = {}
+        request.session.modified = True
+
+
+def _add_file_to_session(request, file_id, file_metadata):
+    """
+    Add a file to the session tracking.
+    """
+    _init_uploaded_files_session(request)
+    request.session['climate_hazards_v2_uploaded_files'][file_id] = file_metadata
+    request.session.modified = True
+
+
+def _remove_file_from_session(request, file_id):
+    """
+    Remove a file from the session tracking.
+    """
+    if 'climate_hazards_v2_uploaded_files' in request.session:
+        if file_id in request.session['climate_hazards_v2_uploaded_files']:
+            del request.session['climate_hazards_v2_uploaded_files'][file_id]
+            request.session.modified = True
+            return True
+    return False
+
+
+def _get_file_from_session(request, file_id):
+    """
+    Get file metadata from session.
+    """
+    if 'climate_hazards_v2_uploaded_files' in request.session:
+        return request.session['climate_hazards_v2_uploaded_files'].get(file_id)
+    return None
+
+
+def _delete_physical_file(file_path):
+    """
+    Safely delete a physical file from the filesystem.
+    """
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            return True
+    except Exception as e:
+        logger.error(f"Error deleting file {file_path}: {str(e)}")
+    return False
+
+
+@require_POST
+def remove_file(request):
+    """
+    Remove a specific uploaded file and all associated facility data, then redirect back to main page.
+    """
+    try:
+        # Get file_id from request
+        file_id = request.POST.get('file_id')
+        if not file_id:
+            messages.error(request, 'File ID is required')
+            return redirect('climate_hazards_analysis_v2:view_map')
+
+        # Get file metadata from session
+        file_metadata = _get_file_from_session(request, file_id)
+        if not file_metadata:
+            messages.error(request, 'File not found in session')
+            return redirect('climate_hazards_analysis_v2:view_map')
+
+        # Delete physical file
+        file_path = file_metadata.get('file_path')
+        if file_path:
+            _delete_physical_file(file_path)
+
+        # Delete CSV file generated from this upload
+        csv_path = file_metadata.get('csv_path')
+        if csv_path:
+            _delete_physical_file(csv_path)
+
+        # Remove all facility data from session (clears map markers and preview data)
+        session_keys_to_clear = [
+            'climate_hazards_v2_facility_data',
+            'climate_hazards_v2_uploaded_filename',
+            'climate_hazards_v2_facility_csv_path',
+            'climate_hazards_v2_selected_hazards',
+            'climate_hazards_v2_parent_facilities',
+            'climate_hazards_v2_asset_inventory',
+            'climate_hazards_v2_results',
+            'climate_hazards_v2_baseline_results',
+            'climate_hazards_v2_archetype_params',
+            'climate_hazards_v2_revised_params',
+            'climate_hazards_v2_sensitivity_results',
+            'climate_hazards_v2_analysis_results',
+            'climate_hazards_v2_asset_exposure_updated_csv_path'
+        ]
+
+        for key in session_keys_to_clear:
+            if key in request.session:
+                del request.session[key]
+
+        # Clear polygon assets that were created from uploaded files (not user-drawn)
+        Asset.objects.filter(source='session_polygon_workflow').delete()
+
+        # Remove file from session
+        if _remove_file_from_session(request, file_id):
+            logger.info(f"Successfully removed file and all associated data: {file_metadata.get('name')} (ID: {file_id})")
+            messages.success(request, f'File "{file_metadata.get("name")}" and all associated facility data removed successfully')
+        else:
+            messages.error(request, 'Failed to remove file from session')
+
+        request.session.modified = True
+        return redirect('climate_hazards_analysis_v2:view_map')
+
+    except Exception as e:
+        logger.exception(f"Error removing file: {str(e)}")
+        messages.error(request, 'An unexpected error occurred while removing the file')
+        return redirect('climate_hazards_analysis_v2:view_map')
+
+
+@require_POST
+def clear_all_files(request):
+    """
+    Clear all uploaded files and redirect back to main page.
+    """
+    try:
+        uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
+        removed_count = 0
+
+        # Delete all physical files from tracked files
+        for file_id, file_metadata in uploaded_files.items():
+            file_path = file_metadata.get('file_path')
+            if file_path:
+                if _delete_physical_file(file_path):
+                    removed_count += 1
+
+            # Also delete CSV files generated from uploads
+            csv_path = file_metadata.get('csv_path')
+            if csv_path:
+                _delete_physical_file(csv_path)
+
+        # Clean up any old uploaded files in the directory that aren't tracked
+        try:
+            upload_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
+            if os.path.exists(upload_dir):
+                # Get list of tracked files
+                tracked_files = set()
+                for file_metadata in uploaded_files.values():
+                    file_path = file_metadata.get('file_path')
+                    if file_path:
+                        tracked_files.add(os.path.basename(file_path))
+
+                # Clean up untracked CSV files (except template files)
+                for filename in os.listdir(upload_dir):
+                    if filename.endswith('.csv') and not filename.startswith('asset_template'):
+                        file_full_path = os.path.join(upload_dir, filename)
+                        if filename not in tracked_files:
+                            if _delete_physical_file(file_full_path):
+                                removed_count += 1
+        except Exception as cleanup_error:
+            logger.warning(f"Error during cleanup of old files: {str(cleanup_error)}")
+
+        # Clear polygon assets that were created from uploaded files (not user-drawn)
+        Asset.objects.filter(source='session_polygon_workflow').delete()
+
+        # Clear session data
+        request.session['climate_hazards_v2_uploaded_files'] = {}
+
+        # Also clear all related session data
+        session_keys_to_clear = [
+            'climate_hazards_v2_facility_data',
+            'climate_hazards_v2_uploaded_filename',
+            'climate_hazards_v2_facility_csv_path',
+            'climate_hazards_v2_selected_hazards',
+            'climate_hazards_v2_parent_facilities',
+            'climate_hazards_v2_asset_inventory',
+            'climate_hazards_v2_results',
+            'climate_hazards_v2_baseline_results',
+            'climate_hazards_v2_archetype_params',
+            'climate_hazards_v2_revised_params',
+            'climate_hazards_v2_sensitivity_results',
+            'climate_hazards_v2_analysis_results',
+            'climate_hazards_v2_asset_exposure_updated_csv_path'
+        ]
+
+        for key in session_keys_to_clear:
+            if key in request.session:
+                del request.session[key]
+
+        request.session.modified = True
+
+        logger.info(f"Cleared {removed_count} uploaded files and all associated facility data")
+        messages.success(request, f'Successfully removed {removed_count} uploaded files and all associated map markers and preview data')
+
+        return redirect('climate_hazards_analysis_v2:view_map')
+
+    except Exception as e:
+        logger.exception(f"Error clearing all files: {str(e)}")
+        messages.error(request, 'An unexpected error occurred while clearing files')
+        return redirect('climate_hazards_analysis_v2:view_map')
+
+
+@require_GET
+def get_uploaded_files(request):
+    """
+    API endpoint to get list of uploaded files.
+    """
+    try:
+        uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
+
+        # Convert to list format for JSON response
+        files_list = []
+        for file_id, file_metadata in uploaded_files.items():
+            files_list.append({
+                'id': file_id,
+                'name': file_metadata.get('name'),
+                'size': file_metadata.get('size', 0),
+                'type': file_metadata.get('type', 'unknown'),
+                'record_count': file_metadata.get('record_count', 0),
+                'upload_time': file_metadata.get('upload_time'),
+                'file_path': file_metadata.get('file_path')
+            })
+
+        # Sort by upload time (newest first)
+        files_list.sort(key=lambda x: x.get('upload_time', ''), reverse=True)
+
+        return JsonResponse({
+            'success': True,
+            'files': files_list,
+            'total_count': len(files_list)
+        })
+
+    except Exception as e:
+        logger.exception(f"Error getting uploaded files: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'An unexpected error occurred while retrieving files'
+        }, status=500)

@@ -11,7 +11,7 @@ from .views import (
     clear_granular_workflow, get_granular_workflow_state,
     execute_complete_granular_workflow, get_workflow_results_table,
     select_hazards_streamlined, hazard_exposure_results_streamlined, load_granular_data,
-    EnhancedHazardExposureMapView
+    EnhancedHazardExposureMapView, remove_file, clear_all_files, get_uploaded_files
 )
 from .api_views import (
     assets_api, asset_detail_api, asset_analysis_api, granular_analysis_api,
@@ -98,4 +98,9 @@ urlpatterns = [
 
     # Enhanced hazard exposure map
     path('enhanced-hazard-exposure-map/', EnhancedHazardExposureMapView.as_view(), name='enhanced_hazard_exposure_map'),
+
+    # File management endpoints
+    path('api/files/remove/', remove_file, name='remove_file'),
+    path('api/files/clear/', clear_all_files, name='clear_all_files'),
+    path('api/files/', get_uploaded_files, name='get_uploaded_files'),
 ]

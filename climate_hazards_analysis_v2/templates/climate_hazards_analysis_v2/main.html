@@ -174,6 +174,210 @@
         color: #dc3545;
         box-shadow: none;
     }
+
+    /* Uploaded Files List Styles */
+    .uploaded-files-section {
+        margin-top: 20px;
+        border-top: 1px solid #dee2e6;
+        padding-top: 15px;
+    }
+
+    .uploaded-files-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .uploaded-files-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #495057;
+        margin: 0;
+    }
+
+    .clear-all-btn {
+        background: none;
+        border: none;
+        color: #dc3545;
+        font-size: 12px;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+    }
+
+    .clear-all-btn:hover {
+        background-color: #dc3545;
+        color: white;
+        text-decoration: none;
+    }
+
+    .clear-all-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .files-list {
+        max-height: 200px;
+        overflow-y: auto;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        background-color: #f8f9fa;
+    }
+
+    .files-list:empty::before {
+        content: "No files uploaded yet";
+        display: block;
+        padding: 20px;
+        text-align: center;
+        color: #6c757d;
+        font-style: italic;
+        font-size: 13px;
+    }
+
+    .file-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 12px;
+        border-bottom: 1px solid #e9ecef;
+        background-color: white;
+        transition: background-color 0.2s ease;
+    }
+
+    .file-item:last-child {
+        border-bottom: none;
+    }
+
+    .file-item:hover {
+        background-color: #f8f9fa;
+    }
+
+    .file-info {
+        display: flex;
+        align-items: center;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .file-icon {
+        margin-right: 8px;
+        font-size: 14px;
+        color: #6c757d;
+    }
+
+    .file-name {
+        font-size: 13px;
+        color: #495057;
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+    }
+
+    .file-size {
+        font-size: 11px;
+        color: #6c757d;
+        margin-left: 8px;
+        white-space: nowrap;
+    }
+
+    .file-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .remove-file-btn {
+        background: none;
+        border: none;
+        color: #dc3545;
+        font-size: 14px;
+        cursor: pointer;
+        padding: 4px 6px;
+        border-radius: 3px;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .remove-file-btn:hover {
+        background-color: #dc3545;
+        color: white;
+    }
+
+    .remove-file-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .files-loading {
+        text-align: center;
+        padding: 20px;
+        color: #6c757d;
+        font-size: 13px;
+    }
+
+    .files-loading .spinner-border {
+        width: 16px;
+        height: 16px;
+        margin-bottom: 4px;
+    }
+
+    .files-error {
+        text-align: center;
+        padding: 15px;
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        border-radius: 4px;
+        color: #721c24;
+        font-size: 12px;
+    }
+
+    .files-retry-btn {
+        background: none;
+        border: 1px solid #dc3545;
+        color: #dc3545;
+        font-size: 11px;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+        transition: all 0.2s ease;
+    }
+
+    .files-retry-btn:hover {
+        background-color: #dc3545;
+        color: white;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .file-item {
+            padding: 8px 10px;
+        }
+
+        .file-name {
+            font-size: 12px;
+        }
+
+        .file-size {
+            font-size: 10px;
+        }
+
+        .uploaded-files-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .clear-all-btn {
+            align-self: flex-end;
+        }
+    }
 </style>
 
 <div class="container-fluid mt-4">
@@ -277,6 +481,21 @@
                         <div class="alert alert-info mt-3" role="alert" style="margin-right: 40px;">
                             Ensure your asset file includes the columns <strong>Facility</strong>, <strong>Latitude</strong>, <strong>Longitude</strong>, and <strong>Archetype</strong>. You can
                             <a href="{% static 'sample/asset_template.csv' %}" download>download a template</a> for reference.
+                        </div>
+
+                        <!-- Uploaded Files List Section -->
+                        <div class="uploaded-files-section" id="uploaded-files-section">
+                            <div class="uploaded-files-header">
+                                <h6 class="uploaded-files-title">
+                                    <i class="fas fa-files-o me-2"></i>Uploaded Files
+                                </h6>
+                                <button type="button" class="clear-all-btn" id="clear-all-btn" onclick="clearAllFiles()" disabled>
+                                    <i class="fas fa-trash me-1"></i>Clear All
+                                </button>
+                            </div>
+                            <div class="files-list" id="files-list">
+                                <!-- Files will be populated here by JavaScript -->
+                            </div>
                         </div>
 
         <!-- Instructions Panel - MOVED HERE -->
@@ -1157,5 +1376,260 @@
     function refreshEnhancedPreview() {
         showEnhancedPreview();
     }
+
+    // =============== UPLOADED FILES MANAGEMENT ===============
+
+    // Global variables for file management
+    let uploadedFiles = [];
+    let isProcessingRequest = false;
+
+    // Load uploaded files when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        // Load files after a short delay to ensure everything is initialized
+        setTimeout(loadUploadedFiles, 500);
+
+        // Also load files after form submission
+        const uploadForm = document.getElementById('upload-form');
+        if (uploadForm) {
+            uploadForm.addEventListener('submit', function() {
+                // Files will be refreshed after page reload from form submission
+            });
+        }
+    });
+
+    // Load uploaded files from API
+    async function loadUploadedFiles() {
+        const filesList = document.getElementById('files-list');
+        const clearAllBtn = document.getElementById('clear-all-btn');
+
+        if (!filesList) return;
+
+        // Show loading state
+        filesList.innerHTML = `
+            <div class="files-loading">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <div>Loading files...</div>
+            </div>
+        `;
+
+        try {
+            const response = await fetch('/climate-hazards-analysis-v2/api/files/');
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+
+            if (data.success) {
+                uploadedFiles = data.files;
+                renderFilesList(uploadedFiles);
+
+                // Update clear all button state
+                if (clearAllBtn) {
+                    clearAllBtn.disabled = uploadedFiles.length === 0;
+                }
+
+                // Show/hide uploaded files section based on content
+                const section = document.getElementById('uploaded-files-section');
+                if (section) {
+                    section.style.display = uploadedFiles.length === 0 ? 'none' : 'block';
+                }
+            } else {
+                throw new Error(data.error || 'Failed to load files');
+            }
+
+        } catch (error) {
+            console.error('Error loading uploaded files:', error);
+            filesList.innerHTML = `
+                <div class="files-error">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Failed to load files: ${error.message}
+                    <button class="files-retry-btn" onclick="loadUploadedFiles()">
+                        <i class="fas fa-redo me-1"></i>Retry
+                    </button>
+                </div>
+            `;
+        }
+    }
+
+    // Render files list in the UI
+    function renderFilesList(files) {
+        const filesList = document.getElementById('files-list');
+        if (!filesList) return;
+
+        if (!files || files.length === 0) {
+            filesList.innerHTML = '';
+            return;
+        }
+
+        const filesHtml = files.map(file => {
+            const fileIcon = getFileIcon(file.name);
+            const formattedSize = formatFileSize(file.size);
+
+            return `
+                <div class="file-item" data-file-id="${file.id}">
+                    <div class="file-info">
+                        <i class="${fileIcon} file-icon"></i>
+                        <span class="file-name" title="${file.name}">${file.name}</span>
+                        <span class="file-size">${formattedSize}</span>
+                    </div>
+                    <div class="file-actions">
+                        <button type="button"
+                                class="remove-file-btn"
+                                onclick="removeFile('${file.id}')"
+                                title="Remove this file"
+                                ${isProcessingRequest ? 'disabled' : ''}>
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        filesList.innerHTML = filesHtml;
+    }
+
+    // Get appropriate icon based on file extension
+    function getFileIcon(filename) {
+        if (!filename) return 'fas fa-file';
+
+        const ext = filename.split('.').pop().toLowerCase();
+        const iconMap = {
+            'csv': 'fas fa-file-csv',
+            'xlsx': 'fas fa-file-excel',
+            'xls': 'fas fa-file-excel',
+            'zip': 'fas fa-file-archive',
+            'gpkg': 'fas fa-file-gis',
+            'shp': 'fas fa-file-gis',
+            'geojson': 'fas fa-file-gis',
+            'json': 'fas fa-file-code'
+        };
+
+        return iconMap[ext] || 'fas fa-file';
+    }
+
+    // Format file size in human readable format
+    function formatFileSize(bytes) {
+        if (!bytes || bytes === 0) return 'Unknown';
+
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+
+        if (i === 0) return bytes + ' ' + sizes[i];
+        return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + sizes[i];
+    }
+
+    // Remove a single file
+    function removeFile(fileId) {
+        if (isProcessingRequest) return;
+
+        // Find the file to get its name for confirmation
+        const file = uploadedFiles.find(f => f.id === fileId);
+        const fileName = file ? file.name : 'this file';
+
+        // Confirm removal
+        const confirmed = confirm(`Are you sure you want to remove "${fileName}"? This action cannot be undone.`);
+        if (!confirmed) return;
+
+        // Show processing state
+        const removeBtn = document.querySelector(`[data-file-id="${fileId}"] .remove-file-btn`);
+        if (removeBtn) {
+            removeBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            removeBtn.disabled = true;
+        }
+
+        // Create and submit a form
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/climate-hazards-analysis-v2/api/files/remove/';
+        form.style.display = 'none';
+
+        // Add CSRF token
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrfmiddlewaretoken';
+        csrfInput.value = getCookie('csrftoken');
+        form.appendChild(csrfInput);
+
+        // Add file ID
+        const fileInput = document.createElement('input');
+        fileInput.type = 'hidden';
+        fileInput.name = 'file_id';
+        fileInput.value = fileId;
+        form.appendChild(fileInput);
+
+        // Submit form
+        document.body.appendChild(form);
+        form.submit();
+    }
+
+    // Clear all files
+    function clearAllFiles() {
+        if (isProcessingRequest) return;
+
+        if (!uploadedFiles || uploadedFiles.length === 0) return;
+
+        // Confirm removal
+        const confirmed = confirm(`Are you sure you want to remove all ${uploadedFiles.length} uploaded file(s)? This action cannot be undone.`);
+        if (!confirmed) return;
+
+        // Show processing state
+        const clearAllBtn = document.getElementById('clear-all-btn');
+        if (clearAllBtn) {
+            clearAllBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Clearing...';
+            clearAllBtn.disabled = true;
+        }
+
+        // Create and submit a form
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/climate-hazards-analysis-v2/api/files/clear/';
+        form.style.display = 'none';
+
+        // Add CSRF token
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrfmiddlewaretoken';
+        csrfInput.value = getCookie('csrftoken');
+        form.appendChild(csrfInput);
+
+        // Submit form
+        document.body.appendChild(form);
+        form.submit();
+    }
+
+    // Enhanced updateFileName function to also refresh files list
+    function updateFileName() {
+        var input = document.getElementById("facilityCsv");
+        var fileNameDisplay = document.getElementById("file-name");
+
+        if (input.files.length > 0) {
+            fileNameDisplay.textContent = input.files[0].name;
+            document.getElementById('upload-form').submit();
+
+            // Schedule a refresh of the files list after upload
+            setTimeout(() => {
+                loadUploadedFiles();
+            }, 2000); // Wait 2 seconds for upload to complete
+
+        } else {
+            fileNameDisplay.textContent = "No file chosen";
+        }
+    }
+
+    // Add event listener for form submission to refresh files list
+    document.addEventListener('DOMContentLoaded', function() {
+        const uploadForm = document.getElementById('upload-form');
+        if (uploadForm) {
+            // Listen for successful form submission
+            uploadForm.addEventListener('submit', function() {
+                // Files list will be refreshed on page reload
+                console.log('Form submitted, files will be refreshed on reload');
+            });
+        }
+    });
 </script>
 {% endblock %}
