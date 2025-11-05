@@ -172,18 +172,18 @@ def view_map(request):
             # Debug: Log the uploaded facility data
             logger.info(f"Processed {len(facility_data)} facilities from file: {str(facility_data)[:200]}...")
 
-            # Get existing facility data (preserves drawn polygon assets)
+            # Get existing drawn polygon assets (not from uploaded files)
             existing_facility_data = request.session.get('climate_hazards_v2_facility_data', [])
-            logger.info(f"Found {len(existing_facility_data)} existing facilities in session")
+            drawn_polygon_assets = [f for f in existing_facility_data if f.get('source') == 'drawn_polygon']
+            logger.info(f"Found {len(drawn_polygon_assets)} drawn polygon assets in session")
 
-            # Combine existing facilities with uploaded facilities
+            # Combine drawn polygon assets with uploaded facilities
             # This preserves drawn polygon assets and adds uploaded file data
-            facility_data = existing_facility_data + facility_data
+            facility_data = drawn_polygon_assets + facility_data
             logger.info(f"Combined total: {len(facility_data)} facilities")
 
-            # Explicitly store combined data in session
-            request.session['climate_hazards_v2_facility_data'] = facility_data
-            request.session.modified = True  # Ensure session is saved
+            # Rebuild combined facility data from all uploaded files plus drawn polygons
+            _rebuild_combined_facility_data(request)
 
             # Save facility data to CSV (creates standardized CSV file)
             csv_path = _save_facility_data_to_csv(request, facility_data)
@@ -215,7 +215,8 @@ def view_map(request):
                 'upload_time': timezone.now().isoformat(),
                 'file_path': file_path,
                 'csv_path': csv_path,
-                'extension': ext
+                'extension': ext,
+                'facility_data': facility_data  # Store facility data specific to this file
             }
 
             # Add file to session tracking
@@ -238,7 +239,10 @@ def view_map(request):
         except Exception as e:
             logger.exception(f"Error processing file: {str(e)}")
             context['error'] = f"Error processing file: {str(e)}"
-    
+    else:
+        # Ensure facility data is properly initialized when page loads without file upload
+        _rebuild_combined_facility_data(request)
+
     # Return the template with context
     return render(request, 'climate_hazards_analysis_v2/main.html', context)
 
@@ -248,6 +252,9 @@ def get_facility_data(request):
     Returns JSON with facility data including coordinates and available hazard data.
     Enhanced to include polygon assets from the database.
     """
+    # Ensure facility data is up to date with the latest file structure
+    _rebuild_combined_facility_data(request)
+
     # Get base facility data from session
     facility_data = request.session.get('climate_hazards_v2_facility_data', [])
 
@@ -8241,6 +8248,70 @@ def _init_uploaded_files_session(request):
         request.session.modified = True
 
 
+def _migrate_legacy_session_data(request):
+    """
+    Migrate legacy session data to the new per-file tracking structure.
+    This should be called when accessing uploaded files to ensure proper data structure.
+    """
+    uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
+    existing_facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+
+    # Check if we have legacy data (files without facility_data tracked per file)
+    has_legacy_data = False
+    for file_id, file_metadata in uploaded_files.items():
+        if 'facility_data' not in file_metadata and existing_facility_data:
+            has_legacy_data = True
+            break
+
+    if has_legacy_data and existing_facility_data:
+        # Migrate existing facility data to be associated with the first uploaded file
+        # This is a best-effort migration for backward compatibility
+        if uploaded_files:
+            first_file_id = list(uploaded_files.keys())[0]
+            # Remove drawn polygons from the migration
+            non_polygon_facilities = [f for f in existing_facility_data if f.get('source') != 'drawn_polygon']
+
+            if non_polygon_facilities:
+                uploaded_files[first_file_id]['facility_data'] = non_polygon_facilities
+                request.session['climate_hazards_v2_uploaded_files'] = uploaded_files
+                request.session.modified = True
+                logger.info(f"Migrated {len(non_polygon_facilities)} legacy facilities to file {first_file_id}")
+
+
+def _rebuild_combined_facility_data(request):
+    """
+    Rebuild the combined facility data from all uploaded files plus drawn polygon assets.
+    This ensures that facility data is properly tracked per file while maintaining
+    backward compatibility with existing code that expects combined data.
+    """
+    # First, migrate any legacy data
+    _migrate_legacy_session_data(request)
+
+    combined_facility_data = []
+
+    # Get drawn polygon assets from existing session data
+    existing_facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+    drawn_polygon_assets = [f for f in existing_facility_data if f.get('source') == 'drawn_polygon']
+    combined_facility_data.extend(drawn_polygon_assets)
+
+    # Add facility data from all uploaded files
+    uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
+    for file_id, file_metadata in uploaded_files.items():
+        file_facility_data = file_metadata.get('facility_data', [])
+        # Add file_id to each facility record to track which file it came from
+        for facility in file_facility_data:
+            facility['_file_id'] = file_id
+        combined_facility_data.extend(file_facility_data)
+
+    # Store the combined data for backward compatibility
+    request.session['climate_hazards_v2_facility_data'] = combined_facility_data
+    request.session.modified = True
+
+    logger.info(f"Rebuilt combined facility data: {len(combined_facility_data)} total facilities "
+                f"({len(drawn_polygon_assets)} drawn polygons + "
+                f"{len(combined_facility_data) - len(drawn_polygon_assets)} from uploaded files)")
+
+
 def _add_file_to_session(request, file_id, file_metadata):
     """
     Add a file to the session tracking.
@@ -8312,11 +8383,12 @@ def remove_file(request):
         if csv_path:
             _delete_physical_file(csv_path)
 
-        # Remove all facility data from session (clears map markers and preview data)
-        session_keys_to_clear = [
-            'climate_hazards_v2_facility_data',
-            'climate_hazards_v2_uploaded_filename',
-            'climate_hazards_v2_facility_csv_path',
+        # Remove facility data only for the specific file being removed
+        # Rebuild combined data without this file's facilities
+        _rebuild_combined_facility_data(request)
+
+        # Clear analysis results that might be affected by removing this file's data
+        analysis_keys_to_clear = [
             'climate_hazards_v2_selected_hazards',
             'climate_hazards_v2_parent_facilities',
             'climate_hazards_v2_asset_inventory',
@@ -8329,9 +8401,37 @@ def remove_file(request):
             'climate_hazards_v2_asset_exposure_updated_csv_path'
         ]
 
-        for key in session_keys_to_clear:
+        for key in analysis_keys_to_clear:
             if key in request.session:
                 del request.session[key]
+
+        # Update uploaded filename if this was the most recent file
+        current_filename = request.session.get('climate_hazards_v2_uploaded_filename')
+        if current_filename == file_metadata.get('name'):
+            # Try to get the most recent remaining file's name
+            uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
+            remaining_files = [f for f in uploaded_files.values() if f.get('id') != file_id]
+            if remaining_files:
+                # Get the most recent remaining file
+                most_recent_file = max(remaining_files, key=lambda f: f.get('upload_time', ''))
+                request.session['climate_hazards_v2_uploaded_filename'] = most_recent_file.get('name')
+            else:
+                # No files left, clear the filename
+                if 'climate_hazards_v2_uploaded_filename' in request.session:
+                    del request.session['climate_hazards_v2_uploaded_filename']
+
+        # Update facility CSV path if needed
+        current_csv_path = request.session.get('climate_hazards_v2_facility_csv_path')
+        if current_csv_path == file_metadata.get('csv_path'):
+            # Regenerate CSV from remaining data
+            remaining_facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+            if remaining_facility_data:
+                new_csv_path = _save_facility_data_to_csv(request, remaining_facility_data)
+                request.session['climate_hazards_v2_facility_csv_path'] = new_csv_path
+            else:
+                # No facilities left, clear the CSV path
+                if 'climate_hazards_v2_facility_csv_path' in request.session:
+                    del request.session['climate_hazards_v2_facility_csv_path']
 
         # Clear polygon assets that were created from uploaded files (not user-drawn)
         Asset.objects.filter(source='session_polygon_workflow').delete()
