@@ -107,9 +107,16 @@ def view_map(request):
             # Save the uploaded file
             upload_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
             os.makedirs(upload_dir, exist_ok=True)
-            
+
             file = request.FILES['facility_csv']
             file_path = os.path.join(upload_dir, file.name)
+
+            # Check for duplicate file names (case-insensitive)
+            uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
+            for existing_file_id, existing_file_metadata in uploaded_files.items():
+                if existing_file_metadata.get('name', '').lower() == file.name.lower():
+                    context['error'] = f"File '{file.name}' has already been uploaded. Please choose a different file."
+                    return render(request, 'climate_hazards_analysis_v2/main.html', context)
             
             with open(file_path, 'wb+') as destination:
                 for chunk in file.chunks():
