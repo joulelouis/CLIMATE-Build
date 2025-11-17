@@ -8839,6 +8839,10 @@ def _get_unified_json_for_analysis(request):
     Includes both asset data and selected hazards for the analysis engine.
     """
     try:
+        # Ensure data consistency with display workflow by rebuilding combined facility data
+        # This fixes the multi-file upload inconsistency issue
+        _rebuild_combined_facility_data(request)
+
         unified_assets = _get_all_uploaded_assets_json(request)
 
         if not unified_assets:
