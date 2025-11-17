@@ -281,6 +281,27 @@ def view_map(request):
             # Add file to session tracking
             _add_file_to_session(request, file_id, file_metadata)
 
+            # Store assets in database for JSON workflow (NEW)
+            created_asset_ids = _store_uploaded_assets_as_json(facility_data, file.name, file_id)
+
+            # Create unified JSON for all uploaded assets
+            _create_unified_assets_json(request)
+
+            # Log JSON workflow data to console
+            from .json_console_simple import simple_json_console
+            from .models import Asset
+            created_assets = Asset.objects.filter(id__in=created_asset_ids) if created_asset_ids else []
+
+            # Get all uploaded assets for unified logging
+            all_uploaded_assets = _get_all_uploaded_assets_json(request)
+            simple_json_console.log_upload_step(facility_data, file_metadata, created_assets, all_uploaded_assets)
+
+            if created_asset_ids:
+                # Store asset IDs in session for JSON workflow access
+                # FIXED: Replace session asset IDs with current upload only to prevent accumulation
+                request.session['climate_hazards_v2_uploaded_asset_ids'] = created_asset_ids
+                logger.info(f"Updated session with {len(created_asset_ids)} current asset IDs (replaced previous accumulated assets)")
+
             # Store uploaded filename in session for display (backward compatibility)
             request.session['climate_hazards_v2_uploaded_filename'] = file.name
             request.session.modified = True
@@ -760,6 +781,24 @@ def select_hazards(request):
         ordered_hazards = order_selected_hazards(selected_hazards)
         request.session['climate_hazards_v2_selected_hazards'] = ordered_hazards
 
+        # Store hazard selections in unified JSON
+        _store_hazard_selections_in_unified_json(request, ordered_hazards)
+
+        # Log JSON workflow data to console
+        from .json_console_simple import simple_json_console
+        asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+
+        # Get unified assets for enhanced logging
+        unified_assets = _get_all_uploaded_assets_json(request)
+
+        parameters = {
+            'source': 'hazard_selection_form',
+            'total_hazards_available': len(hazard_types),
+            'session_updated': True,
+            'selected_hazards_count': len(ordered_hazards)
+        }
+        simple_json_console.log_hazard_selection_step(asset_ids, ordered_hazards, parameters, unified_assets)
+
         # Capture parent_facility information from form data
         parent_facilities = {}
 
@@ -1021,11 +1060,17 @@ def _render_error_page(request, error_message, facility_data, selected_hazards):
 def show_results(request):
     """
     View to display climate hazard analysis results.
-    Updated to work with unified processing of regular facilities and polygon assets.
+    Updated to work with unified JSON processing for assets and hazards.
     """
     logger.info("SHOW_RESULTS function called - starting unified climate hazard analysis")
 
-    # Validate and prepare session data
+    # === PRIORITY: Check for Unified JSON Analysis (New Approach) ===
+    unified_analysis_data = _get_unified_json_for_analysis(request)
+    if unified_analysis_data:
+        logger.info("Using unified JSON analysis workflow")
+        return _handle_unified_json_analysis_results(request, unified_analysis_data)
+
+    # Validate and prepare session data (legacy fallback)
     facility_data, selected_hazards, facility_csv_path, redirect_response = _validate_and_prepare_session_data(request)
     if redirect_response:
         return redirect_response
@@ -1205,37 +1250,55 @@ def show_results(request):
                 'selected_hazards': selected_hazards
             })
         
-        # Get the combined CSV path and load the data
-        combined_csv_path = result.get('combined_csv_path')
-        
-        if not combined_csv_path or not os.path.exists(combined_csv_path):
-            logger.error(f"Combined CSV not found: {combined_csv_path}")
+        # === JSON-ONLY LOADING (Migrated from Parallel CSV/JSON) ===
+        # Get JSON path from the analysis result
+        from .json_csv_loader import json_csv_loader
+        file_paths = json_csv_loader.get_analysis_file_paths(result)
+
+        combined_json_path = file_paths['json_path']
+
+        logger.info("=== JSON-ONLY LOADING ===")
+        json_csv_loader.log_file_status(combined_json_path)
+
+        # Check if JSON file exists
+        if not combined_json_path:
+            logger.error("JSON file not found")
             return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
-                'error': 'Combined analysis output not found.',
+                'error': 'Analysis output JSON file not found.',
                 'facility_count': len(facility_data),
                 'hazard_types': [
-                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise', 
+                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
                     'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
                 ],
                 'selected_hazards': selected_hazards
             })
-        
-        # Load the combined CSV file with explicit UTF-8 encoding
-        logger.info(f"Loading combined CSV from: {combined_csv_path}")
+
+        # Load data from JSON file
         try:
-            df = pd.read_csv(combined_csv_path, encoding='utf-8')
-        except UnicodeDecodeError:
-            # Try with different encodings if UTF-8 fails
-            try:
-                df = pd.read_csv(combined_csv_path, encoding='latin-1')
-                logger.warning(f"CSV file {combined_csv_path} read with latin-1 encoding")
-            except UnicodeDecodeError:
-                try:
-                    df = pd.read_csv(combined_csv_path, encoding='cp1252')
-                    logger.warning(f"CSV file {combined_csv_path} read with cp1252 encoding")
-                except UnicodeDecodeError:
-                    logger.error(f"Could not read CSV file {combined_csv_path} with any encoding")
-                    raise
+            data, columns = json_csv_loader.load_analysis_results(combined_json_path)
+
+            # Convert back to DataFrame for compatibility with existing code
+            df = pd.DataFrame(data)
+            logger.info(f"Successfully loaded {len(data)} records from JSON")
+
+        except Exception as e:
+            logger.error(f"JSON loading failed: {str(e)}")
+            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                'error': f'Failed to load analysis results: {str(e)}',
+                'facility_count': len(facility_data),
+                'hazard_types': [
+                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
+                    'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
+                ],
+                'selected_hazards': selected_hazards
+            })
+
+        # === END JSON-ONLY LOADING ===
+
+        # Log JSON-only workflow data to console
+        from .json_console_simple import simple_json_console
+        results_data = df.to_dict(orient="records")
+        simple_json_console.log_results_step(results_data, df.columns.tolist(), {}, len(facility_data))
 
         # Ensure facility CSV file exists
         validated_csv_path = _ensure_facility_csv_exists(request, facility_data, facility_csv_path, selected_hazards)
@@ -1258,7 +1321,7 @@ def show_results(request):
             )
 
         # Load and process the combined CSV data
-        df, error = _load_and_process_combined_csv(result.get('combined_csv_path'))
+        df, error = _load_and_process_combined_json(result.get('combined_json_path'))
         if error:
             return _render_error_page(request, error, facility_data, selected_hazards)
 
@@ -1729,14 +1792,23 @@ def show_results(request):
         # Build comprehensive column groups for hazard exposure table
         groups = _build_column_groups(df.columns.tolist(), selected_hazards)
 
+        # Get uploaded asset IDs for JSON workflow
+        uploaded_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+
+        # Log JSON workflow data to console
+        from .json_console_simple import simple_json_console
+        results_data = df.to_dict(orient="records")
+        simple_json_console.log_results_step(results_data, df.columns.tolist(), groups, len(uploaded_asset_ids))
+
         # Prepare context for the template
         context = {
-            'data': df.to_dict(orient="records"),
+            'data': results_data,
             'columns': df.columns.tolist(),
             'groups': groups,  # Now properly populated with column group data
             'plot_path': plot_path,
             'all_plots': all_plots,
             'selected_hazards': selected_hazards,
+            'uploaded_asset_ids': uploaded_asset_ids,  # For JSON workflow JavaScript
             'success_message': f"Successfully analyzed {len(df)} facilities for {len(selected_hazards)} hazard types."
         }
 
@@ -1861,7 +1933,7 @@ def _process_regular_facilities_unified(facility_data, selected_hazards, facilit
             return {'success': False, 'error': 'Climate analysis failed for regular facilities'}
 
         # Load and process results
-        df, error = _load_and_process_combined_csv(result.get('combined_csv_path'))
+        df, error = _load_and_process_combined_json(result.get('combined_json_path'))
         if error:
             return {'success': False, 'error': error}
 
@@ -2309,18 +2381,18 @@ def _process_mixed_assets_via_unified_csv(asset_inventory, selected_hazards, req
             logger.info(f"Analysis result keys: {list(result.keys())}")
 
             # Step 3: Load and process results
-            logger.info("Step 3: Loading and processing combined CSV...")
-            combined_csv_path = result.get('combined_csv_path')
+            logger.info("Step 3: Loading and processing JSON results...")
+            combined_json_path = result.get('combined_json_path')
 
-            if not combined_csv_path:
-                return {'success': False, 'error': 'No combined CSV path in analysis result'}
+            if not combined_json_path:
+                return {'success': False, 'error': 'No JSON path in analysis result'}
 
-            if not os.path.exists(combined_csv_path):
-                return {'success': False, 'error': f'Combined CSV file not found: {combined_csv_path}'}
+            if not os.path.exists(combined_json_path):
+                return {'success': False, 'error': f'JSON file not found: {combined_json_path}'}
 
-            df, error = _load_and_process_combined_csv(combined_csv_path)
+            df, error = _load_and_process_combined_json(combined_json_path)
             if error:
-                return {'success': False, 'error': f'Failed to load combined CSV: {error}'}
+                return {'success': False, 'error': f'Failed to load JSON: {error}'}
 
             if df is None or df.empty:
                 return {'success': False, 'error': 'Combined CSV resulted in empty DataFrame'}
@@ -3246,6 +3318,46 @@ def _load_and_process_combined_csv(combined_csv_path):
     df.columns = df.columns.str.strip()
 
     return df, None
+
+
+def _load_and_process_combined_json(combined_json_path):
+    """
+    Load and process the combined JSON file with proper error handling.
+
+    Args:
+        combined_json_path: Path to the combined JSON file
+
+    Returns:
+        tuple: (DataFrame, error_message) or (DataFrame, None) if successful
+    """
+    if not combined_json_path or not os.path.exists(combined_json_path):
+        error_msg = f"Combined JSON not found: {combined_json_path}"
+        logger.error(error_msg)
+        return None, 'Combined analysis output file not found.'
+
+    # Load the combined JSON file
+    logger.info(f"Loading combined JSON from: {combined_json_path}")
+
+    try:
+        # Use the JSON loader to read the file
+        from .json_csv_loader import json_csv_loader
+        data, columns = json_csv_loader.load_analysis_results(json_path=combined_json_path)
+
+        # Convert to DataFrame for compatibility with existing code
+        df = pd.DataFrame(data)
+
+        if df.empty:
+            error_msg = f"JSON file loaded but resulted in empty DataFrame: {combined_json_path}"
+            logger.warning(error_msg)
+            return df, error_msg
+
+        logger.info(f"Successfully loaded JSON with {len(df)} records and {len(df.columns)} columns")
+        return df, None
+
+    except Exception as e:
+        error_msg = f"Error loading JSON file {combined_json_path}: {str(e)}"
+        logger.error(error_msg)
+        return None, error_msg
 
 
 def _validate_and_fix_data_columns(df, selected_hazards):
@@ -8536,6 +8648,622 @@ class EnhancedHazardExposureMapView(TemplateView):
 
 
 # ============================================================================
+# JSON WORKFLOW FUNCTIONS
+# ============================================================================
+
+def _create_unified_assets_json(request):
+    """
+    Create a unified JSON structure containing all uploaded assets.
+    This consolidates all asset data from multiple file uploads into a single JSON structure.
+    """
+    try:
+        # Get all uploaded assets from the current session
+        uploaded_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+
+        if not uploaded_asset_ids:
+            logger.info("No uploaded assets to create unified JSON")
+            return None
+
+        # Ensure we have unique asset IDs to prevent duplicates
+        unique_asset_ids = list(set(uploaded_asset_ids))
+        if len(unique_asset_ids) != len(uploaded_asset_ids):
+            logger.warning(f"Removed {len(uploaded_asset_ids) - len(unique_asset_ids)} duplicate asset IDs from session")
+            # Update session with unique IDs
+            request.session['climate_hazards_v2_uploaded_asset_ids'] = unique_asset_ids
+            request.session.modified = True
+
+        # Get all assets from database
+        from .models import Asset
+        assets = Asset.objects.filter(id__in=unique_asset_ids, source='uploaded_file')
+
+        # Create unified JSON structure
+        unified_assets = {
+            "metadata": {
+                "total_assets": assets.count(),
+                "upload_session_id": request.session.session_key,
+                "created_at": timezone.now().isoformat(),
+                "files_uploaded": [],
+                "asset_types": {"point_assets": 0, "polygon_assets": 0}
+            },
+            "assets": []
+        }
+
+        # Process each asset
+        for asset in assets:
+            asset_data = {
+                "database_id": asset.id,
+                "name": asset.name,
+                "latitude": float(asset.latitude),
+                "longitude": float(asset.longitude),
+                "archetype": asset.archetype,
+                "asset_type": asset.asset_type,
+                "source": asset.source,
+                "created_at": asset.created_at.isoformat(),
+                "properties": asset.properties,
+                "polygon_geometry": asset.polygon_geometry
+            }
+
+            unified_assets["assets"].append(asset_data)
+
+            # Track file uploads
+            original_filename = asset.properties.get('original_filename', 'unknown')
+            if original_filename not in [f['filename'] for f in unified_assets["metadata"]["files_uploaded"]]:
+                file_info = {
+                    "filename": original_filename,
+                    "file_type": asset.properties.get('file_type', 'unknown'),
+                    "upload_id": asset.properties.get('file_upload_id', 'unknown'),
+                    "asset_count": 0
+                }
+                unified_assets["metadata"]["files_uploaded"].append(file_info)
+
+            # Update file asset count
+            for file_info in unified_assets["metadata"]["files_uploaded"]:
+                if file_info["filename"] == original_filename:
+                    file_info["asset_count"] += 1
+
+            # Count asset types
+            if asset.asset_type == 'polygon':
+                unified_assets["metadata"]["asset_types"]["polygon_assets"] += 1
+            else:
+                unified_assets["metadata"]["asset_types"]["point_assets"] += 1
+
+        # Store unified JSON in session for easy access
+        request.session['unified_uploaded_assets_json'] = unified_assets
+        request.session.modified = True
+
+        logger.info(f"Created unified JSON for {unified_assets['metadata']['total_assets']} assets "
+                   f"from {len(unified_assets['metadata']['files_uploaded'])} files")
+
+        return unified_assets
+
+    except Exception as e:
+        logger.error(f"Error creating unified assets JSON: {str(e)}")
+        logger.exception("Full traceback:")
+        return None
+
+
+def _get_all_uploaded_assets_json(request):
+    """
+    Get the unified JSON containing all uploaded assets.
+    Returns the stored unified JSON or creates it if it doesn't exist.
+    """
+    try:
+        # Check if unified JSON already exists in session
+        unified_assets = request.session.get('unified_uploaded_assets_json')
+
+        if not unified_assets:
+            logger.info("No unified assets JSON found in session, creating new one")
+            unified_assets = _create_unified_assets_json(request)
+
+        return unified_assets
+
+    except Exception as e:
+        logger.error(f"Error getting unified assets JSON: {str(e)}")
+        return None
+
+
+def _update_unified_json_on_file_removal(request, removed_file_id):
+    """
+    Update the unified JSON when a file is removed.
+    This ensures the unified JSON stays synchronized with the current session state.
+    """
+    try:
+        # Recreate unified JSON to reflect changes
+        _create_unified_assets_json(request)
+        logger.info(f"Updated unified JSON after removing file {removed_file_id}")
+
+    except Exception as e:
+        logger.error(f"Error updating unified JSON on file removal: {str(e)}")
+
+
+def _store_hazard_selections_in_unified_json(request, selected_hazards):
+    """
+    Store hazard selections in the unified JSON structure.
+    This adds the selected hazards to the existing unified assets JSON.
+    """
+    try:
+        # Get or create unified JSON
+        unified_assets = _get_all_uploaded_assets_json(request)
+
+        if not unified_assets:
+            logger.warning("No unified assets found, creating empty structure for hazard selection")
+            unified_assets = {
+                "metadata": {
+                    "total_assets": 0,
+                    "upload_session_id": request.session.session_key,
+                    "created_at": timezone.now().isoformat(),
+                    "files_uploaded": [],
+                    "asset_types": {"point_assets": 0, "polygon_assets": 0},
+                    "hazard_selection": {
+                        "selected_hazards": [],
+                        "selection_timestamp": None,
+                        "total_hazards_available": 0,
+                        "selection_source": "unknown"
+                    }
+                },
+                "assets": []
+            }
+
+        # Update hazard selection metadata
+        from datetime import datetime
+        unified_assets["metadata"]["hazard_selection"] = {
+            "selected_hazards": selected_hazards,
+            "selection_timestamp": datetime.now().isoformat(),
+            "total_hazards_available": 7,  # Total available hazard types
+            "selection_source": "web_form",
+            "hazards_count": len(selected_hazards)
+        }
+
+        # Add hazard analysis parameters to each asset
+        for asset in unified_assets["assets"]:
+            asset["selected_hazards"] = selected_hazards
+            asset["hazard_analysis_status"] = "pending"
+
+        # Store updated unified JSON in session
+        request.session['unified_uploaded_assets_json'] = unified_assets
+        request.session.modified = True
+
+        logger.info(f"Stored {len(selected_hazards)} hazard selections in unified JSON for session {request.session.session_key[:8]}...")
+
+        return unified_assets
+
+    except Exception as e:
+        logger.error(f"Error storing hazard selections in unified JSON: {str(e)}")
+        logger.exception("Full traceback:")
+        return None
+
+
+def _get_unified_json_for_analysis(request):
+    """
+    Get the unified JSON structure ready for analysis.
+    Includes both asset data and selected hazards for the analysis engine.
+    """
+    try:
+        unified_assets = _get_all_uploaded_assets_json(request)
+
+        if not unified_assets:
+            logger.error("No unified assets found for analysis")
+            return None
+
+        # Check if hazards have been selected
+        hazard_selection = unified_assets["metadata"].get("hazard_selection", {})
+        selected_hazards = hazard_selection.get("selected_hazards", [])
+
+        if not selected_hazards:
+            logger.warning("No hazards selected for analysis")
+            return None
+
+        # SAFEGUARD: Validate that assets in unified JSON match current session assets
+        session_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+        unified_asset_ids = [asset['database_id'] for asset in unified_assets.get('assets', [])]
+
+        if session_asset_ids and set(session_asset_ids) != set(unified_asset_ids):
+            logger.warning(f"Session asset IDs ({len(session_asset_ids)}) don't match unified JSON asset IDs ({len(unified_asset_ids)})")
+            logger.warning(f"Session IDs: {session_asset_ids}")
+            logger.warning(f"Unified IDs: {unified_asset_ids}")
+            logger.warning("Rebuilding unified JSON to sync with current session")
+            # Force rebuild unified JSON to match current session
+            unified_assets = _create_unified_assets_json(request)
+            if not unified_assets:
+                logger.error("Failed to rebuild unified JSON")
+                return None
+            # Re-check hazards after rebuild
+            hazard_selection = unified_assets["metadata"].get("hazard_selection", {})
+            selected_hazards = hazard_selection.get("selected_hazards", [])
+            if not selected_hazards:
+                logger.warning("No hazards found after unified JSON rebuild")
+                return None
+
+        # Prepare analysis data structure
+        analysis_data = {
+            "metadata": {
+                "session_id": unified_assets["metadata"]["upload_session_id"],
+                "total_assets": unified_assets["metadata"]["total_assets"],
+                "selected_hazards": selected_hazards,
+                "selection_timestamp": hazard_selection.get("selection_timestamp"),
+                "files_uploaded": unified_assets["metadata"]["files_uploaded"],
+                "asset_types": unified_assets["metadata"]["asset_types"],
+                "analysis_status": "ready"
+            },
+            "assets_for_analysis": []
+        }
+
+        # Prepare assets for analysis with required keys
+        for asset in unified_assets["assets"]:
+            analysis_asset = {
+                "Facility": asset["name"],
+                "Lat": float(asset["latitude"]),
+                "Long": float(asset["longitude"]),
+                "Archetype": asset["archetype"],
+                "_file_id": asset.get("properties", {}).get("file_upload_id"),
+                "selected_hazards": selected_hazards,
+                "asset_id": asset["database_id"],
+                "asset_type": asset["asset_type"],
+                "source_file": asset.get("properties", {}).get("original_filename", "unknown")
+            }
+
+            # Add polygon geometry if available
+            if asset.get("polygon_geometry"):
+                analysis_asset["polygon_geometry"] = asset["polygon_geometry"]
+
+            analysis_data["assets_for_analysis"].append(analysis_asset)
+
+        logger.info(f"Prepared {len(analysis_data['assets_for_analysis'])} assets for hazard analysis with {len(selected_hazards)} selected hazards")
+
+        return analysis_data
+
+    except Exception as e:
+        logger.error(f"Error preparing unified JSON for analysis: {str(e)}")
+        logger.exception("Full traceback:")
+        return None
+
+
+def _execute_climate_analysis_unified_json(request):
+    """
+    Execute climate hazards analysis using unified JSON data.
+    This function uses the consolidated JSON structure containing both assets and hazards.
+    """
+    try:
+        # Get unified JSON ready for analysis
+        analysis_data = _get_unified_json_for_analysis(request)
+
+        if not analysis_data:
+            logger.error("No unified JSON data available for analysis")
+            return None
+
+        # Extract analysis parameters
+        selected_hazards = analysis_data["metadata"]["selected_hazards"]
+        assets_for_analysis = analysis_data["assets_for_analysis"]
+
+        if not assets_for_analysis:
+            logger.error("No assets available for analysis")
+            return None
+
+        logger.info(f"Starting climate hazards analysis for {len(assets_for_analysis)} assets with {len(selected_hazards)} hazards")
+
+        # Log analysis step to console
+        from .json_console_simple import simple_json_console
+        simple_json_console.log_analysis_step(
+            analysis_data=assets_for_analysis,
+            hazards=selected_hazards,
+            processing_status="starting_unified_json_analysis"
+        )
+
+        # Create temporary CSV from unified JSON for analysis engine compatibility
+        import pandas as pd
+        from django.conf import settings
+        import tempfile
+        import uuid
+
+        # Convert assets to DataFrame
+        df = pd.DataFrame(assets_for_analysis)
+
+        # Create temporary CSV file
+        temp_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
+        os.makedirs(temp_dir, exist_ok=True)
+
+        temp_filename = f'unified_analysis_{uuid.uuid4().hex[:8]}.csv'
+        temp_csv_path = os.path.join(temp_dir, temp_filename)
+
+        # Clean up old JSON files to prevent conflicts
+        import glob
+        import time
+        old_json_pattern = os.path.join(temp_dir, 'combined_output*.json')
+        old_json_files = glob.glob(old_json_pattern)
+        for old_json in old_json_files:
+            try:
+                file_age = time.time() - os.path.getmtime(old_json)
+                if file_age > 3600:  # Remove files older than 1 hour
+                    os.remove(old_json)
+                    logger.info(f"Removed old JSON file: {old_json}")
+            except Exception as e:
+                logger.warning(f"Could not remove old JSON file {old_json}: {e}")
+
+        # Save to CSV for analysis engine
+        df.to_csv(temp_csv_path, index=False)
+        logger.info(f"Created temporary unified analysis CSV: {temp_csv_path}")
+
+        # Execute analysis using existing engine
+        from climate_hazards_analysis.utils.climate_hazards_analysis import generate_climate_hazards_analysis
+
+        result = generate_climate_hazards_analysis(
+            facility_csv_path=temp_csv_path,
+            selected_fields=selected_hazards,
+            flood_scenarios=['current', 'moderate', 'worst']
+        )
+
+        # Clean up temporary file
+        try:
+            if os.path.exists(temp_csv_path):
+                os.remove(temp_csv_path)
+                logger.info(f"Cleaned up temporary file: {temp_csv_path}")
+        except Exception as e:
+            logger.warning(f"Could not remove temporary file {temp_csv_path}: {e}")
+
+        # Check for errors
+        if result is None or 'error' in result:
+            error_message = result.get('error', 'Unknown error') if result else 'Analysis failed.'
+            logger.error(f"Climate hazards analysis error: {error_message}")
+
+            # Log error to console
+            simple_json_console.log_analysis_step(
+                analysis_data=assets_for_analysis,
+                hazards=selected_hazards,
+                processing_status=f"error: {error_message}"
+            )
+            return None
+
+        # Log successful completion
+        simple_json_console.log_analysis_step(
+            analysis_data=assets_for_analysis,
+            hazards=selected_hazards,
+            processing_status="completed_successfully"
+        )
+
+        # Add unified metadata to result
+        result['unified_analysis_metadata'] = {
+            'session_id': analysis_data['metadata']['session_id'],
+            'total_assets_analyzed': len(assets_for_analysis),
+            'hazards_processed': selected_hazards,
+            'analysis_method': 'unified_json_workflow',
+            'temporary_csv_used': temp_filename
+        }
+
+        logger.info(f"Successfully completed climate hazards analysis for {len(assets_for_analysis)} assets")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in unified JSON climate analysis: {str(e)}")
+        logger.exception("Full traceback:")
+        return None
+
+
+def _handle_unified_json_analysis_results(request, unified_analysis_data):
+    """
+    Handle the results display for unified JSON analysis workflow.
+    This function executes analysis using unified JSON data and displays results.
+    """
+    try:
+        selected_hazards = unified_analysis_data["metadata"]["selected_hazards"]
+        assets_for_analysis = unified_analysis_data["assets_for_analysis"]
+
+        logger.info(f"Executing unified JSON analysis for {len(assets_for_analysis)} assets with {len(selected_hazards)} hazards")
+
+        # Execute analysis using unified JSON data
+        result = _execute_climate_analysis_unified_json(request)
+
+        if not result:
+            logger.error("Unified JSON analysis failed")
+            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                'error': 'Analysis failed. Please try again.',
+                'facility_count': len(assets_for_analysis),
+                'hazard_types': [
+                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
+                    'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
+                ],
+                'selected_hazards': selected_hazards
+            })
+
+        # Load results from the generated JSON file
+        from .json_csv_loader import json_csv_loader
+        file_paths = json_csv_loader.get_analysis_file_paths(result)
+        combined_json_path = file_paths['json_path']
+
+        if not combined_json_path or not os.path.exists(combined_json_path):
+            logger.error("Analysis completed but JSON result file not found")
+            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                'error': 'Analysis results not found. Please try again.',
+                'facility_count': len(assets_for_analysis),
+                'hazard_types': [
+                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
+                    'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
+                ],
+                'selected_hazards': selected_hazards
+            })
+
+        # Load analysis results data
+        data, columns = json_csv_loader.load_analysis_results(json_path=combined_json_path)
+        df = pd.DataFrame(data)
+
+        if df.empty:
+            logger.error("Analysis results loaded but DataFrame is empty")
+            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                'error': 'Analysis results are empty. Please check your data and try again.',
+                'facility_count': len(assets_for_analysis),
+                'hazard_types': [
+                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
+                    'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
+                ],
+                'selected_hazards': selected_hazards
+            })
+
+        # Prepare column groups for template
+        groups = _build_column_groups(columns, selected_hazards)
+
+        # Log results to console
+        from .json_console_simple import simple_json_console
+        simple_json_console.log_results_step(
+            results_data=data,
+            columns=columns,
+            groups=groups,
+            asset_count=len(assets_for_analysis)
+        )
+
+        # Prepare context for template
+        context = {
+            'data': data,  # Fixed: template expects 'data' not 'facilities'
+            'selected_hazards': selected_hazards,
+            'columns': columns,
+            'groups': groups,
+            'results_count': len(df),
+            'total_facilities': len(assets_for_analysis),
+            'analysis_metadata': result.get('unified_analysis_metadata', {}),
+            'unified_workflow': True,
+            'json_file_path': combined_json_path,
+        }
+
+        logger.info(f"Successfully displayed {len(df)} analysis results from unified JSON workflow")
+        return render(request, 'climate_hazards_analysis_v2/results.html', context)
+
+    except Exception as e:
+        logger.error(f"Error handling unified JSON analysis results: {str(e)}")
+        logger.exception("Full traceback:")
+
+        return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+            'error': f'An error occurred during analysis: {str(e)}',
+            'facility_count': unified_analysis_data.get('metadata', {}).get('total_assets', 0) if unified_analysis_data else 0,
+            'hazard_types': [
+                'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
+                'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
+            ],
+            'selected_hazards': unified_analysis_data.get('metadata', {}).get('selected_hazards', []) if unified_analysis_data else []
+        })
+
+
+def _export_unified_assets_to_file(request, filename=None):
+    """
+    Export the unified assets JSON to a file for download or backup.
+    """
+    try:
+        unified_assets = _get_all_uploaded_assets_json(request)
+
+        if not unified_assets:
+            return None, "No uploaded assets to export"
+
+        if not filename:
+            timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+            filename = f'unified_assets_{timestamp}.json'
+
+        # Create file path in input_files directory
+        from django.conf import settings
+        output_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
+        os.makedirs(output_dir, exist_ok=True)
+
+        file_path = os.path.join(output_dir, filename)
+
+        # Write unified JSON to file
+        import json
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(unified_assets, f, indent=2, ensure_ascii=False, default=str)
+
+        logger.info(f"Exported unified assets JSON to {file_path}")
+        return file_path, None
+
+    except Exception as e:
+        error_msg = f"Error exporting unified assets JSON: {str(e)}"
+        logger.error(error_msg)
+        return None, error_msg
+
+def _store_uploaded_assets_as_json(facility_data, original_filename, file_upload_id):
+    """
+    Store uploaded facility data as Asset records for JSON workflow.
+    Enhanced to support both point and polygon assets from all file types.
+
+    Args:
+        facility_data: List of facility records from uploaded file
+        original_filename: Original uploaded file name
+        file_upload_id: UUID for the uploaded file batch
+
+    Returns:
+        List of created Asset IDs
+    """
+    from .models import Asset
+
+    created_asset_ids = []
+
+    try:
+        for facility_record in facility_data:
+            # Extract asset data from facility record
+            name = facility_record.get('Facility', facility_record.get('name', 'Unknown Facility'))
+            latitude = float(facility_record.get('Lat', facility_record.get('latitude', 0.0)))
+            longitude = float(facility_record.get('Long', facility_record.get('longitude', 0.0)))
+            archetype = facility_record.get('Archetype', facility_record.get('Asset Archetype', 'default'))
+
+            # Determine asset type and handle polygon geometry
+            asset_type = 'point'
+            polygon_geometry = None
+
+            # Check if this is a polygon asset from shapefile/geopackage
+            if facility_record.get('AssetType') == 'polygon' or facility_record.get('geometry'):
+                asset_type = 'polygon'
+                polygon_geometry = facility_record.get('geometry')
+                logger.info(f"Creating polygon asset: {name} with geometry type: {type(polygon_geometry)}")
+
+            # Check if coordinates are valid (for point assets)
+            if asset_type == 'point' and latitude == 0.0 and longitude == 0.0:
+                logger.warning(f"Skipping asset with invalid coordinates: {name}")
+                continue  # Skip invalid coordinates
+
+            # Create Asset record with enhanced properties
+            asset_properties = {
+                'original_filename': original_filename,
+                'file_upload_id': file_upload_id,
+                'upload_method': 'json_workflow',
+                'original_data': facility_record,
+                'file_type': original_filename.split('.')[-1].lower() if '.' in original_filename else 'unknown'
+            }
+
+            # Add polygon-specific metadata
+            if asset_type == 'polygon':
+                asset_properties.update({
+                    'geometry_type': polygon_geometry.get('type') if polygon_geometry else 'unknown',
+                    'has_centroid': True if latitude != 0.0 or longitude != 0.0 else False
+                })
+
+            asset = Asset.objects.create(
+                name=name,
+                latitude=latitude,
+                longitude=longitude,
+                archetype=archetype,
+                asset_type=asset_type,
+                polygon_geometry=polygon_geometry,
+                source='uploaded_file',
+                properties=asset_properties
+            )
+
+            created_asset_ids.append(asset.id)
+
+            # Log individual asset creation for debugging
+            if asset_type == 'polygon':
+                logger.info(f"Created polygon asset: {name} (ID: {asset.id}) with centroid: {latitude}, {longitude}")
+            else:
+                logger.info(f"Created point asset: {name} (ID: {asset.id}) at: {latitude}, {longitude}")
+
+        logger.info(f"Successfully created {len(created_asset_ids)} Asset records from uploaded file: {original_filename}")
+
+        # Log breakdown by asset type
+        from collections import Counter
+        asset_types_created = Counter([Asset.objects.get(id=aid).asset_type for aid in created_asset_ids])
+        logger.info(f"Asset breakdown: {dict(asset_types_created)}")
+
+    except Exception as e:
+        logger.error(f"Error storing uploaded assets as JSON: {str(e)}")
+        logger.exception("Full traceback:")
+
+    return created_asset_ids
+
+
+# ============================================================================
 # FILE MANAGEMENT SYSTEM
 # ============================================================================
 
@@ -8623,14 +9351,21 @@ def _add_file_to_session(request, file_id, file_metadata):
 
 def _remove_file_from_session(request, file_id):
     """
-    Remove a file from the session tracking.
+    Remove a file from the session tracking and update unified JSON.
     """
+    file_removed = False
     if 'climate_hazards_v2_uploaded_files' in request.session:
         if file_id in request.session['climate_hazards_v2_uploaded_files']:
             del request.session['climate_hazards_v2_uploaded_files'][file_id]
             request.session.modified = True
-            return True
-    return False
+            file_removed = True
+
+    # Update unified JSON to reflect file removal
+    if file_removed:
+        _update_unified_json_on_file_removal(request, file_id)
+        logger.info(f"Removed file {file_id} from session and updated unified JSON")
+
+    return file_removed
 
 
 def _get_file_from_session(request, file_id):
@@ -8698,12 +9433,20 @@ def remove_file(request):
             'climate_hazards_v2_revised_params',
             'climate_hazards_v2_sensitivity_results',
             'climate_hazards_v2_analysis_results',
-            'climate_hazards_v2_asset_exposure_updated_csv_path'
+            'climate_hazards_v2_asset_exposure_updated_csv_path',
+            'climate_hazards_v2_uploaded_asset_ids',  # CRITICAL FIX: Clear asset IDs to prevent contamination
+            'unified_uploaded_assets_json'  # Clear unified JSON to prevent stale data
         ]
 
         for key in analysis_keys_to_clear:
             if key in request.session:
                 del request.session[key]
+                logger.info(f"Cleared session key: {key}")
+
+        # Log critical session cleanup
+        cleared_asset_ids = 'climate_hazards_v2_uploaded_asset_ids' in analysis_keys_to_clear
+        cleared_unified_json = 'unified_uploaded_assets_json' in analysis_keys_to_clear
+        logger.info(f"Session cleanup completed - Asset IDs cleared: {cleared_asset_ids}, Unified JSON cleared: {cleared_unified_json}")
 
         # Update uploaded filename if this was the most recent file
         current_filename = request.session.get('climate_hazards_v2_uploaded_filename')
