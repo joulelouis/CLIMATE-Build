@@ -129,10 +129,15 @@ def view_map(request):
                 df = pd.read_excel(file_path)
 
             elif ext in ['.shp', '.zip', '.gpkg']:
+                # Initialize zip_file_count for zip files
+                zip_file_count = 0
+
                 if ext == '.zip':
                     with tempfile.TemporaryDirectory() as tmpdir:
                         with zipfile.ZipFile(file_path, 'r') as zip_ref:
                             zip_ref.extractall(tmpdir)
+                            # Count actual files in zip for accurate record count
+                            zip_file_count = len(zip_ref.namelist())
                         shp_files = [f for f in os.listdir(tmpdir) if f.lower().endswith('.shp')]
                         if not shp_files:
                             raise ValueError('No shapefile found in the uploaded zip archive')
@@ -270,7 +275,7 @@ def view_map(request):
                 'name': file.name,
                 'size': file.size,
                 'type': file_type,
-                'record_count': len(facility_data),
+                'record_count': zip_file_count if ext == '.zip' else len(facility_data),
                 'upload_time': timezone.now().isoformat(),
                 'file_path': file_path,
                 'csv_path': csv_path,
