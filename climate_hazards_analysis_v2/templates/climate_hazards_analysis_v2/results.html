@@ -433,6 +433,38 @@ Climate Hazard Analysis Results
         border-left: 3px solid #ffc107;
     }
 
+    /* OVERRIDDEN VALUE STYLES */
+    .override-value {
+        background-color: #e7f3ff !important;
+        border: 1px solid #007bff !important;
+        color: #004085 !important;
+        font-weight: 500 !important;
+        position: relative;
+    }
+
+    .override-value::before {
+        content: "📝";
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        font-size: 10px;
+        background: #007bff;
+        color: white;
+        border-radius: 50%;
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        z-index: 10;
+    }
+
+    .override-value:hover {
+        background-color: #cce5ff !important;
+        border-color: #0056b3 !important;
+    }
+
     .editing {
         padding: 2px !important;
     }
@@ -1498,13 +1530,23 @@ $(document).on('submit', '#override-form', function(e) {
     $submitButton.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
 
     // Save the cell with enhanced error handling
+    console.log('Submitting override:', { newValue, reason, columnName, rowIndex });
     const $tempInput = $('<input>').val(newValue);
     saveCellEnhanced(currentEditCell, $tempInput, rowIndex, columnName, reason)
         .then(() => {
             // Success
-            currentEditCell.attr('data-reason', reason)
+            // Update cell content with new value
+            const displayValue = newValue === '' ? 'N/A' : newValue;
+            currentEditCell.text(displayValue);
+
+            // Update cell attributes
+            currentEditCell.attr('data-original-value', displayValue)
+                .attr('data-reason', reason)
                 .attr('title', reason || '')
                 .attr('data-bs-toggle', 'tooltip');
+
+            // Add visual indication that value was overridden
+            currentEditCell.addClass('override-value');
 
             // Initialize tooltip if reason provided
             if (reason) {
