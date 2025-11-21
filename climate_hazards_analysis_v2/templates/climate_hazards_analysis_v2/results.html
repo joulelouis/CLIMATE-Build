@@ -1247,9 +1247,6 @@ Climate Hazard Analysis Results
                                         <div class="mb-3">
                                             <label class="form-label"><strong>Override Value</strong></label>
                                             <input type="text" id="override-value" class="form-control" placeholder="Enter override value">
-                                            <div id="validation-feedback" class="form-text">
-                                                <small id="validation-message" class="text-muted"></small>
-                                            </div>
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label"><strong>Reason/Explanation</strong></label>
@@ -1479,90 +1476,12 @@ function openOverrideModal($cell) {
     $('#override-reason').val($cell.attr('data-reason') || '');
     $('#override-file').val('');
 
-    // Reset validation state
-    $('#override-value').removeClass('is-invalid is-valid');
-    $('#validation-message').removeClass('text-danger text-success').addClass('text-muted').text('');
-
-    // Add real-time validation
-    setupRealTimeValidation($cell.attr('data-column'));
-
     if (!overrideModalInstance) {
         overrideModalInstance = new bootstrap.Modal(document.getElementById('overrideModal'));
     }
     overrideModalInstance.show();
 }
 
-// Enhanced validation and feedback
-function setupRealTimeValidation(columnName) {
-    const $valueInput = $('#override-value');
-    const $validationMessage = $('#validation-message');
-
-    // Remove existing event listeners
-    $valueInput.off('input.validation');
-
-    // Add real-time validation
-    $valueInput.on('input.validation', function() {
-        const value = $(this).val().trim();
-        const validation = validateCellValue(value, columnName);
-
-        if (validation.valid) {
-            $(this).removeClass('is-invalid').addClass('is-valid');
-            $validationMessage.removeClass('text-danger').addClass('text-success').text(validation.message || 'Valid value');
-        } else {
-            $(this).removeClass('is-valid').addClass('is-invalid');
-            $validationMessage.removeClass('text-success').addClass('text-danger').text(validation.message);
-        }
-    });
-}
-
-function validateCellValue(value, columnName) {
-    // Empty values are valid (user can clear the cell)
-    if (value === '') {
-        return { valid: true, message: 'Empty value (will be removed)' };
-    }
-
-    // N/A values are always valid
-    if (value.toUpperCase() === 'N/A') {
-        return { valid: true, message: 'N/A - No data available' };
-    }
-
-    // Column-specific validation (less strict)
-    if (columnName.includes('Depth') || columnName.includes('Level')) {
-        const numValue = parseFloat(value);
-        if (isNaN(numValue)) {
-            return { valid: false, message: 'Must be numeric (e.g., 0.5, 1.2, 3)' };
-        }
-        if (numValue < 0) {
-            return { valid: false, message: 'Cannot be negative' };
-        }
-        return { valid: true, message: `${numValue} meters (valid)` };
-    }
-
-    if (columnName.includes('Days')) {
-        const intValue = parseInt(value);
-        if (isNaN(intValue)) {
-            return { valid: false, message: 'Must be a whole number (e.g., 5, 10, 30)' };
-        }
-        if (intValue < 0) {
-            return { valid: false, message: 'Cannot be negative' };
-        }
-        return { valid: true, message: `${intValue} days (valid)` };
-    }
-
-    if (columnName.includes('Exposure') || columnName.includes('Stress')) {
-        const numValue = parseFloat(value);
-        if (isNaN(numValue)) {
-            return { valid: false, message: 'Must be numeric (e.g., 15, 25.5, 75)' };
-        }
-        if (numValue < 0 || numValue > 100) {
-            return { valid: false, message: 'Must be between 0 and 100' };
-        }
-        return { valid: true, message: `${numValue}% (valid)` };
-    }
-
-    // Default validation - allow any non-empty value
-    return { valid: true, message: `${value} (valid)` };
-}
 
 $(document).on('submit', '#override-form', function(e) {
     e.preventDefault();
@@ -1572,38 +1491,6 @@ $(document).on('submit', '#override-form', function(e) {
     const reason = $('#override-reason').val().trim();
     const columnName = currentEditCell.attr('data-column');
     const rowIndex = parseInt(currentEditCell.attr('data-row'), 10);
-
-    // Enhanced validation before saving
-    const validation = validateCellValue(newValue, columnName);
-
-    // Debug logging
-    console.log('Override validation:', {
-        value: newValue,
-        column: columnName,
-        valid: validation.valid,
-        message: validation.message
-    });
-
-    if (!validation.valid) {
-        // Check if user wants to force submit (for testing)
-        if (newValue.includes('force')) {
-            console.log('Force submitting despite validation');
-            validation.valid = true;
-            validation.message = 'Force submission (testing)';
-        } else {
-            // Show validation error
-            $('#override-value').addClass('is-invalid');
-            $('#validation-message').removeClass('text-success text-muted').addClass('text-danger').text(validation.message);
-
-            // Shake the input to draw attention
-            $('#override-value').addClass('animate__animated animate__shakeX');
-            setTimeout(() => {
-                $('#override-value').removeClass('animate__animated animate__shakeX');
-            }, 1000);
-
-            return;
-        }
-    }
 
     // Add loading state
     const $submitButton = $(this).find('button[type="submit"]');
@@ -1992,11 +1879,7 @@ function saveCell($cell, $input, rowIndex, columnName) {
         newValue = ls.text;
     }
     
-    if (!validateCellValue(newValue, columnName)) {
-        alert(`Invalid value for ${columnName}. Please enter a valid number.`);
-        cancelEdit($cell, $cell.text().trim());
-        return;
-    }
+    // Validation removed - any value is now accepted
     
     $cell.removeClass('editing').html(displayHTML);
 
