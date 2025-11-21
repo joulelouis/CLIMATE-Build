@@ -1535,12 +1535,14 @@ $(document).on('submit', '#override-form', function(e) {
     saveCellEnhanced(currentEditCell, $tempInput, rowIndex, columnName, reason)
         .then(() => {
             // Success
-            // Update cell content with new value
-            const displayValue = newValue === '' ? 'N/A' : newValue;
-            currentEditCell.text(displayValue);
+            // Apply color coding based on hazard type and value
+            const displayHTML = getColorCodedDisplay(newValue, columnName);
+
+            // Update cell content with colored value
+            currentEditCell.html(displayHTML);
 
             // Update cell attributes
-            currentEditCell.attr('data-original-value', displayValue)
+            currentEditCell.attr('data-original-value', newValue)
                 .attr('data-reason', reason)
                 .attr('title', reason || '')
                 .attr('data-bs-toggle', 'tooltip');
@@ -1642,6 +1644,61 @@ function showToast(message, type = 'info') {
     $toast.on('hidden.bs.toast', function() {
         $(this).remove();
     });
+}
+
+function getColorCodedDisplay(value, columnName) {
+    // Return empty values as-is
+    if (value === '' || value === 'N/A') {
+        return value;
+    }
+
+    // Apply color coding based on hazard type
+    if (columnName === 'Flood Depth (meters)' && value !== 'N/A') {
+        const fd = categorizeFloodDepth(value);
+        return `<span style="color: ${fd.color}; font-weight: bold;">${fd.text}</span>`;
+    }
+
+    if (columnName.includes('Storm Surge Flood Depth (meters)') && value !== 'N/A') {
+        const ss = categorizeStormSurge(value);
+        return `<span style="color: ${ss.color}; font-weight: bold;">${ss.text}</span>`;
+    }
+
+    if (columnName.startsWith('Water Stress Exposure') && value !== 'N/A') {
+        const ws = categorizeWaterStress(value);
+        return `<span style="color: ${ws.color}; font-weight: bold;">${ws.text}</span>`;
+    }
+
+    if (columnName.includes('Extreme Windspeed') && value !== 'N/A') {
+        const ew = categorizeExtremeWindspeed(value);
+        return `<span style="color: ${ew.color}; font-weight: bold;">${ew.text}</span>`;
+    }
+
+    if (columnName.includes('Days over') && columnName.includes('Celsius') && value !== 'N/A') {
+        const hd = categorizeHeatDays(value);
+        return `<span style="color: ${hd.color}; font-weight: bold;">${hd.text}</span>`;
+    }
+
+    if (columnName.startsWith('Rainfall-Induced Landslide (factor of safety') && value !== 'N/A') {
+        const ls = categorizeLandslideFOS(value);
+        return `<span style="color: ${ls.color}; font-weight: bold;">${ls.text}</span>`;
+    }
+
+    // Sea Level Rise (if handled differently)
+    if (columnName.includes('Sea Level Rise') && value !== 'N/A') {
+        const num = parseFloat(value);
+        if (!isNaN(num)) {
+            if (num >= 1.0) {
+                return `<span style="color: red; font-weight: bold;">${value}</span>`;
+            }
+            if (num >= 0.5) {
+                return `<span style="color: orange; font-weight: bold;">${value}</span>`;
+            }
+            return `<span style="color: green; font-weight: bold;">${value}</span>`;
+        }
+    }
+
+    // Default: return value as-is with override styling
+    return `<span style="color: #004085; font-weight: 500;">${value}</span>`;
 }
 
 function editCell($cell) {
