@@ -18,7 +18,8 @@ from .api_views import (
     heatmap_data_api, visualization_data_api,
     AssetListCreateView, AssetDetailView, AssetAnalysisView, GranularAnalysisView,
     GranularAnalysisPointView, HeatmapDataView, AssetVisualizationView,
-    AssetStatisticsView
+    AssetStatisticsView, save_hazard_selection_json, run_json_analysis,
+    get_json_analysis_results
 )
 
 app_name = "climate_hazards_analysis_v2"
@@ -40,6 +41,7 @@ urlpatterns = [
     path('api/polygon-assets/<int:asset_id>/', update_polygon_asset, name='update_polygon_asset'),
     path('api/polygon-assets/<int:asset_id>/delete/', delete_polygon_asset, name='delete_polygon_asset'),
     path('api/assets/<int:asset_id>/analysis/', get_asset_analysis_results, name='get_asset_analysis_results'),
+    path('save-table-changes/', save_table_changes, name='save_table_changes'),
     path('reset-table-data/', reset_table_data, name='reset_table_data'),
     path('export-to-excel/', export_hazard_data_to_excel, name='export_to_excel'),
     path('clear-site-data/', clear_site_data, name='clear_site_data'),
@@ -82,6 +84,11 @@ urlpatterns = [
 
     # Statistics and system info
     path('api/v2/statistics/', AssetStatisticsView.as_view(), name='asset_statistics_api'),
+
+    # JSON Workflow Endpoints
+    path('api/v2/json/save-hazard-selection/', save_hazard_selection_json, name='save_hazard_selection_json'),
+    path('api/v2/json/run-analysis/', run_json_analysis, name='run_json_analysis'),
+    path('api/v2/json/get-results/', get_json_analysis_results, name='get_json_analysis_results'),
 
     # Class-based view alternatives
     path('api/v2/assets/cbv/', AssetListCreateView.as_view(), name='asset_list_create_cbv'),

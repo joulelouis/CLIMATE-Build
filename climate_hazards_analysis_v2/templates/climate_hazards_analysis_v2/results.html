@@ -1246,7 +1246,10 @@ Climate Hazard Analysis Results
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label"><strong>Override Value</strong></label>
-                                            <input type="text" id="override-value" class="form-control">
+                                            <input type="text" id="override-value" class="form-control" placeholder="Enter override value">
+                                            <div id="validation-feedback" class="form-text">
+                                                <small id="validation-message" class="text-muted"></small>
+                                            </div>
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label"><strong>Reason/Explanation</strong></label>
@@ -1475,27 +1478,228 @@ function openOverrideModal($cell) {
     $('#override-value').val(currentValue);
     $('#override-reason').val($cell.attr('data-reason') || '');
     $('#override-file').val('');
+
+    // Reset validation state
+    $('#override-value').removeClass('is-invalid is-valid');
+    $('#validation-message').removeClass('text-danger text-success').addClass('text-muted').text('');
+
+    // Add real-time validation
+    setupRealTimeValidation($cell.attr('data-column'));
+
     if (!overrideModalInstance) {
         overrideModalInstance = new bootstrap.Modal(document.getElementById('overrideModal'));
     }
     overrideModalInstance.show();
 }
 
+// Enhanced validation and feedback
+function setupRealTimeValidation(columnName) {
+    const $valueInput = $('#override-value');
+    const $validationMessage = $('#validation-message');
+
+    // Remove existing event listeners
+    $valueInput.off('input.validation');
+
+    // Add real-time validation
+    $valueInput.on('input.validation', function() {
+        const value = $(this).val().trim();
+        const validation = validateCellValue(value, columnName);
+
+        if (validation.valid) {
+            $(this).removeClass('is-invalid').addClass('is-valid');
+            $validationMessage.removeClass('text-danger').addClass('text-success').text(validation.message || 'Valid value');
+        } else {
+            $(this).removeClass('is-valid').addClass('is-invalid');
+            $validationMessage.removeClass('text-success').addClass('text-danger').text(validation.message);
+        }
+    });
+}
+
+function validateCellValue(value, columnName) {
+    // Empty or N/A values are always valid
+    if (value === '' || value.toUpperCase() === 'N/A') {
+        return { valid: true, message: 'N/A - No data available' };
+    }
+
+    // Column-specific validation
+    if (columnName.includes('Depth') || columnName.includes('Level')) {
+        const numValue = parseFloat(value);
+        if (isNaN(numValue)) {
+            return { valid: false, message: 'Must be a numeric value (e.g., 0.5, 1.2, 3)' };
+        }
+        if (numValue < 0) {
+            return { valid: false, message: 'Cannot be negative' };
+        }
+        if (numValue > 100) {
+            return { valid: false, message: 'Value too large (max: 100)' };
+        }
+        return { valid: true, message: `${numValue} meters` };
+    }
+
+    if (columnName.includes('Days')) {
+        const intValue = parseInt(value);
+        if (isNaN(intValue)) {
+            return { valid: false, message: 'Must be a whole number (e.g., 5, 10, 30)' };
+        }
+        if (intValue < 0 || intValue > 365) {
+            return { valid: false, message: 'Must be between 0 and 365 days' };
+        }
+        return { valid: true, message: `${intValue} days` };
+    }
+
+    if (columnName.includes('Exposure') || columnName.includes('Stress')) {
+        const numValue = parseFloat(value);
+        if (isNaN(numValue)) {
+            return { valid: false, message: 'Must be a numeric value (e.g., 15, 25.5, 75)' };
+        }
+        if (numValue < 0 || numValue > 100) {
+            return { valid: false, message: 'Must be between 0 and 100%' };
+        }
+        return { valid: true, message: `${numValue}% exposure` };
+    }
+
+    // Default validation - allow any non-empty value
+    if (value.length > 0) {
+        return { valid: true, message: 'Custom value entered' };
+    }
+
+    return { valid: false, message: 'Value cannot be empty' };
+}
+
 $(document).on('submit', '#override-form', function(e) {
     e.preventDefault();
     if (!currentEditCell) return;
+
     const newValue = $('#override-value').val().trim();
     const reason = $('#override-reason').val().trim();
     const columnName = currentEditCell.attr('data-column');
     const rowIndex = parseInt(currentEditCell.attr('data-row'), 10);
+
+    // Enhanced validation before saving
+    const validation = validateCellValue(newValue, columnName);
+    if (!validation.valid) {
+        // Show validation error
+        $('#override-value').addClass('is-invalid');
+        $('#validation-message').removeClass('text-success text-muted').addClass('text-danger').text(validation.message);
+
+        // Shake the input to draw attention
+        $('#override-value').addClass('animate__animated animate__shakeX');
+        setTimeout(() => {
+            $('#override-value').removeClass('animate__animated animate__shakeX');
+        }, 1000);
+
+        return;
+    }
+
+    // Add loading state
+    const $submitButton = $(this).find('button[type="submit"]');
+    const originalText = $submitButton.html();
+    $submitButton.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
+
+    // Save the cell with enhanced error handling
     const $tempInput = $('<input>').val(newValue);
-    saveCell(currentEditCell, $tempInput, rowIndex, columnName);
-    currentEditCell.attr('data-reason', reason)
-        .attr('title', reason)
-        .attr('data-bs-toggle', 'tooltip');
-    new bootstrap.Tooltip(currentEditCell[0]);
-    overrideModalInstance.hide();
+    saveCellEnhanced(currentEditCell, $tempInput, rowIndex, columnName, reason)
+        .then(() => {
+            // Success
+            currentEditCell.attr('data-reason', reason)
+                .attr('title', reason || '')
+                .attr('data-bs-toggle', 'tooltip');
+
+            // Initialize tooltip if reason provided
+            if (reason) {
+                new bootstrap.Tooltip(currentEditCell[0]);
+            }
+
+            // Show success feedback
+            showToast('Override value saved successfully', 'success');
+            overrideModalInstance.hide();
+        })
+        .catch((error) => {
+            // Error handling
+            showToast('Failed to save override: ' + error.message, 'error');
+        })
+        .finally(() => {
+            // Reset button state
+            $submitButton.prop('disabled', false).html(originalText);
+        });
 });
+
+// Enhanced save function with promise support
+function saveCellEnhanced($cell, $input, rowIndex, columnName, reason) {
+    return new Promise((resolve, reject) => {
+        const oldValue = $cell.attr('data-original-value') || $cell.text().trim();
+        const facilityName = $cell.closest('tr').find('td').first().text().trim();
+
+        const change = {
+            rowIndex: rowIndex,
+            column: columnName,
+            oldValue: oldValue,
+            newValue: $input.val().trim(),
+            facilityName: facilityName,
+            reason: reason || ''
+        };
+
+        const changesData = {
+            changes: [change],
+            csrf_token: $('[name=csrfmiddlewaretoken]').val()
+        };
+
+        $.ajax({
+            url: '/climate-hazards-analysis-v2/save-table-changes/',
+            method: 'POST',
+            data: JSON.stringify(changesData),
+            contentType: 'application/json',
+            headers: {
+                'X-CSRFToken': $('[name=csrfmiddlewaretoken]').val()
+            },
+            success: function(response) {
+                if (response.success) {
+                    resolve(response);
+                } else {
+                    reject(new Error(response.error || 'Unknown error'));
+                }
+            },
+            error: function(xhr, status, error) {
+                const errorMsg = xhr.responseJSON?.error || error || 'Network error';
+                reject(new Error(errorMsg));
+            }
+        });
+    });
+}
+
+// Toast notification function
+function showToast(message, type = 'info') {
+    const toastHtml = `
+        <div class="toast align-items-center text-white bg-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'primary'} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body">
+                    ${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        </div>
+    `;
+
+    const $toastContainer = $('#toast-container');
+    if (!$toastContainer.length) {
+        $('body').append('<div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3"></div>');
+    }
+
+    const $toast = $(toastHtml);
+    $('#toast-container').append($toast);
+
+    const toast = new bootstrap.Toast($toast[0], {
+        autohide: true,
+        delay: 3000
+    });
+
+    toast.show();
+
+    // Remove toast element after hidden
+    $toast.on('hidden.bs.toast', function() {
+        $(this).remove();
+    });
+}
 
 function editCell($cell) {
     if ($cell.hasClass('editing')) {
@@ -3574,6 +3778,14 @@ function reinitializeHierarchicalTable() {
 
 
 </script>
+
+<!-- JSON Workflow Integration -->
+<script src="{% static 'js/json-workflow.js' %}"></script>
+
+<!-- Hidden element to pass uploaded asset IDs to JavaScript -->
+{% if uploaded_asset_ids %}
+<div id="uploaded-asset-ids" style="display: none;">{{ uploaded_asset_ids|safe }}</div>
+{% endif %}
 
 <!-- Development Utilities (Only in Development Mode) -->
 {% if debug %}
