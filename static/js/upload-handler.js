@@ -6,7 +6,7 @@
 class AssetUploadHandler {
     constructor() {
         this.maxFileSize = 50 * 1024 * 1024; // 50MB max file size
-        this.allowedTypes = ['.csv', '.xlsx', '.xls', '.zip', '.shp'];
+        this.allowedTypes = ['.csv', '.xlsx', '.xls', '.zip', '.gpkg'];
         this.isUploading = false;
         this.retryCount = 0;
         this.maxRetries = 3;

@@ -795,3 +795,272 @@ def visualization_data_api(request):
     """
     view = AssetVisualizationView()
     return view.get(request)
+
+
+# JSON Workflow Endpoints
+@csrf_exempt
+@require_http_methods(["POST"])
+def save_hazard_selection_json(request):
+    """
+    Save hazard selection for JSON workflow.
+    POST: Save selected hazards and parameters for assets
+    """
+    try:
+        data = json.loads(request.body)
+
+        # Validate required fields
+        if 'asset_ids' not in data or 'hazards' not in data:
+            return JsonResponse({
+                'error': 'Missing required fields: asset_ids and hazards'
+            }, status=400)
+
+        asset_ids = data['asset_ids']
+        hazards = data['hazards']
+        parameters = data.get('parameters', {})
+
+        # Store hazard selection in existing Asset model properties field
+        from .models import Asset
+        assets = Asset.objects.filter(id__in=asset_ids)
+
+        for asset in assets:
+            # Update properties with hazard selection
+            properties = asset.properties or {}
+            properties.update({
+                'selected_hazards': hazards,
+                'analysis_parameters': parameters,
+                'workflow_type': 'json'
+            })
+            asset.properties = properties
+            asset.save()
+
+        # Log JSON workflow data to console
+        from .json_console_simple import simple_json_console
+        simple_json_console.log_hazard_selection_step(asset_ids, hazards, parameters)
+
+        return JsonResponse({
+            'status': 'success',
+            'message': f'Hazard selection saved for {len(assets)} assets',
+            'asset_count': len(assets),
+            'selected_hazards': hazards
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON data'}, status=400)
+    except Exception as e:
+        logger.error(f"Error saving hazard selection: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def run_json_analysis(request):
+    """
+    Run climate hazards analysis using JSON workflow.
+    POST: Execute analysis for assets with stored hazard selections
+    """
+    try:
+        data = json.loads(request.body)
+
+        # Get assets for analysis
+        asset_ids = data.get('asset_ids', [])
+        if not asset_ids:
+            return JsonResponse({'error': 'No asset IDs provided'}, status=400)
+
+        from .models import Asset
+        assets = Asset.objects.filter(id__in=asset_ids)
+
+        # Collect hazard selections and prepare analysis data
+        analysis_data = []
+        all_hazards = set()
+
+        for asset in assets:
+            properties = asset.properties or {}
+            selected_hazards = properties.get('selected_hazards', [])
+            parameters = properties.get('analysis_parameters', {})
+
+            asset_data = {
+                'name': asset.name,
+                'latitude': asset.latitude,
+                'longitude': asset.longitude,
+                'archetype': asset.archetype,
+                'asset_id': asset.id,
+                'selected_hazards': selected_hazards,
+                'parameters': parameters
+            }
+
+            # Add polygon geometry if present
+            if asset.polygon_geometry:
+                asset_data['geometry'] = asset.polygon_geometry
+                asset_data['asset_type'] = 'polygon'
+            else:
+                asset_data['asset_type'] = 'point'
+
+            analysis_data.append(asset_data)
+            all_hazards.update(selected_hazards)
+
+        # Run analysis using existing service
+        if not all_hazards:
+            return JsonResponse({'error': 'No hazards selected for analysis'}, status=400)
+
+        # Log JSON workflow analysis start
+        from .json_console_simple import simple_json_console
+        simple_json_console.log_analysis_step(analysis_data, list(all_hazards), "starting")
+
+        # Use existing AssetAnalysisService
+        from .asset_service import AssetAnalysisService
+
+        # Convert analysis data to format expected by existing engines
+        try:
+            # Run analysis and get results in template-compatible format
+            results = AssetAnalysisService.run_comprehensive_analysis(
+                analysis_data, list(all_hazards)
+            )
+            simple_json_console.log_analysis_step(analysis_data, list(all_hazards), "completed")
+
+            # Store results in database for persistence
+            from .models import HazardAnalysisResult
+            for asset in assets:
+                asset_result = next((r for r in results if r.get('asset_id') == asset.id), None)
+                if asset_result:
+                    HazardAnalysisResult.objects.update_or_create(
+                        asset=asset,
+                        hazard_type='comprehensive',
+                        defaults={
+                            'result_data': asset_result,
+                            'processing_status': 'completed'
+                        }
+                    )
+
+            # Format for template compatibility (same as current results.html expects)
+            if results:
+                # Convert to pandas DataFrame for column processing
+                import pandas as pd
+                df = pd.DataFrame(results)
+
+                # Build column groups for template
+                groups = _build_column_groups_from_results(df.columns, list(all_hazards))
+
+                return JsonResponse({
+                    'status': 'success',
+                    'data': results,
+                    'columns': df.columns.tolist(),
+                    'groups': groups,
+                    'asset_count': len(results),
+                    'hazards_processed': list(all_hazards)
+                })
+            else:
+                return JsonResponse({
+                    'status': 'success',
+                    'data': [],
+                    'columns': [],
+                    'groups': {},
+                    'asset_count': 0,
+                    'hazards_processed': []
+                })
+
+        except Exception as analysis_error:
+            logger.error(f"Analysis execution error: {str(analysis_error)}")
+            return JsonResponse({
+                'error': f'Analysis failed: {str(analysis_error)}'
+            }, status=500)
+
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON data'}, status=400)
+    except Exception as e:
+        logger.error(f"Error running JSON analysis: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def get_json_analysis_results(request):
+    """
+    Get stored JSON analysis results.
+    GET: Retrieve analysis results for assets in template-compatible format
+    """
+    try:
+        asset_ids = request.GET.getlist('asset_ids')
+
+        if not asset_ids:
+            return JsonResponse({'error': 'No asset IDs provided'}, status=400)
+
+        from .models import Asset, HazardAnalysisResult
+        assets = Asset.objects.filter(id__in=asset_ids)
+
+        # Collect stored results
+        all_results = []
+        all_hazards = set()
+
+        for asset in assets:
+            # Get comprehensive analysis results
+            hazard_results = HazardAnalysisResult.objects.filter(
+                asset=asset,
+                hazard_type='comprehensive',
+                processing_status='completed'
+            ).first()
+
+            if hazard_results and hazard_results.result_data:
+                result_data = hazard_results.result_data
+                if isinstance(result_data, dict):
+                    all_results.append(result_data)
+                    # Extract hazards from result data
+                    properties = asset.properties or {}
+                    selected_hazards = properties.get('selected_hazards', [])
+                    all_hazards.update(selected_hazards)
+
+        if all_results:
+            # Format for template compatibility
+            import pandas as pd
+            df = pd.DataFrame(all_results)
+
+            # Build column groups
+            groups = _build_column_groups_from_results(df.columns, list(all_hazards))
+
+            return JsonResponse({
+                'status': 'success',
+                'data': all_results,
+                'columns': df.columns.tolist(),
+                'groups': groups,
+                'asset_count': len(all_results),
+                'hazards_processed': list(all_hazards)
+            })
+        else:
+            return JsonResponse({
+                'status': 'success',
+                'data': [],
+                'columns': [],
+                'groups': {},
+                'asset_count': 0,
+                'hazards_processed': []
+            })
+
+    except Exception as e:
+        logger.error(f"Error getting JSON analysis results: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def _build_column_groups_from_results(columns, selected_hazards):
+    """
+    Build column groups for template header structure.
+    Compatible with existing results.html format.
+    """
+    # Column mapping based on existing system
+    column_mappings = {
+        'Facility Information': ['name', 'archetype', 'latitude', 'longitude', 'asset_id', 'asset_type'],
+        'Flood': [col for col in columns if 'flood' in col.lower() or 'water' in col.lower() and 'stress' not in col.lower()],
+        'Water Stress': [col for col in columns if 'water stress' in col.lower()],
+        'Heat': [col for col in columns if 'heat' in col.lower() or 'temperature' in col.lower() or 'days over' in col.lower()],
+        'Sea Level Rise': [col for col in columns if 'sea level' in col.lower() or 'slr' in col.lower()],
+        'Tropical Cyclones': [col for col in columns if 'cyclone' in col.lower() or 'wind' in col.lower()],
+        'Storm Surge': [col for col in columns if 'storm surge' in col.lower()],
+        'Landslide': [col for col in columns if 'landslide' in col.lower()]
+    }
+
+    groups = {}
+    for group_name, group_columns in column_mappings.items():
+        # Filter columns that actually exist
+        existing_columns = [col for col in group_columns if col in columns]
+        if existing_columns:
+            groups[group_name] = len(existing_columns)
+
+    return groups

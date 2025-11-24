@@ -128,7 +128,7 @@ def view_map(request):
             if ext in ['.xls', '.xlsx']:
                 df = pd.read_excel(file_path)
 
-            elif ext in ['.shp', '.zip', '.gpkg']:
+            elif ext in ['.zip', '.gpkg']:
                 # Initialize zip_file_count for zip files
                 zip_file_count = 0
 
@@ -138,16 +138,26 @@ def view_map(request):
                             zip_ref.extractall(tmpdir)
                             # Count actual files in zip for accurate record count
                             zip_file_count = len(zip_ref.namelist())
-                        shp_files = [f for f in os.listdir(tmpdir) if f.lower().endswith('.shp')]
+
+                        # Validate that required shapefile files are present
+                        extracted_files = [f.lower() for f in os.listdir(tmpdir)]
+                        shp_files = [f for f in extracted_files if f.endswith('.shp')]
+                        shx_files = [f for f in extracted_files if f.endswith('.shx')]
+                        dbf_files = [f for f in extracted_files if f.endswith('.dbf')]
+
                         if not shp_files:
-                            raise ValueError('No shapefile found in the uploaded zip archive')
-                        shp_path = os.path.join(tmpdir, shp_files[0])
+                            raise ValueError('The shapefile(.zip) is missing the (.shp) file')
+                        if not shx_files:
+                            raise ValueError('The shapefile(.zip) is missing the (.shx) file')
+                        if not dbf_files:
+                            raise ValueError('The shapefile(.zip) is missing the (.dbf) file')
+
+                        # Use the first .shp file found
+                        shp_file = shp_files[0]
+                        shp_path = os.path.join(tmpdir, shp_file)
                         gdf = gpd.read_file(shp_path)
                 elif ext == '.gpkg':
                     # Read GeoPackage file (reads first layer by default)
-                    gdf = gpd.read_file(file_path)
-                else:
-                    # Direct .shp file
                     gdf = gpd.read_file(file_path)
 
                 # Validate geospatial file structure before processing
@@ -216,7 +226,7 @@ def view_map(request):
 
 
             # Store facility data in session for map display
-            if ext in ['.shp', '.zip', '.gpkg']:
+            if ext in ['.zip', '.gpkg']:
                 facility_data = []
                 for i, row in df.iterrows():
                     record = row.to_dict()

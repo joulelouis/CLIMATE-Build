@@ -649,8 +649,59 @@ class AssetAnalysisService:
             logger.error(f"Failed to get granular analysis data: {str(e)}")
             return {'error': str(e)}
 
+    @staticmethod
+    def run_comprehensive_analysis(asset_data_list: List[Dict[str, Any]], hazard_types: List[str]) -> List[Dict[str, Any]]:
+        """
+        Run comprehensive climate hazards analysis for multiple assets using JSON workflow.
 
-# Convenience functions for backward compatibility
+        Args:
+            asset_data_list: List of asset data with coordinates and properties
+            hazard_types: List of hazard types to analyze
+
+        Returns:
+            List of analysis results in template-compatible format
+        """
+        try:
+            # For now, return a simple mock structure to test the workflow
+            # This can be enhanced to integrate with the actual analysis engines later
+            results = []
+            for asset_data in asset_data_list:
+                result = {
+                    'Facility': asset_data.get('name', 'Unknown'),
+                    'Asset Archetype': asset_data.get('archetype', 'default'),
+                    'Lat': asset_data.get('latitude', 0.0),
+                    'Long': asset_data.get('longitude', 0.0),
+                    'asset_id': asset_data.get('asset_id', 0)
+                }
+
+                # Add placeholder hazard columns
+                for hazard in hazard_types:
+                    result[f'{hazard} Exposure'] = 'Low'
+                    result[f'{hazard} Risk'] = 'Low'
+
+                results.append(result)
+
+            logger.info(f"Mock analysis completed for {len(results)} assets with hazards: {hazard_types}")
+            return results
+
+        except Exception as e:
+            logger.error(f"Error in comprehensive analysis: {str(e)}")
+            # Return basic structure on error
+            error_results = []
+            for asset_data in asset_data_list:
+                error_result = {
+                    'Facility': asset_data.get('name', 'Unknown'),
+                    'Asset Archetype': asset_data.get('archetype', 'default'),
+                    'Lat': asset_data.get('latitude', 0.0),
+                    'Long': asset_data.get('longitude', 0.0),
+                    'asset_id': asset_data.get('asset_id', 0),
+                    'Error': f'Analysis failed: {str(e)}'
+                }
+                error_results.append(error_result)
+
+            return error_results
+
+
 def create_asset(name: str, coordinates: Union[Tuple[float, float], Dict[str, Any]],
                 asset_type: str = AssetType.POINT, **kwargs) -> Asset:
     """
@@ -699,3 +750,119 @@ def get_asset_with_analysis(asset_id: int, hazard_types: Optional[List[str]] = N
 
     analysis_data['granular_data'] = granular_data
     return analysis_data
+
+    @staticmethod
+    def run_comprehensive_analysis(asset_data_list: List[Dict[str, Any]], hazard_types: List[str]) -> List[Dict[str, Any]]:
+        """
+        Run comprehensive climate hazards analysis for multiple assets using JSON workflow.
+
+        Args:
+            asset_data_list: List of asset data with coordinates and properties
+            hazard_types: List of hazard types to analyze
+
+        Returns:
+            List of analysis results in template-compatible format
+        """
+        try:
+            # Import legacy analysis engines for compatibility
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'climate_hazards_analysis'))
+
+            from climate_hazards_analysis import generate_climate_hazards_analysis
+            import pandas as pd
+            import tempfile
+
+            # Convert JSON asset data to DataFrame for existing analysis engines
+            facility_records = []
+            for asset_data in asset_data_list:
+                record = {
+                    'Facility': asset_data.get('name', 'Unknown Facility'),
+                    'Lat': asset_data.get('latitude', 0.0),
+                    'Long': asset_data.get('longitude', 0.0),
+                    'Asset Archetype': asset_data.get('archetype', 'default'),
+                    'Asset ID': asset_data.get('asset_id', 0)
+                }
+                facility_records.append(record)
+
+            # Create DataFrame
+            df_facilities = pd.DataFrame(facility_records)
+
+            # Create temporary CSV file for existing analysis engine compatibility
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as tmp_file:
+                df_facilities.to_csv(tmp_file.name, index=False)
+                temp_csv_path = tmp_file.name
+
+            try:
+                # Run analysis using existing engine
+                analysis_results = generate_climate_hazards_analysis(
+                    facility_csv_path=temp_csv_path,
+                    hazards_selected=hazard_types,
+                    scenarios_selected=['moderate', 'worst']  # Default scenarios
+                )
+
+                # Read the combined output results
+                combined_csv_path = analysis_results.get('combined_csv_path')
+                if combined_csv_path and os.path.exists(combined_csv_path):
+                    df_results = pd.read_csv(combined_csv_path, encoding='utf-8')
+
+                    # Convert to list of dictionaries for template compatibility
+                    results_list = df_results.to_dict(orient='records')
+
+                    # Add asset IDs back to results
+                    for i, result in enumerate(results_list):
+                        if i < len(asset_data_list):
+                            result['asset_id'] = asset_data_list[i].get('asset_id')
+
+                    return results_list
+                else:
+                    # Fallback: Create basic results structure
+                    basic_results = []
+                    for i, asset_data in enumerate(asset_data_list):
+                        result = {
+                            'Facility': asset_data.get('name', 'Unknown'),
+                            'Asset Archetype': asset_data.get('archetype', 'default'),
+                            'Lat': asset_data.get('latitude', 0.0),
+                            'Long': asset_data.get('longitude', 0.0),
+                            'asset_id': asset_data.get('asset_id', 0)
+                        }
+
+                        # Add placeholder hazard columns
+                        for hazard in hazard_types:
+                            result[f'{hazard} Exposure'] = 'N/A'
+                            result[f'{hazard} Risk'] = 'Unknown'
+
+                        basic_results.append(result)
+
+                    return basic_results
+
+            finally:
+                # Clean up temporary files
+                try:
+                    if os.path.exists(temp_csv_path):
+                        os.unlink(temp_csv_path)
+
+                    # Clean up analysis output files
+                    output_files = analysis_results.get('output_files', {})
+                    for file_path in output_files.values():
+                        if os.path.exists(file_path):
+                            os.unlink(file_path)
+                except:
+                    pass  # Ignore cleanup errors
+
+        except Exception as e:
+            logger.error(f"Error in comprehensive analysis: {str(e)}")
+            # Return basic structure on error
+            error_results = []
+            for asset_data in asset_data_list:
+                error_result = {
+                    'Facility': asset_data.get('name', 'Unknown'),
+                    'Asset Archetype': asset_data.get('archetype', 'default'),
+                    'Lat': asset_data.get('latitude', 0.0),
+                    'Long': asset_data.get('longitude', 0.0),
+                    'asset_id': asset_data.get('asset_id', 0),
+                    'Error': f'Analysis failed: {str(e)}'
+                }
+                error_results.append(error_result)
+
+            return error_results

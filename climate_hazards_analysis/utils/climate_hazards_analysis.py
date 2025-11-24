@@ -12,6 +12,7 @@ Dependencies:
 import os
 import logging
 from pathlib import Path
+from datetime import datetime
 import pandas as pd
 import numpy as np
 import geopandas as gpd
@@ -1055,13 +1056,39 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             metadata_lines.append(f"# Sensitivity Analysis Results")
             metadata_lines.append(f"# Buffer Size: {buffer_size} degrees (~{int(buffer_size * 111000)}m)")
         
-        # Write metadata and data with explicit UTF-8 encoding
-        with open(out_csv, 'w', encoding='utf-8', newline='') as f:
-            for line in metadata_lines:
-                f.write(line + '\n')
-            combined_df.to_csv(f, index=False)
-            
-        logger.info(f"Saved combined output CSV: {out_csv}")
+        # === JSON-ONLY GENERATION (Migrated from CSV/JSON Parallel) ===
+        # Generate JSON output for improved performance and data integrity
+        import json
+
+        # Determine JSON filename based on analysis type
+        if sensitivity_params and buffer_size != 0.0009:
+            out_json = os.path.join(input_dir, f'combined_output_sensitivity_buffer_{buffer_size:.4f}.json')
+        elif buffer_size != 0.0009:
+            out_json = os.path.join(input_dir, f'combined_output_buffer_{buffer_size:.4f}.json')
+        else:
+            out_json = os.path.join(input_dir, 'combined_output.json')
+
+        # Create JSON data structure
+        json_data = {
+            'metadata': {
+                'generated_at': str(datetime.now()),
+                'analysis_type': 'sensitivity' if sensitivity_params else 'standard',
+                'buffer_size_degrees': buffer_size,
+                'buffer_size_meters': int(buffer_size * 111000) if buffer_size != 0.0009 else 100,
+                'sensitivity_parameters': sensitivity_params or {},
+                'total_facilities': len(combined_df),
+                'hazards_analyzed': selected_fields or []
+            },
+            'data': combined_df.to_dict(orient='records')
+        }
+
+        # Write JSON file with UTF-8 encoding
+        with open(out_json, 'w', encoding='utf-8') as f_json:
+            json.dump(json_data, f_json, indent=2, ensure_ascii=False, default=str)
+
+        logger.info(f"Saved JSON output: {out_json}")
+
+        # === END JSON-ONLY GENERATION ===
         
         # Select the main plot for display (prioritizing flood exposure if available)
         main_plot = None
@@ -1075,7 +1102,7 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         
         logger.info("=== ANALYSIS COMPLETE ===")
         return {
-            'combined_csv_path': out_csv,
+            'combined_json_path': out_json,
             'plot_path': main_plot,
             'all_plots': all_plot_paths,
             'buffer_size': buffer_size,
@@ -1084,7 +1111,7 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         
     except Exception as e:
         logger.exception(f"Error in generate_climate_hazards_analysis: {e}")
-        return {'error': str(e), 'combined_csv_path': None, 'plot_path': None}
+        return {'error': str(e), 'combined_json_path': None, 'plot_path': None}
     
 def validate_and_clean_dataframe(df, analysis_name=""):
     """
