@@ -65,6 +65,32 @@ class Asset(models.Model):
     last_analysis_date = models.DateTimeField(null=True, blank=True)
     analysis_version = models.CharField(max_length=20, default='v1.0')
 
+    # Workflow state tracking
+    workflow_state = models.CharField(
+        max_length=20,
+        choices=[
+            ('uploaded', 'Data Uploaded'),
+            ('hazards_selected', 'Hazards Selected'),
+            ('analysis_complete', 'Analysis Complete'),
+            ('overrides_applied', 'Overrides Applied'),
+            ('finalized', 'Finalized'),
+        ],
+        default='uploaded',
+        help_text="Current state in the analysis workflow"
+    )
+
+    # Session independence - allows overrides without session
+    has_session_independent_analysis = models.BooleanField(
+        default=False,
+        help_text="Whether this asset has analysis results that can be overridden without session"
+    )
+    last_analysis_session_key = models.CharField(
+        max_length=255, null=True, blank=True,
+        help_text="Last session key that performed analysis on this asset"
+    )
+    session_key = models.CharField(max_length=255, null=True, blank=True,
+                                   help_text="Session key used for upload/creation")
+
     # Quality and validation flags
     is_validated = models.BooleanField(default=False)
     validation_errors = models.JSONField(default=list, blank=True)
@@ -542,3 +568,192 @@ class HeatmapData(models.Model):
                 })
 
         return grid_data
+
+
+class OverrideValue(models.Model):
+    """
+    Model for storing user override values for hazard analysis results.
+    Provides database persistence for overrides, eliminating session dependency.
+    """
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='overrides')
+
+    # Override identification
+    hazard_type = models.CharField(max_length=50, null=True, blank=True)
+    column_name = models.CharField(max_length=255)
+
+    # Override values
+    original_value = models.TextField(null=True, blank=True)
+    override_value = models.TextField()
+
+    # Override metadata
+    reason = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    # User and session tracking
+    user_identifier = models.CharField(max_length=255, null=True, blank=True,
+                                     help_text="User session ID or identifier")
+    session_key = models.CharField(max_length=255, null=True, blank=True,
+                                  help_text="Session key for tracking")
+
+    # Override status
+    is_active = models.BooleanField(default=True,
+                                   help_text="Whether this override is currently active")
+    approval_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', 'Pending Approval'),
+            ('approved', 'Approved'),
+            ('rejected', 'Rejected'),
+            ('auto_applied', 'Auto Applied'),
+        ],
+        default='auto_applied'
+    )
+
+    # Workflow context
+    analysis_version = models.CharField(max_length=20, null=True, blank=True)
+    scenario = models.CharField(max_length=50, default='current')
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['asset', 'column_name', 'is_active']),
+            models.Index(fields=['asset', 'hazard_type']),
+            models.Index(fields=['user_identifier']),
+            models.Index(fields=['session_key']),
+            models.Index(fields=['created_at']),
+            models.Index(fields=['approval_status']),
+        ]
+        unique_together = ['asset', 'column_name', 'hazard_type', 'scenario', 'is_active']
+        verbose_name = "Override Value"
+        verbose_name_plural = "Override Values"
+
+    def __str__(self):
+        return f"{self.asset.name} - {self.column_name}: {self.override_value}"
+
+    def apply_override(self, original_value):
+        """
+        Apply this override to a value.
+
+        Args:
+            original_value: The original analysis value
+
+        Returns:
+            The override value if active, otherwise the original value
+        """
+        if not self.is_active:
+            return original_value
+        return self.override_value
+
+    def get_history(self):
+        """
+        Get override history for this asset and column.
+
+        Returns:
+            QuerySet of OverrideValue objects for this asset/column combination
+        """
+        return OverrideValue.objects.filter(
+            asset=self.asset,
+            column_name=self.column_name,
+            hazard_type=self.hazard_type,
+            scenario=self.scenario
+        ).order_by('-created_at')
+
+    @classmethod
+    def get_active_override(cls, asset, column_name, hazard_type=None, scenario='current'):
+        """
+        Get the active override for a specific asset and column.
+
+        Args:
+            asset: Asset instance
+            column_name: Name of the column to override
+            hazard_type: Optional hazard type for specificity
+            scenario: Analysis scenario
+
+        Returns:
+            OverrideValue instance or None
+        """
+        try:
+            return cls.objects.get(
+                asset=asset,
+                column_name=column_name,
+                hazard_type=hazard_type,
+                scenario=scenario,
+                is_active=True
+            )
+        except cls.DoesNotExist:
+            return None
+
+    @classmethod
+    def create_or_update_override(cls, asset, column_name, override_value,
+                                 original_value=None, reason=None, hazard_type=None,
+                                 user_identifier=None, session_key=None, scenario='current'):
+        """
+        Create or update an override value.
+
+        Args:
+            asset: Asset instance
+            column_name: Name of the column to override
+            override_value: New override value
+            original_value: Original analysis value
+            reason: Reason for the override
+            hazard_type: Optional hazard type
+            user_identifier: User identifier
+            session_key: Session key
+            scenario: Analysis scenario
+
+        Returns:
+            OverrideValue instance
+        """
+        # Deactivate any existing active overrides for this column
+        cls.objects.filter(
+            asset=asset,
+            column_name=column_name,
+            hazard_type=hazard_type,
+            scenario=scenario,
+            is_active=True
+        ).update(is_active=False)
+
+        # Create new override
+        return cls.objects.create(
+            asset=asset,
+            column_name=column_name,
+            hazard_type=hazard_type,
+            original_value=original_value,
+            override_value=override_value,
+            reason=reason,
+            user_identifier=user_identifier,
+            session_key=session_key,
+            scenario=scenario
+        )
+
+    @classmethod
+    def apply_overrides_to_data(cls, asset, data_dict, hazard_type=None, scenario='current'):
+        """
+        Apply all active overrides for an asset to a data dictionary.
+
+        Args:
+            asset: Asset instance
+            data_dict: Dictionary of column_name -> value pairs
+            hazard_type: Optional hazard type for specificity
+            scenario: Analysis scenario
+
+        Returns:
+            Updated dictionary with overrides applied
+        """
+        active_overrides = cls.objects.filter(
+            asset=asset,
+            is_active=True,
+            scenario=scenario
+        )
+
+        if hazard_type:
+            active_overrides = active_overrides.filter(
+                models.Q(hazard_type=hazard_type) | models.Q(hazard_type__isnull=True)
+            )
+
+        result = data_dict.copy()
+        for override in active_overrides:
+            if override.column_name in result:
+                result[override.column_name] = override.apply_override(result[override.column_name])
+
+        return result

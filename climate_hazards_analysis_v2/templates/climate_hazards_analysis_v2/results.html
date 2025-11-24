@@ -1569,47 +1569,137 @@ $(document).on('submit', '#override-form', function(e) {
         });
 });
 
-// Enhanced save function with promise support
+// Pre-flight validation before attempting override
+function validateAnalysisContext() {
+    return new Promise((resolve, reject) => {
+        // Check if we have uploaded assets in session
+        $.ajax({
+            url: '/climate-hazards-analysis-v2/check-analysis-context/',
+            method: 'GET',
+            success: function(response) {
+                if (response.has_context) {
+                    resolve(response);
+                } else {
+                    reject(new Error(response.message || 'Analysis context not found'));
+                }
+            },
+            error: function(xhr, status, error) {
+                reject(new Error('Failed to validate analysis context'));
+            }
+        });
+    });
+}
+
+// Enhanced save function with pre-flight validation and graceful error handling
 function saveCellEnhanced($cell, $input, rowIndex, columnName, reason) {
     return new Promise((resolve, reject) => {
         const oldValue = $cell.attr('data-original-value') || $cell.text().trim();
         const facilityName = $cell.closest('tr').find('td').first().text().trim();
+        const newValue = $input.val().trim();
+
+        // Input validation
+        if (!newValue) {
+            reject(new Error('Override value cannot be empty'));
+            return;
+        }
+
+        if (newValue === oldValue) {
+            reject(new Error('Override value is the same as the original value'));
+            return;
+        }
 
         const change = {
             rowIndex: rowIndex,
             column: columnName,
             oldValue: oldValue,
-            newValue: $input.val().trim(),
+            newValue: newValue,
             facilityName: facilityName,
             reason: reason || ''
         };
 
-        const changesData = {
-            changes: [change],
-            csrf_token: $('[name=csrfmiddlewaretoken]').val()
-        };
+        // Pre-flight validation
+        validateAnalysisContext()
+            .then(contextResponse => {
+                console.log('Analysis context validated:', contextResponse);
 
-        $.ajax({
-            url: '/climate-hazards-analysis-v2/save-table-changes/',
-            method: 'POST',
-            data: JSON.stringify(changesData),
-            contentType: 'application/json',
-            headers: {
-                'X-CSRFToken': $('[name=csrfmiddlewaretoken]').val()
-            },
-            success: function(response) {
+                // Show loading state
+                showToast('Saving override...', 'info');
+
+                const changesData = {
+                    changes: [change],
+                    csrf_token: $('[name=csrfmiddlewaretoken]').val()
+                };
+
+                return $.ajax({
+                    url: '/climate-hazards-analysis-v2/save-table-changes/',
+                    method: 'POST',
+                    data: JSON.stringify(changesData),
+                    contentType: 'application/json',
+                    headers: {
+                        'X-CSRFToken': $('[name=csrfmiddlewaretoken]').val()
+                    }
+                });
+            })
+            .then(response => {
                 if (response.success) {
+                    // Show success message with appropriate context
+                    let successMessage = response.message;
+                    if (response.database_mode) {
+                        successMessage += ' (Saved to database - session independent)';
+                    }
+                    showToast(successMessage, 'success');
                     resolve(response);
                 } else {
-                    reject(new Error(response.error || 'Unknown error'));
+                    // Handle different error types
+                    let errorMessage = response.error || 'Unknown error';
+                    let errorAction = '';
+
+                    if (response.requires_analysis) {
+                        errorAction = ' You will be redirected to run the analysis.';
+                        setTimeout(() => {
+                            if (response.redirect_url) {
+                                window.location.href = response.redirect_url;
+                            }
+                        }, 3000);
+                    }
+
+                    showToast(errorMessage + errorAction, 'error');
+                    reject(new Error(errorMessage));
                 }
-            },
-            error: function(xhr, status, error) {
-                const errorMsg = xhr.responseJSON?.error || error || 'Network error';
-                reject(new Error(errorMsg));
-            }
-        });
+            })
+            .catch(xhr => {
+                let errorMessage = 'Failed to save override';
+
+                if (xhr.responseJSON) {
+                    errorMessage = xhr.responseJSON.error || errorMessage;
+                } else if (xhr.message) {
+                    errorMessage = xhr.message;
+                }
+
+                // Provide user-friendly error messages
+                if (errorMessage.includes('Analysis results not found')) {
+                    errorMessage = 'Please complete the climate analysis workflow first before making overrides.';
+                } else if (errorMessage.includes('No assets found')) {
+                    errorMessage = 'Please upload facility data first before making overrides.';
+                }
+
+                showToast(errorMessage, 'error');
+                reject(new Error(errorMessage));
+            });
     });
+}
+
+// Function to check if analysis context exists (AJAX endpoint needed in views.py)
+function checkAnalysisContext() {
+    return validateAnalysisContext()
+        .then(response => {
+            console.log('Analysis context check passed');
+            return true;
+        })
+        .catch(error => {
+            console.warn('Analysis context check failed:', error.message);
+            return false;
+        });
 }
 
 // Toast notification function
@@ -2662,6 +2752,12 @@ function sortByColumn(columnIndex, columnName) {
 
 // PAGINATION FUNCTIONALITY
 function renderTable() {
+    // Guard against stale page index (can happen if row count shrinks)
+    const totalParents = tableState.filteredParentRows.length;
+    if (totalParents > 0 && (tableState.currentPage - 1) * tableState.rowsPerPage >= totalParents) {
+        tableState.currentPage = 1;
+    }
+
     const startIndex = (tableState.currentPage - 1) * tableState.rowsPerPage;
     const endIndex = startIndex + tableState.rowsPerPage;
 
@@ -2786,6 +2882,10 @@ function setupPagination() {
     `;
 
     $('#hazard-data-table').closest('.table-responsive').after(paginationHtml);
+
+    // Initialize rows-per-page from the selected option to keep state in sync with UI
+    const initialRowsPerPage = parseInt($('#rows-per-page').val()) || tableState.rowsPerPage;
+    tableState.rowsPerPage = initialRowsPerPage === -1 ? tableState.filteredParentRows.length : initialRowsPerPage;
 
     // Handle rows per page change
     $('#rows-per-page').on('change', function() {

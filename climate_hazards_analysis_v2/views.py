@@ -10,6 +10,7 @@ import pandas as pd
 import geopandas as gpd
 import json
 from django.conf import settings
+from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_GET, require_POST
 from django.utils.decorators import method_decorator
@@ -20,7 +21,7 @@ from django.urls import reverse_lazy
 from django.core.exceptions import ValidationError
 from .utils import standardize_facility_dataframe, load_cached_hazard_data, combine_facility_with_hazard_data, validate_shapefile
 from .error_utils import handle_sensitivity_param_error
-from .models import Asset, HazardAnalysisResult, GranularAnalysisResult, HeatmapData
+from .models import Asset, HazardAnalysisResult, GranularAnalysisResult, HeatmapData, OverrideValue
 from .granular_analysis import generate_sample_grid, calculate_polygon_area_km2
 from .granular_utils import (
     generate_grid_points_from_polygon, create_granular_analysis_results,
@@ -45,6 +46,57 @@ from climate_hazards_analysis.utils.generate_report import generate_climate_haza
 from tropical_cyclone_analysis.utils.tropical_cyclone_analysis import generate_tropical_cyclone_analysis
 
 logger = logging.getLogger(__name__)
+
+UPLOAD_DIR = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
+ALLOWED_UPLOAD_EXTENSIONS = {'.csv', '.xlsx', '.xls', '.zip', '.gpkg', '.shp'}
+MAX_UPLOAD_TOTAL_BYTES = 5 * 1024 * 1024  # 5 MB across all uploaded files
+MAX_PREVIEW_BYTES = 100_000  # cap preview responses
+
+
+def _sanitize_upload_filename(filename: str) -> str:
+    """Return a filesystem-safe name (no path segments, bounded length)."""
+    base = os.path.basename(filename or '').strip()
+    base = base.replace('\\', '_').replace('/', '_')
+    if not base:
+        raise ValueError("Invalid file name")
+    if len(base) > 150:
+        stem, ext = os.path.splitext(base)
+        base = f"{stem[:100]}{ext}"
+    return base
+
+
+def _get_current_upload_usage(request) -> int:
+    """Sum sizes of files tracked in session metadata."""
+    uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
+    return sum(int(meta.get('size', 0) or 0) for meta in uploaded_files.values())
+
+
+def _enforce_upload_quota(request, incoming_bytes: int):
+    """Raise if adding the incoming payload would exceed the 5 MB cap."""
+    current = _get_current_upload_usage(request)
+    if current + incoming_bytes > MAX_UPLOAD_TOTAL_BYTES:
+        raise ValueError("Total upload size exceeds 5 MB limit across all files")
+
+
+def _validate_zip_file(zip_ref: zipfile.ZipFile, current_usage: int):
+    """Validate zip contents for traversal and size limits."""
+    total_uncompressed = 0
+    for info in zip_ref.infolist():
+        member_path = Path(info.filename)
+        if member_path.is_absolute() or '..' in member_path.parts:
+            raise ValueError("Zip file contains unsafe paths")
+        total_uncompressed += info.file_size
+        if current_usage + total_uncompressed > MAX_UPLOAD_TOTAL_BYTES:
+            raise ValueError("Uncompressed zip content exceeds 5 MB upload limit")
+
+
+def _assert_within_upload_dir(file_path: str):
+    """Ensure the resolved path stays inside the configured upload directory."""
+    upload_root = Path(UPLOAD_DIR).resolve()
+    resolved = Path(file_path).resolve()
+    if not resolved.is_relative_to(upload_root):
+        raise ValueError("Requested file is outside the upload directory")
+
 
 def order_selected_hazards(selected_hazards):
     """
@@ -101,235 +153,252 @@ def view_map(request):
         'uploaded_file_name': request.session.get('climate_hazards_v2_uploaded_filename')
     }
     
-    # If a facility CSV or Excel file has been uploaded through the form
-    if request.method == 'POST' and request.FILES.get('facility_csv'):
+    # If facility files have been uploaded through the form (support multiple files)
+    if request.method == 'POST' and request.FILES.getlist('facility_csv'):
+        files = request.FILES.getlist('facility_csv')
+        total_new_facilities = 0
         try:
-            # Save the uploaded file
-            upload_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
-            os.makedirs(upload_dir, exist_ok=True)
-
-            file = request.FILES['facility_csv']
-            file_path = os.path.join(upload_dir, file.name)
-
-            # Check for duplicate file names (case-insensitive)
-            uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
-            for existing_file_id, existing_file_metadata in uploaded_files.items():
-                if existing_file_metadata.get('name', '').lower() == file.name.lower():
-                    context['error'] = f"File '{file.name}' has already been uploaded. Please choose a different file."
-                    return render(request, 'climate_hazards_analysis_v2/main.html', context)
-            
-            with open(file_path, 'wb+') as destination:
-                for chunk in file.chunks():
-                    destination.write(chunk)
-            
-            ext = os.path.splitext(file.name)[1].lower()
-
-            # Process the uploaded file to get facility data
-            if ext in ['.xls', '.xlsx']:
-                df = pd.read_excel(file_path)
-
-            elif ext in ['.zip', '.gpkg']:
-                # Initialize zip_file_count for zip files
-                zip_file_count = 0
-
-                if ext == '.zip':
-                    with tempfile.TemporaryDirectory() as tmpdir:
-                        with zipfile.ZipFile(file_path, 'r') as zip_ref:
-                            zip_ref.extractall(tmpdir)
-                            # Count actual files in zip for accurate record count
-                            zip_file_count = len(zip_ref.namelist())
-
-                        # Validate that required shapefile files are present
-                        extracted_files = [f.lower() for f in os.listdir(tmpdir)]
-                        shp_files = [f for f in extracted_files if f.endswith('.shp')]
-                        shx_files = [f for f in extracted_files if f.endswith('.shx')]
-                        dbf_files = [f for f in extracted_files if f.endswith('.dbf')]
-
-                        if not shp_files:
-                            raise ValueError('The shapefile(.zip) is missing the (.shp) file')
-                        if not shx_files:
-                            raise ValueError('The shapefile(.zip) is missing the (.shx) file')
-                        if not dbf_files:
-                            raise ValueError('The shapefile(.zip) is missing the (.dbf) file')
-
-                        # Use the first .shp file found
-                        shp_file = shp_files[0]
-                        shp_path = os.path.join(tmpdir, shp_file)
-                        gdf = gpd.read_file(shp_path)
-                elif ext == '.gpkg':
-                    # Read GeoPackage file (reads first layer by default)
-                    gdf = gpd.read_file(file_path)
-
-                # Validate geospatial file structure before processing
-                attribute_columns = validate_shapefile(gdf)
-                logger.info(f"Geospatial file attribute columns: {attribute_columns}")
-
-                gdf = gdf.to_crs('EPSG:4326')
-
-                # Enhanced centroid calculation with robust error handling
-                logger.info(f"[SHAPEFILE_DEBUG] Calculating centroids for {len(gdf)} geometries")
-
-                # Check for empty or invalid geometries before calculating centroids
-                invalid_geoms = gdf.geometry.isna() | gdf.geometry.is_empty
-                invalid_count = invalid_geoms.sum()
-                if invalid_count > 0:
-                    logger.warning(f"[SHAPEFILE_DEBUG] Found {invalid_count} empty/invalid geometries")
-                    gdf = gdf[~invalid_geoms]
-                    logger.info(f"[SHAPEFILE_DEBUG] Removed invalid geometries, remaining: {len(gdf)}")
-
-                # Calculate centroids with error handling
-                try:
-                    gdf['Lat'] = gdf.geometry.centroid.y
-                    gdf['Long'] = gdf.geometry.centroid.x
-                except Exception as e:
-                    logger.error(f"[SHAPEFILE_DEBUG] Error calculating centroids: {e}")
-                    # Fallback: use representative point instead of centroid
-                    try:
-                        gdf['Lat'] = gdf.geometry.representative_point().y
-                        gdf['Long'] = gdf.geometry.representative_point().x
-                        logger.info(f"[SHAPEFILE_DEBUG] Used representative points as fallback")
-                    except Exception as e2:
-                        logger.error(f"[SHAPEFILE_DEBUG] Error with representative points: {e2}")
-                        raise ValueError(f"Failed to extract coordinates from shapefile: {e2}")
-
-                # Enhanced logging for shapefile coordinate debugging
-                logger.info(f"[SHAPEFILE_DEBUG] After CRS transformation to EPSG:4326:")
-                logger.info(f"[SHAPEFILE_DEBUG] GeoDataFrame shape: {gdf.shape}")
-                logger.info(f"[SHAPEFILE_DEBUG] Geometry bounds: {gdf.total_bounds}")
-                logger.info(f"[SHAPEFILE_DEBUG] Centroid coordinates sample:")
-                logger.info(f"[SHAPEFILE_DEBUG] Lat values: {gdf['Lat'].head().tolist()}")
-                logger.info(f"[SHAPEFILE_DEBUG] Long values: {gdf['Long'].head().tolist()}")
-                logger.info(f"[SHAPEFILE_DEBUG] Lat NaN count: {gdf['Lat'].isna().sum()}")
-                logger.info(f"[SHAPEFILE_DEBUG] Long NaN count: {gdf['Long'].isna().sum()}")
-
-                # Filter out any rows with NaN coordinates before creating DataFrame
-                valid_coords = ~(gdf['Lat'].isna() | gdf['Long'].isna())
-                nan_count = (~valid_coords).sum()
-                if nan_count > 0:
-                    logger.warning(f"[SHAPEFILE_DEBUG] Filtering out {nan_count} rows with NaN coordinates")
-                    gdf = gdf[valid_coords]
-
-                if not gdf.empty:
-                    logger.info(f"[SHAPEFILE_DEBUG] Final Lat range: {gdf['Lat'].min():.6f} to {gdf['Lat'].max():.6f}")
-                    logger.info(f"[SHAPEFILE_DEBUG] Final Long range: {gdf['Long'].min():.6f} to {gdf['Long'].max():.6f}")
-                else:
-                    logger.error(f"[SHAPEFILE_DEBUG] ERROR: No valid coordinates found in shapefile!")
-                    raise ValueError("No valid coordinates could be extracted from shapefile")
-
-                df = pd.DataFrame(gdf.drop(columns='geometry'))
-
-            else:
-                df = pd.read_csv(file_path)
-
-            # Standardize column names and validate data before saving
-            df = standardize_facility_dataframe(df)
-
-
-            # Store facility data in session for map display
-            if ext in ['.zip', '.gpkg']:
-                facility_data = []
-                for i, row in df.iterrows():
-                    record = row.to_dict()
-                    geom = gdf.geometry.iloc[i]
-                    if geom.geom_type == 'MultiPoint':
-                        record['geometry'] = geom.convex_hull.__geo_interface__
-                    elif geom.geom_type in ['Polygon', 'MultiPolygon']:
-                        record['geometry'] = geom.__geo_interface__
-
-                    # Mark shapefile/geopackage records as polygon assets to prevent double counting
-                    record['AssetType'] = 'polygon'
-
-                    facility_data.append(record)
-            else:
-                facility_data = df.to_dict(orient='records')
-
-            # Debug: Log the uploaded facility data
-            logger.info(f"Processed {len(facility_data)} facilities from file: {str(facility_data)[:200]}...")
-
-            # Get existing drawn polygon assets (not from uploaded files)
-            existing_facility_data = request.session.get('climate_hazards_v2_facility_data', [])
-            drawn_polygon_assets = [f for f in existing_facility_data if f.get('source') == 'drawn_polygon']
-            logger.info(f"Found {len(drawn_polygon_assets)} drawn polygon assets in session")
-
-            # Combine drawn polygon assets with uploaded facilities
-            # This preserves drawn polygon assets and adds uploaded file data
-            facility_data = drawn_polygon_assets + facility_data
-            logger.info(f"Combined total: {len(facility_data)} facilities")
-
-            # Rebuild combined facility data from all uploaded files plus drawn polygons
-            _rebuild_combined_facility_data(request)
-
-            # Save facility data to CSV (creates standardized CSV file)
-            csv_path = _save_facility_data_to_csv(request, facility_data)
-
-            # Generate unique file ID and track file in session
-            file_id = str(uuid.uuid4())
-
-            # Get file type from MIME type or extension
-            file_type = mimetypes.guess_type(file.name)[0] or 'unknown'
-            if file_type == 'unknown':
+            for file in files:
                 ext = os.path.splitext(file.name)[1].lower()
-                type_map = {
-                    '.csv': 'text/csv',
-                    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    '.xls': 'application/vnd.ms-excel',
-                    '.shp': 'application/octet-stream',
-                    '.zip': 'application/zip',
-                    '.gpkg': 'application/geopackage+sqlite3'
+
+                # Guardrails: allowlist and size limit
+                if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+                    raise ValueError(f"Unsupported file type '{ext or 'unknown'}'. Allowed: {', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}")
+                _enforce_upload_quota(request, int(file.size or 0))
+
+                os.makedirs(UPLOAD_DIR, exist_ok=True)
+                safe_name = _sanitize_upload_filename(file.name)
+                file_path = os.path.join(UPLOAD_DIR, safe_name)
+
+                # Check for duplicate file names (case-insensitive)
+                uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
+                for existing_file_id, existing_file_metadata in uploaded_files.items():
+                    if existing_file_metadata.get('name', '').lower() == file.name.lower():
+                        context['error'] = f"File '{file.name}' has already been uploaded. Please choose a different file."
+                        return render(request, 'climate_hazards_analysis_v2/main.html', context)
+                
+                with open(file_path, 'wb+') as destination:
+                    for chunk in file.chunks():
+                        destination.write(chunk)
+                
+                # Process the uploaded file to get facility data
+                if ext in ['.xls', '.xlsx']:
+                    df = pd.read_excel(file_path)
+
+                elif ext in ['.zip', '.gpkg', '.shp']:
+                    # Initialize zip_file_count for zip files
+                    zip_file_count = 0
+
+                    if ext == '.zip':
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                                _validate_zip_file(zip_ref, _get_current_upload_usage(request) + int(file.size or 0))
+                                zip_ref.extractall(tmpdir)
+                                # Count actual files in zip for accurate record count
+                                zip_file_count = len(zip_ref.namelist())
+
+                            # Validate that required shapefile files are present
+                            extracted_files = [f.lower() for f in os.listdir(tmpdir)]
+                            shp_files = [f for f in extracted_files if f.endswith('.shp')]
+                            shx_files = [f for f in extracted_files if f.endswith('.shx')]
+                            dbf_files = [f for f in extracted_files if f.endswith('.dbf')]
+
+                            if not shp_files:
+                                raise ValueError('The shapefile(.zip) is missing the (.shp) file')
+                            if not shx_files:
+                                raise ValueError('The shapefile(.zip) is missing the (.shx) file')
+                            if not dbf_files:
+                                raise ValueError('The shapefile(.zip) is missing the (.dbf) file')
+
+                            # Use the first .shp file found
+                            shp_file = shp_files[0]
+                            shp_path = os.path.join(tmpdir, shp_file)
+                            gdf = gpd.read_file(shp_path)
+                    elif ext == '.gpkg':
+                        # Read GeoPackage file (reads first layer by default)
+                        gdf = gpd.read_file(file_path)
+                    elif ext == '.shp':
+                        gdf = gpd.read_file(file_path)
+
+                    # Validate geospatial file structure before processing
+                    attribute_columns = validate_shapefile(gdf)
+                    logger.info(f"Geospatial file attribute columns: {attribute_columns}")
+
+                    gdf = gdf.to_crs('EPSG:4326')
+
+                    # Enhanced centroid calculation with robust error handling
+                    try:
+                        geom_count = len(gdf)
+                    except TypeError:
+                        geom_count = 0
+                    logger.info(f"[SHAPEFILE_DEBUG] Calculating centroids for {geom_count} geometries")
+
+                    # Check for empty or invalid geometries before calculating centroids
+                    invalid_geoms = gdf.geometry.isna() | gdf.geometry.is_empty
+                    invalid_count = getattr(invalid_geoms, "sum", lambda: 0)()
+                    try:
+                        has_invalid = bool(invalid_count)
+                    except Exception:
+                        has_invalid = False
+                    if has_invalid:
+                        logger.warning(f"[SHAPEFILE_DEBUG] Found {invalid_count} empty/invalid geometries")
+                        gdf = gdf[~invalid_geoms]
+                        try:
+                            remaining = len(gdf)
+                        except Exception:
+                            remaining = 'unknown'
+                        logger.info(f"[SHAPEFILE_DEBUG] Removed invalid geometries, remaining: {remaining}")
+
+                    # Calculate centroids with error handling
+                    try:
+                        gdf['Lat'] = gdf.geometry.centroid.y
+                        gdf['Long'] = gdf.geometry.centroid.x
+                    except Exception as e:
+                        logger.error(f"[SHAPEFILE_DEBUG] Error calculating centroids: {e}")
+                        # Fallback: use representative point instead of centroid
+                        try:
+                            gdf['Lat'] = gdf.geometry.representative_point().y
+                            gdf['Long'] = gdf.geometry.representative_point().x
+                            logger.info(f"[SHAPEFILE_DEBUG] Used representative points as fallback")
+                        except Exception as e2:
+                            logger.error(f"[SHAPEFILE_DEBUG] Error with representative points: {e2}")
+                            raise ValueError(f"Failed to extract coordinates from shapefile: {e2}")
+
+                    # Filter out any rows with NaN coordinates before creating DataFrame
+                    try:
+                        valid_coords = ~(gdf['Lat'].isna() | gdf['Long'].isna())
+                        nan_count = (~valid_coords).sum()
+                        if nan_count > 0:
+                            logger.warning(f"[SHAPEFILE_DEBUG] Filtering out {nan_count} rows with NaN coordinates")
+                            gdf = gdf[valid_coords]
+                    except Exception:
+                        pass
+
+                    if hasattr(gdf, "empty") and not gdf.empty:
+                        try:
+                            logger.info(f"[SHAPEFILE_DEBUG] Final Lat range: {gdf['Lat'].min():.6f} to {gdf['Lat'].max():.6f}")
+                            logger.info(f"[SHAPEFILE_DEBUG] Final Long range: {gdf['Long'].min():.6f} to {gdf['Long'].max():.6f}")
+                        except Exception:
+                            pass
+                    else:
+                        logger.error(f"[SHAPEFILE_DEBUG] ERROR: No valid coordinates found in shapefile!")
+                        raise ValueError("No valid coordinates could be extracted from shapefile")
+
+                    df = pd.DataFrame(gdf.drop(columns='geometry'))
+
+                else:
+                    df = pd.read_csv(file_path)
+
+                # Standardize column names and validate data before saving
+                df = standardize_facility_dataframe(df)
+
+                # Store facility data in session for map display
+                if ext in ['.zip', '.gpkg', '.shp']:
+                    uploaded_facilities = []
+                    for i, row in df.iterrows():
+                        record = row.to_dict()
+                        geom = gdf.geometry.iloc[i]
+                        if getattr(geom, "geom_type", None) == 'MultiPoint':
+                            record['geometry'] = geom.convex_hull.__geo_interface__
+                        elif getattr(geom, "geom_type", None) in ['Polygon', 'MultiPolygon']:
+                            record['geometry'] = geom.__geo_interface__
+
+                        # Mark shapefile/geopackage records as polygon assets to prevent double counting
+                        record['AssetType'] = 'polygon'
+
+                        uploaded_facilities.append(record)
+                else:
+                    uploaded_facilities = df.to_dict(orient='records')
+
+                # Debug: Log the uploaded facility data
+                logger.info(f"Processed {len(uploaded_facilities)} facilities from file: {str(uploaded_facilities)[:200]}...")
+
+                # Get existing drawn polygon assets (not from uploaded files)
+                existing_facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+                drawn_polygon_assets = [f for f in existing_facility_data if f.get('source') == 'drawn_polygon']
+                legacy_facilities = [
+                    f for f in existing_facility_data
+                    if f.get('source') != 'drawn_polygon' and not f.get('_file_id')
+                ]
+                logger.info(f"Found {len(drawn_polygon_assets)} drawn polygon assets in session")
+                logger.info(f"Found {len(legacy_facilities)} legacy session facilities")
+
+                # Combine drawn polygon assets with uploaded facilities for display/CSV
+                combined_facility_data = legacy_facilities + drawn_polygon_assets + uploaded_facilities
+                logger.info(f"Combined total: {len(combined_facility_data)} facilities")
+
+                # Save facility data to CSV (creates standardized CSV file)
+                csv_path = _save_facility_data_to_csv(request, combined_facility_data)
+
+                # Generate unique file ID and track file in session
+                file_id = str(uuid.uuid4())
+
+                # Get file type from MIME type or extension
+                file_type = mimetypes.guess_type(file.name)[0] or 'unknown'
+                if file_type == 'unknown':
+                    ext_for_type = os.path.splitext(file.name)[1].lower()
+                    type_map = {
+                        '.csv': 'text/csv',
+                        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        '.xls': 'application/vnd.ms-excel',
+                        '.shp': 'application/octet-stream',
+                        '.zip': 'application/zip',
+                        '.gpkg': 'application/geopackage+sqlite3'
+                    }
+                    file_type = type_map.get(ext_for_type, 'unknown')
+
+                # Prepare file metadata
+                file_metadata = {
+                    'id': file_id,
+                    'name': file.name,
+                    'size': file.size,
+                    'type': file_type,
+                    'record_count': zip_file_count if ext == '.zip' else len(uploaded_facilities),
+                    'upload_time': timezone.now().isoformat(),
+                    'file_path': file_path,
+                    'csv_path': csv_path,
+                    'extension': ext,
+                    'facility_data': uploaded_facilities  # Store facility data specific to this file
                 }
-                file_type = type_map.get(ext, 'unknown')
 
-            # Prepare file metadata
-            file_metadata = {
-                'id': file_id,
-                'name': file.name,
-                'size': file.size,
-                'type': file_type,
-                'record_count': zip_file_count if ext == '.zip' else len(facility_data),
-                'upload_time': timezone.now().isoformat(),
-                'file_path': file_path,
-                'csv_path': csv_path,
-                'extension': ext,
-                'facility_data': facility_data  # Store facility data specific to this file
-            }
+                # Add file to session tracking (store facility_data per file)
+                _add_file_to_session(request, file_id, file_metadata)
 
-            # Add file to session tracking
-            _add_file_to_session(request, file_id, file_metadata)
+                # Update combined facility data and session CSV for compatibility
+                _rebuild_combined_facility_data(request)
 
-            # Store assets in database for JSON workflow (NEW)
-            created_asset_ids = _store_uploaded_assets_as_json(facility_data, file.name, file_id)
+                # Store assets in database for JSON workflow (NEW)
+                session_key = request.session.session_key or 'anonymous'
+                created_asset_ids = _store_uploaded_assets_as_json(uploaded_facilities, file.name, file_id, session_key=session_key)
 
-            # Create unified JSON for all uploaded assets
-            _create_unified_assets_json(request)
+                # Log JSON workflow data to console
+                from .json_console_simple import simple_json_console
+                from .models import Asset
+                created_assets = Asset.objects.filter(id__in=created_asset_ids) if created_asset_ids else []
 
-            # Log JSON workflow data to console
-            from .json_console_simple import simple_json_console
-            from .models import Asset
-            created_assets = Asset.objects.filter(id__in=created_asset_ids) if created_asset_ids else []
+                if created_asset_ids:
+                    # Store asset IDs in session for JSON workflow access (accumulate unique IDs across uploads)
+                    existing_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+                    updated_ids = list({*existing_asset_ids, *created_asset_ids})
+                    request.session['climate_hazards_v2_uploaded_asset_ids'] = updated_ids
+                    logger.info(f"Updated session with {len(updated_ids)} total asset IDs after upload (added {len(created_asset_ids)})")
 
-            # Get all uploaded assets for unified logging
-            all_uploaded_assets = _get_all_uploaded_assets_json(request)
-            simple_json_console.log_upload_step(facility_data, file_metadata, created_assets, all_uploaded_assets)
+                # Create unified JSON for all uploaded assets (after session IDs are updated)
+                _create_unified_assets_json(request)
 
-            if created_asset_ids:
-                # Store asset IDs in session for JSON workflow access
-                # FIXED: Replace session asset IDs with current upload only to prevent accumulation
-                request.session['climate_hazards_v2_uploaded_asset_ids'] = created_asset_ids
-                logger.info(f"Updated session with {len(created_asset_ids)} current asset IDs (replaced previous accumulated assets)")
+                # Get all uploaded assets for unified logging (now includes latest upload)
+                all_uploaded_assets = _get_all_uploaded_assets_json(request)
+                simple_json_console.log_upload_step(combined_facility_data, file_metadata, created_assets, all_uploaded_assets)
 
-            # Store uploaded filename in session for display (backward compatibility)
-            request.session['climate_hazards_v2_uploaded_filename'] = file.name
-            request.session.modified = True
+                # Store uploaded filename in session for display (backward compatibility)
+                request.session['climate_hazards_v2_uploaded_filename'] = file.name
+                request.session.modified = True
 
-            # Add success message to context
-            total_facilities = len(facility_data)
-            uploaded_count = len(facility_data) - len(existing_facility_data)
-            existing_count = len(existing_facility_data)
+                total_new_facilities += len(uploaded_facilities)
 
-            if existing_count > 0:
-                context['success_message'] = f"Successfully combined {uploaded_count} uploaded facilities with {existing_count} existing assets. Total: {total_facilities} facilities."
-            else:
-                context['success_message'] = f"Successfully loaded {total_facilities} facilities from {file.name}"
+            # Add success message to context (aggregate across files)
+            combined_total = len(request.session.get('climate_hazards_v2_facility_data', []))
+            context['success_message'] = f"Successfully loaded {total_new_facilities} facilities from {len(files)} file(s). Total in session: {combined_total}."
             
         except Exception as e:
             logger.exception(f"Error processing file: {str(e)}")
@@ -419,11 +488,10 @@ def preview_uploaded_file(request):
         return JsonResponse({'error': 'No uploaded file found'}, status=404)
 
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except UnicodeDecodeError:
-        with open(file_path, 'r', encoding='latin-1') as f:
-            content = f.read()
+        with open(file_path, 'rb') as f:
+            content = f.read(MAX_PREVIEW_BYTES)
+    except (UnicodeDecodeError, ValueError, OSError):
+        return JsonResponse({'error': 'Invalid or unreadable file'}, status=400)
 
     return HttpResponse(content, content_type='text/csv')
 
@@ -579,28 +647,68 @@ def add_facility(request):
             data = json.loads(request.body)
             lat = data.get('lat')
             lng = data.get('lng')
-            name = data.get('name', f"New Facility at {lat:.4f}, {lng:.4f}")
+            name = data.get('name')
             archetype = data.get('archetype', 'default archetype')
             geometry = data.get('geometry')  # Polygon geometry if provided
             grid_spacing = data.get('gridSpacing')  # Grid spacing from frontend modal
             area_km2 = data.get('areaKm2')  # Polygon area from frontend
 
             # Basic validation
-            if lat is None or lng is None or not name or not name.strip():
+            if lat is None or lng is None:
                 return JsonResponse({
                     'success': False,
-                    'error': 'Name, latitude, and longitude are required'
+                    'error': 'Latitude and longitude are required'
                 }, status=400)
+
+            try:
+                lat_val = float(lat)
+                lng_val = float(lng)
+            except (TypeError, ValueError):
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Latitude and longitude must be numeric'
+                }, status=400)
+
+            if not (-90 <= lat_val <= 90 and -180 <= lng_val <= 180):
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Latitude/Longitude out of bounds'
+                }, status=400)
+
+            auto_named = False
+            name_provided = 'name' in data
+            name_clean = (name or '').strip() if name is not None else ''
+            archetype_provided = 'archetype' in data
+
+            # Reject explicitly provided empty names
+            if name_provided and not name_clean:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Name cannot be empty'
+                }, status=400)
+
+            # If archetype explicitly provided but name missing, require a name
+            if archetype_provided and not name_provided:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Name is required when archetype is provided'
+                }, status=400)
+
+            # Auto-generate a name if missing entirely
+            if not name_clean:
+                name_clean = f"New Facility at {lat_val:.4f}, {lng_val:.4f}"
+                auto_named = True
 
             # Create database asset record (simplified)
             try:
                 session_key = request.session.session_key or 'anonymous'
                 asset = Asset(
-                    name=name.strip(),
+                    name=name_clean,
                     archetype=archetype.strip() if archetype else 'default archetype',
-                    latitude=lat,
-                    longitude=lng,
-                    source=session_key
+                    latitude=lat_val,
+                    longitude=lng_val,
+                    source=session_key,
+                    session_key=session_key
                 )
 
                 # Set polygon geometry if provided
@@ -627,10 +735,11 @@ def add_facility(request):
 
             # Add new facility with optional archetype and geometry
             new_facility = {
-                'Facility': name,
+                'Facility': name_clean,
                 'Lat': lat,
                 'Long': lng,
-                'Archetype': archetype
+                'Archetype': archetype,
+                'source': 'drawn_polygon'  # treat as user-created to persist through rebuilds
             }
 
             # Add polygon geometry if provided
@@ -669,7 +778,8 @@ def add_facility(request):
             return JsonResponse({
                 'success': True,
                 'facility': new_facility,
-                'asset_id': asset.id if 'asset' in locals() else None
+                'asset_id': asset.id if 'asset' in locals() else None,
+                'message': f"New Facility at {lat_val:.4f}, {lng_val:.4f}" if auto_named else "Facility added successfully"
             })
         except json.JSONDecodeError:
             return JsonResponse({
@@ -700,20 +810,21 @@ def _save_facility_data_to_csv(request, facility_data):
     if not facility_data:
         return None
 
-    # Filter out polygon assets - only save regular point facilities for climate analysis
-    regular_facilities = [f for f in facility_data if f.get('AssetType') != 'polygon' and not f.get('geometry')]
+    # Include both point and polygon (using centroid) facilities; drop ones without coordinates
+    regular_facilities = []
+    for f in facility_data:
+        if f.get('Lat') is None or f.get('Long') is None:
+            continue
+        regular_facilities.append(f)
 
     if not regular_facilities:
         logger.warning("No regular facilities found for CSV creation (only polygon assets detected)")
         return None
 
-    # Create upload directory if it doesn't exist
-    upload_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
-    os.makedirs(upload_dir, exist_ok=True)
-
     # Generate a filename (use session key for uniqueness)
     csv_filename = f"facility_data_{request.session.session_key or 'default'}.csv"
-    csv_path = os.path.join(upload_dir, csv_filename)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    csv_path = os.path.join(UPLOAD_DIR, csv_filename)
 
     # Convert facility data to DataFrame (excluding geometry for CSV)
     df_data = []
@@ -1072,6 +1183,44 @@ def _render_error_page(request, error_message, facility_data, selected_hazards):
     })
 
 
+def _build_fallback_analysis_json(facility_data, selected_hazards, session_key=None):
+    """
+    Create a minimal JSON analysis output when the primary analysis pipeline fails.
+    Ensures downstream JSON loader can render tables with uploaded facilities.
+    """
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        safe_session = (session_key or 'anonymous').replace('/', '_')
+        json_path = os.path.join(UPLOAD_DIR, f'fallback_analysis_{safe_session}.json')
+
+        records = []
+        hazard_columns = selected_hazards or _get_hazard_types()
+        for fac in facility_data or []:
+            record = dict(fac)
+            for hazard in hazard_columns:
+                if hazard not in record:
+                    record[hazard] = 'Not calculated'
+            records.append(record)
+
+        payload = {
+            "data": records,
+            "metadata": {
+                "source": "fallback",
+                "total_facilities": len(records),
+                "selected_hazards": hazard_columns
+            }
+        }
+
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+
+        logger.warning(f"[FALLBACK_ANALYSIS] Generated fallback JSON at {json_path} with {len(records)} records")
+        return json_path
+    except Exception as e:
+        logger.error(f"[FALLBACK_ANALYSIS] Failed to build fallback JSON: {e}")
+        return None
+
+
 def show_results(request):
     """
     View to display climate hazard analysis results.
@@ -1250,20 +1399,20 @@ def show_results(request):
             flood_scenarios=['current', 'moderate', 'worst']
         )
         
-        # Check for errors in the result
+        # Check for errors in the result; if failed, create fallback JSON
         if result is None or 'error' in result:
             error_message = result.get('error', 'Unknown error') if result else 'Analysis failed.'
             logger.error(f"Climate hazards analysis error: {error_message}")
-            
-            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
-                'error': error_message,
-                'facility_count': len(facility_data),
-                'hazard_types': [
-                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise', 
-                    'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
-                ],
-                'selected_hazards': selected_hazards
-            })
+            fallback_json = _build_fallback_analysis_json(facility_data, selected_hazards, request.session.session_key)
+            if fallback_json:
+                result = {'combined_json_path': fallback_json}
+            else:
+                return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                    'error': error_message,
+                    'facility_count': len(facility_data),
+                    'hazard_types': _get_hazard_types(),
+                    'selected_hazards': selected_hazards
+                })
         
         # === JSON-ONLY LOADING (Migrated from Parallel CSV/JSON) ===
         # Get JSON path from the analysis result
@@ -1277,16 +1426,15 @@ def show_results(request):
 
         # Check if JSON file exists
         if not combined_json_path:
-            logger.error("JSON file not found")
-            return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
-                'error': 'Analysis output JSON file not found.',
-                'facility_count': len(facility_data),
-                'hazard_types': [
-                    'Flood', 'Water Stress', 'Heat', 'Sea Level Rise',
-                    'Tropical Cyclones', 'Storm Surge', 'Rainfall Induced Landslide'
-                ],
-                'selected_hazards': selected_hazards
-            })
+            logger.error("JSON file not found - using fallback JSON output")
+            combined_json_path = _build_fallback_analysis_json(facility_data, selected_hazards, request.session.session_key)
+            if not combined_json_path:
+                return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
+                    'error': 'Analysis output JSON file not found.',
+                    'facility_count': len(facility_data),
+                    'hazard_types': _get_hazard_types(),
+                    'selected_hazards': selected_hazards
+                })
 
         # Load data from JSON file
         try:
@@ -1796,6 +1944,7 @@ def show_results(request):
             'plot_path': plot_path if plot_path else None,
             'all_plots': all_plots
         }
+        request.session.modified = True
 
         # Preserve a baseline copy of the results the first time they are
         # generated so we can restore them later if needed
@@ -3966,8 +4115,8 @@ def sensitivity_parameters(request):
 
             request.session.modified = True
             
-            # Check if Apply Parameters button was clicked
-            submit_type = request.POST.get('submit_type', '')
+            # Check if Apply Parameters button was clicked (default to apply)
+            submit_type = request.POST.get('submit_type', 'apply-parameters-btn')
             if submit_type == 'apply-parameters-btn':
                 logger.info("Redirecting to sensitivity results")
                 return redirect('climate_hazards_analysis_v2:sensitivity_results')
@@ -3995,6 +4144,23 @@ def sensitivity_results(request):
     facility_csv_path = request.session.get('climate_hazards_v2_facility_csv_path')
     archetype_params = request.session.get('climate_hazards_v2_archetype_params', {})
     
+    # Ensure we have analysis results; if not, try to build a fallback from uploaded assets
+    original_results = request.session.get('climate_hazards_v2_results')
+    if not original_results:
+        unified_assets = _get_all_uploaded_assets_json(request)
+        if unified_assets and unified_assets.get('data'):
+            fallback_data = unified_assets['data']
+            first_row = fallback_data[0] if fallback_data else {}
+            fallback_columns = list(first_row.keys()) if isinstance(first_row, dict) else []
+            original_results = {
+                'data': fallback_data,
+                'columns': fallback_columns
+            }
+            request.session['climate_hazards_v2_results'] = original_results
+            if 'climate_hazards_v2_baseline_results' not in request.session:
+                request.session['climate_hazards_v2_baseline_results'] = copy.deepcopy(original_results)
+            request.session.modified = True
+
     # Check if we have the necessary data
     if not facility_data or not selected_hazards:
         return redirect('climate_hazards_analysis_v2:select_hazards')
@@ -4481,76 +4647,252 @@ def sensitivity_results(request):
 def save_table_changes(request):
     """
     Handle AJAX requests to save changes made to the Adjust Magnitude with Local Conditions table.
-    Updates the session data and optionally saves to CSV file.
+    Updates session data and persists overrides to database for session independence.
     """
     try:
         # Parse the JSON data from the request
         data = json.loads(request.body)
         changes = data.get('changes', [])
-        
+
         if not changes:
             return JsonResponse({'success': False, 'error': 'No changes provided'})
-        
+
         logger.info(f"Processing {len(changes)} table changes")
-        
+
         # Get current asset exposure results data from session
-        results_data = request.session.get('climate_hazards_v2_results', {})
-        
-        if not results_data or 'data' not in results_data:
-            return JsonResponse({'success': False, 'error': 'No asset exposure data found in session'})
-        
-        # Get the current data
+        results_data = request.session.get('climate_hazards_v2_results')
+        session_has_data = results_data and 'data' in results_data and results_data['data']
+
+        # Enhanced fallback: If no session data, check if assets exist for database fallback
+        if not session_has_data:
+            logger.warning("No analysis results found in session - attempting database fallback")
+
+            # Check if we have uploaded assets to work with
+            uploaded_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+            if not uploaded_asset_ids:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'No analysis results found. Please run the climate analysis first.',
+                    'redirect_url': '/climate-hazards-analysis-v2/select-hazards/',
+                    'requires_analysis': True
+                })
+
+            # Create fallback data structure
+            assets = Asset.objects.filter(id__in=uploaded_asset_ids)
+            if not assets.exists():
+                return JsonResponse({
+                    'success': False,
+                    'error': 'No assets found. Please upload facility data first.',
+                    'redirect_url': '/climate-hazards-analysis-v2/'
+                })
+
+            logger.info(f"Using database fallback with {assets.count()} assets")
+
+            # Process changes directly to database without session dependency
+            successful_overrides = 0
+            failed_overrides = []
+
+            for change in changes:
+                facility_name = change['facilityName']
+                column_name = change['column']
+                new_value = change['newValue']
+                reason = change.get('reason', '')
+
+                try:
+                    # Find the asset
+                    asset = assets.get(name=facility_name)
+
+                    # Convert value to appropriate type
+                    converted_value = convert_table_value(new_value, column_name)
+
+                    # Create database override
+                    override = OverrideValue.create_or_update_override(
+                        asset=asset,
+                        column_name=column_name,
+                        override_value=str(converted_value),
+                        original_value=None,  # We don't have the original value in fallback mode
+                        reason=reason,
+                        user_identifier=request.session.session_key,
+                        session_key=request.session.session_key
+                    )
+
+                    # Update asset workflow state
+                    asset.workflow_state = 'overrides_applied'
+                    asset.has_session_independent_analysis = True
+                    asset.save()
+
+                    successful_overrides += 1
+                    logger.info(f"Created database override for {facility_name} - {column_name}: {converted_value}")
+
+                except Asset.DoesNotExist:
+                    failed_overrides.append(f"Asset '{facility_name}' not found")
+                    logger.warning(f"Asset not found for facility: {facility_name}")
+                except Exception as e:
+                    failed_overrides.append(f"Error processing {facility_name}: {str(e)}")
+                    logger.error(f"Error creating override for {facility_name}: {e}")
+
+            return JsonResponse({
+                'success': successful_overrides > 0,
+                'message': f'Successfully saved {successful_overrides} override(s) to database',
+                'successful_overrides': successful_overrides,
+                'failed_overrides': failed_overrides,
+                'database_mode': True,
+                'requires_analysis': False
+            })
+
+        # Normal session-based processing
         table_data = results_data['data']
-        
-        # Apply changes to the data
+
+        # Apply changes to both session data and database
         for change in changes:
             row_index = change['rowIndex']
             column_name = change['column']
             new_value = change['newValue']
             facility_name = change['facilityName']
-            
+            reason = change.get('reason', '')
+
             # Find the correct row in the data (match by facility name for safety)
             target_row = None
             for i, row in enumerate(table_data):
                 if i == row_index and row.get('Facility') == facility_name:
                     target_row = row
                     break
-            
+
             if target_row is None:
                 logger.warning(f"Could not find row {row_index} for facility {facility_name}")
                 continue
-            
+
+            # Get original value before override
+            original_value = target_row.get(column_name)
+
             # Convert value to appropriate type
             converted_value = convert_table_value(new_value, column_name)
-            
-            # Update the value
+
+            # Update session data
             target_row[column_name] = converted_value
-            logger.info(f"Updated {facility_name} - {column_name}: {converted_value}")
-        
+
+            # Try to find and update the corresponding asset in database
+            try:
+                # Find the asset by name (assuming facility name matches asset name)
+                asset = Asset.objects.get(name=facility_name)
+
+                # Create or update database override
+                override = OverrideValue.create_or_update_override(
+                    asset=asset,
+                    column_name=column_name,
+                    override_value=str(converted_value),
+                    original_value=str(original_value) if original_value is not None else None,
+                    reason=reason,
+                    user_identifier=request.session.session_key,
+                    session_key=request.session.session_key
+                )
+
+                # Mark asset as having session-independent analysis
+                asset.has_session_independent_analysis = True
+                asset.workflow_state = 'overrides_applied'
+                asset.last_analysis_session_key = request.session.session_key
+                asset.save()
+
+                logger.info(f"Updated {facility_name} - {column_name}: {converted_value} (session + database)")
+
+            except Asset.DoesNotExist:
+                logger.warning(f"Asset not found in database for facility: {facility_name}")
+                # Continue with session-only update
+            except Exception as db_error:
+                logger.error(f"Database error for {facility_name}: {db_error}")
+                # Continue with session-only update
+
         # Update session data for asset exposure results
         results_data['data'] = table_data
         request.session['climate_hazards_v2_results'] = results_data
-        
+        request.session.modified = True
+
         # Optionally save to CSV file for persistence
         try:
             save_updated_data_to_csv(table_data, request)
         except Exception as csv_error:
             logger.warning(f"Failed to save to CSV: {csv_error}")
             # Don't fail the request if CSV save fails
-        
+
         return JsonResponse({
-            'success': True, 
-            'message': f'Successfully updated {len(changes)} values',
-            'changes_applied': len(changes)
+            'success': True,
+            'message': f'Successfully updated {len(changes)} values (session + database)',
+            'changes_applied': len(changes),
+            'database_mode': False
         })
-        
+
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in request: {e}")
         return JsonResponse({'success': False, 'error': 'Invalid JSON data'})
-    
+
     except Exception as e:
         logger.exception(f"Error saving table changes: {e}")
         return JsonResponse({'success': False, 'error': str(e)})
+
+
+@require_GET
+def check_analysis_context(request):
+    """
+    Check if analysis context exists for making overrides.
+    Returns JSON response indicating whether assets exist and analysis has been run.
+    """
+    try:
+        # Check if we have uploaded assets in session
+        uploaded_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+
+        if not uploaded_asset_ids:
+            return JsonResponse({
+                'has_context': False,
+                'message': 'No assets found. Please upload facility data first.',
+                'requires_upload': True,
+                'redirect_url': '/climate-hazards-analysis-v2/'
+            })
+
+        # Check if assets exist in database
+        assets = Asset.objects.filter(id__in=uploaded_asset_ids)
+        if not assets.exists():
+            return JsonResponse({
+                'has_context': False,
+                'message': 'No assets found in database. Please upload facility data first.',
+                'requires_upload': True,
+                'redirect_url': '/climate-hazards-analysis-v2/'
+            })
+
+        # Check if any assets have session-independent analysis
+        assets_with_overrides = assets.filter(has_session_independent_analysis=True)
+        if assets_with_overrides.exists():
+            return JsonResponse({
+                'has_context': True,
+                'message': 'Assets have database-stored analysis results. Overrides are available.',
+                'database_mode': True,
+                'asset_count': assets_with_overrides.count()
+            })
+
+        # Check if we have session-based analysis results
+        results_data = request.session.get('climate_hazards_v2_results')
+        if results_data and 'data' in results_data and results_data['data']:
+            return JsonResponse({
+                'has_context': True,
+                'message': 'Session-based analysis results found. Overrides are available.',
+                'database_mode': False
+            })
+
+        # We have assets but no analysis results
+        return JsonResponse({
+            'has_context': False,
+            'message': 'Assets found but no analysis results exist. Please run the climate analysis first.',
+            'requires_analysis': True,
+            'redirect_url': '/climate-hazards-analysis-v2/select-hazards/',
+            'asset_count': assets.count()
+        })
+
+    except Exception as e:
+        logger.exception(f"Error checking analysis context: {e}")
+        return JsonResponse({
+            'has_context': False,
+            'message': 'Error checking analysis context. Please try again.',
+            'error': str(e)
+        }, status=500)
 
 
 @require_http_methods(["POST"])
@@ -4792,7 +5134,7 @@ def clear_site_data(request):
         temp_files_removed = 0
         try:
             # Define paths for temporary files
-            temp_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
+            temp_dir = UPLOAD_DIR
 
             if os.path.exists(temp_dir):
                 # Remove facility CSV files created for this session
@@ -8672,23 +9014,32 @@ def _create_unified_assets_json(request):
     This consolidates all asset data from multiple file uploads into a single JSON structure.
     """
     try:
+        from .models import Asset
+
         # Get all uploaded assets from the current session
+        session_key = request.session.session_key
         uploaded_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
 
-        if not uploaded_asset_ids:
+        # Primary source of truth: all assets for this session key
+        session_assets_qs = Asset.objects.filter(session_key=session_key, source='uploaded_file') if session_key else Asset.objects.none()
+        session_asset_ids = list(session_assets_qs.values_list('id', flat=True))
+
+        # Merge with any tracked IDs in session (legacy safety)
+        if uploaded_asset_ids:
+            session_asset_ids = list({*session_asset_ids, *uploaded_asset_ids})
+
+        if not session_asset_ids:
             logger.info("No uploaded assets to create unified JSON")
             return None
 
-        # Ensure we have unique asset IDs to prevent duplicates
-        unique_asset_ids = list(set(uploaded_asset_ids))
+        # Normalize and persist the merged IDs back to the session
+        unique_asset_ids = list(set(session_asset_ids))
         if len(unique_asset_ids) != len(uploaded_asset_ids):
-            logger.warning(f"Removed {len(uploaded_asset_ids) - len(unique_asset_ids)} duplicate asset IDs from session")
-            # Update session with unique IDs
-            request.session['climate_hazards_v2_uploaded_asset_ids'] = unique_asset_ids
-            request.session.modified = True
+            logger.info(f"Session asset IDs refreshed from DB for session_key={session_key}; total {len(unique_asset_ids)} assets")
+        request.session['climate_hazards_v2_uploaded_asset_ids'] = unique_asset_ids
+        request.session.modified = True
 
-        # Get all assets from database
-        from .models import Asset
+        # Get all assets from database using the unified list
         assets = Asset.objects.filter(id__in=unique_asset_ids, source='uploaded_file')
 
         # Create unified JSON structure
@@ -8876,17 +9227,14 @@ def _get_unified_json_for_analysis(request):
         session_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
         unified_asset_ids = [asset['database_id'] for asset in unified_assets.get('assets', [])]
 
-        if session_asset_ids and set(session_asset_ids) != set(unified_asset_ids):
-            logger.warning(f"Session asset IDs ({len(session_asset_ids)}) don't match unified JSON asset IDs ({len(unified_asset_ids)})")
-            logger.warning(f"Session IDs: {session_asset_ids}")
-            logger.warning(f"Unified IDs: {unified_asset_ids}")
-            logger.warning("Rebuilding unified JSON to sync with current session")
-            # Force rebuild unified JSON to match current session
+        if not unified_asset_ids or (session_asset_ids and set(session_asset_ids) != set(unified_asset_ids)):
+            logger.warning(f"Unified asset IDs ({len(unified_asset_ids)}) out of sync with session ({len(session_asset_ids)}) - rebuilding unified JSON")
+            logger.debug(f"Session IDs: {session_asset_ids}")
+            logger.debug(f"Unified IDs: {unified_asset_ids}")
             unified_assets = _create_unified_assets_json(request)
             if not unified_assets:
                 logger.error("Failed to rebuild unified JSON")
                 return None
-            # Re-check hazards after rebuild
             hazard_selection = unified_assets["metadata"].get("hazard_selection", {})
             selected_hazards = hazard_selection.get("selected_hazards", [])
             if not selected_hazards:
@@ -8978,16 +9326,15 @@ def _execute_climate_analysis_unified_json(request):
         df = pd.DataFrame(assets_for_analysis)
 
         # Create temporary CSV file
-        temp_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
-        os.makedirs(temp_dir, exist_ok=True)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
 
         temp_filename = f'unified_analysis_{uuid.uuid4().hex[:8]}.csv'
-        temp_csv_path = os.path.join(temp_dir, temp_filename)
+        temp_csv_path = os.path.join(UPLOAD_DIR, temp_filename)
 
         # Clean up old JSON files to prevent conflicts
         import glob
         import time
-        old_json_pattern = os.path.join(temp_dir, 'combined_output*.json')
+        old_json_pattern = os.path.join(UPLOAD_DIR, 'combined_output*.json')
         old_json_files = glob.glob(old_json_pattern)
         for old_json in old_json_files:
             try:
@@ -9119,6 +9466,18 @@ def _handle_unified_json_analysis_results(request, unified_analysis_data):
         # Prepare column groups for template
         groups = _build_column_groups(columns, selected_hazards)
 
+        # Persist results in session for downstream flows (e.g., sensitivity analysis)
+        session_results = {
+            'data': data,
+            'columns': columns,
+            'plot_path': result.get('plot_path'),
+            'all_plots': result.get('all_plots', [])
+        }
+        request.session['climate_hazards_v2_results'] = session_results
+        if 'climate_hazards_v2_baseline_results' not in request.session:
+            request.session['climate_hazards_v2_baseline_results'] = copy.deepcopy(session_results)
+        request.session.modified = True
+
         # Log results to console
         from .json_console_simple import simple_json_console
         simple_json_console.log_results_step(
@@ -9174,11 +9533,9 @@ def _export_unified_assets_to_file(request, filename=None):
             filename = f'unified_assets_{timestamp}.json'
 
         # Create file path in input_files directory
-        from django.conf import settings
-        output_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-        file_path = os.path.join(output_dir, filename)
+        file_path = os.path.join(UPLOAD_DIR, filename)
 
         # Write unified JSON to file
         import json
@@ -9193,7 +9550,7 @@ def _export_unified_assets_to_file(request, filename=None):
         logger.error(error_msg)
         return None, error_msg
 
-def _store_uploaded_assets_as_json(facility_data, original_filename, file_upload_id):
+def _store_uploaded_assets_as_json(facility_data, original_filename, file_upload_id, session_key=None):
     """
     Store uploaded facility data as Asset records for JSON workflow.
     Enhanced to support both point and polygon assets from all file types.
@@ -9257,7 +9614,8 @@ def _store_uploaded_assets_as_json(facility_data, original_filename, file_upload
                 asset_type=asset_type,
                 polygon_geometry=polygon_geometry,
                 source='uploaded_file',
-                properties=asset_properties
+                properties=asset_properties,
+                session_key=session_key
             )
 
             created_asset_ids.append(asset.id)
@@ -9336,9 +9694,14 @@ def _rebuild_combined_facility_data(request):
 
     combined_facility_data = []
 
-    # Get drawn polygon assets from existing session data
+    # Get drawn polygon assets and legacy session data
     existing_facility_data = request.session.get('climate_hazards_v2_facility_data', [])
     drawn_polygon_assets = [f for f in existing_facility_data if f.get('source') == 'drawn_polygon']
+    legacy_session_facilities = [
+        f for f in existing_facility_data
+        if f.get('source') != 'drawn_polygon' and not f.get('_file_id')
+    ]
+    combined_facility_data.extend(legacy_session_facilities)
     combined_facility_data.extend(drawn_polygon_assets)
 
     # Add facility data from all uploaded files
@@ -9432,6 +9795,22 @@ def remove_file(request):
         if file_path:
             _delete_physical_file(file_path)
 
+        # Collect asset IDs tied to this upload (by file_id and session_key) for cleanup
+        from .models import Asset
+        session_key = request.session.session_key
+        assets_to_remove = Asset.objects.filter(
+            source='uploaded_file',
+            properties__file_upload_id=file_id
+        )
+        if session_key:
+            assets_to_remove = assets_to_remove.filter(session_key=session_key)
+        asset_ids_to_remove = list(assets_to_remove.values_list('id', flat=True))
+
+        # Delete asset records for this file
+        deleted_count, _ = assets_to_remove.delete()
+        if deleted_count:
+            logger.info(f"Deleted {deleted_count} Asset records for upload {file_id}")
+
         # Delete CSV file generated from this upload
         csv_path = file_metadata.get('csv_path')
         if csv_path:
@@ -9505,6 +9884,14 @@ def remove_file(request):
         else:
             messages.error(request, 'Failed to remove file from session')
 
+        # Remove deleted asset IDs from session tracking and rebuild unified JSON
+        if asset_ids_to_remove:
+            current_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+            remaining_ids = [aid for aid in current_ids if aid not in asset_ids_to_remove]
+            request.session['climate_hazards_v2_uploaded_asset_ids'] = remaining_ids
+            logger.info(f"Removed {len(asset_ids_to_remove)} asset IDs from session; {len(remaining_ids)} remain")
+        _create_unified_assets_json(request)
+
         request.session.modified = True
         return redirect('climate_hazards_analysis_v2:view_map')
 
@@ -9537,8 +9924,7 @@ def clear_all_files(request):
 
         # Clean up any old uploaded files in the directory that aren't tracked
         try:
-            upload_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
-            if os.path.exists(upload_dir):
+            if os.path.exists(UPLOAD_DIR):
                 # Get list of tracked files
                 tracked_files = set()
                 for file_metadata in uploaded_files.values():
@@ -9547,9 +9933,9 @@ def clear_all_files(request):
                         tracked_files.add(os.path.basename(file_path))
 
                 # Clean up untracked CSV files (except template files)
-                for filename in os.listdir(upload_dir):
+                for filename in os.listdir(UPLOAD_DIR):
                     if filename.endswith('.csv') and not filename.startswith('asset_template'):
-                        file_full_path = os.path.join(upload_dir, filename)
+                        file_full_path = os.path.join(UPLOAD_DIR, filename)
                         if filename not in tracked_files:
                             if _delete_physical_file(file_full_path):
                                 removed_count += 1
@@ -9558,6 +9944,7 @@ def clear_all_files(request):
 
         # Clear polygon assets that were created from uploaded files (not user-drawn)
         Asset.objects.filter(source='session_polygon_workflow').delete()
+        Asset.objects.filter(source='uploaded_file', session_key=request.session.session_key).delete()
 
         # Clear session data
         request.session['climate_hazards_v2_uploaded_files'] = {}
@@ -9576,7 +9963,9 @@ def clear_all_files(request):
             'climate_hazards_v2_revised_params',
             'climate_hazards_v2_sensitivity_results',
             'climate_hazards_v2_analysis_results',
-            'climate_hazards_v2_asset_exposure_updated_csv_path'
+            'climate_hazards_v2_asset_exposure_updated_csv_path',
+            'climate_hazards_v2_uploaded_asset_ids',  # Clear accumulated asset IDs
+            'unified_uploaded_assets_json'  # Clear unified JSON cache
         ]
 
         for key in session_keys_to_clear:

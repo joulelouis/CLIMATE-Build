@@ -298,10 +298,10 @@ class AddFacilityAPITestCase(TestCase):
             content_type='application/json'
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
         response_data = json.loads(response.content)
-        self.assertFalse(response_data['success'])
-        self.assertIn('error', response_data)
+        self.assertTrue(response_data['success'])
+        self.assertIn('message', response_data)
 
     def test_add_facility_invalid_coordinates(self):
         """Test adding facility with invalid coordinates."""

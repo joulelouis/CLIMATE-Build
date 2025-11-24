@@ -12,6 +12,7 @@
 {% endblock %}
 
 {% block content %}
+<!-- Template: climate_hazards_analysis_v2/main.html -->
 <!-- Data attributes for JavaScript utilities -->
 <div id="main-page-data"
      data-preview-url="{% url 'climate_hazards_analysis_v2:preview_uploaded_file' %}"
@@ -476,6 +477,7 @@
                                 <!-- File Name Display -->
                                 <p id="file-name" class="file-name-display">{{ uploaded_file_name|default:"No file chosen" }}</p>
                             </div>
+                            <input id="facilityCsv" name="facility_csv" type="file" class="d-none" multiple onchange="updateFileName()" />
                         </div>
 
                         <div class="alert alert-info mt-3" role="alert" style="margin-right: 40px;">
@@ -541,7 +543,7 @@
                     </div>
                 </div>
                 <!-- Hidden File Input -->
-                <input type="file" name="facility_csv" id="facilityCsv" accept=".csv,.xlsx,.zip,.gpkg" class="d-none" onchange="updateFileName()">
+                <input type="file" name="facility_csv" id="facilityCsv" accept=".csv,.xlsx,.xls,.zip,.gpkg,.shp" class="d-none" multiple onchange="updateFileName()">
             </form>
         </div>
         
@@ -1603,11 +1605,12 @@
 
     // Enhanced updateFileName function to also refresh files list
     function updateFileName() {
-        var input = document.getElementById("facilityCsv");
-        var fileNameDisplay = document.getElementById("file-name");
+        const input = document.getElementById("facilityCsv");
+        const fileNameDisplay = document.getElementById("file-name");
 
         if (input.files.length > 0) {
-            fileNameDisplay.textContent = input.files[0].name;
+            const names = Array.from(input.files).map(f => f.name).join(', ');
+            fileNameDisplay.textContent = names;
             document.getElementById('upload-form').submit();
 
             // Schedule a refresh of the files list after upload

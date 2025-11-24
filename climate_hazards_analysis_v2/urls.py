@@ -11,7 +11,8 @@ from .views import (
     clear_granular_workflow, get_granular_workflow_state,
     execute_complete_granular_workflow, get_workflow_results_table,
     select_hazards_streamlined, hazard_exposure_results_streamlined, load_granular_data,
-    EnhancedHazardExposureMapView, remove_file, clear_all_files, get_uploaded_files
+    EnhancedHazardExposureMapView, remove_file, clear_all_files, get_uploaded_files,
+    check_analysis_context
 )
 from .api_views import (
     assets_api, asset_detail_api, asset_analysis_api, granular_analysis_api,
@@ -41,6 +42,7 @@ urlpatterns = [
     path('api/polygon-assets/<int:asset_id>/', update_polygon_asset, name='update_polygon_asset'),
     path('api/polygon-assets/<int:asset_id>/delete/', delete_polygon_asset, name='delete_polygon_asset'),
     path('api/assets/<int:asset_id>/analysis/', get_asset_analysis_results, name='get_asset_analysis_results'),
+    path('check-analysis-context/', check_analysis_context, name='check_analysis_context'),
     path('save-table-changes/', save_table_changes, name='save_table_changes'),
     path('reset-table-data/', reset_table_data, name='reset_table_data'),
     path('export-to-excel/', export_hazard_data_to_excel, name='export_to_excel'),
