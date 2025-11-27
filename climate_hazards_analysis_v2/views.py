@@ -6138,6 +6138,7 @@ def draw_polygon_complete(request):
             'grid_spacing_meters': grid_spacing,
             'granular-points': granular_points,
             'AssetType': 'polygon',
+            'source': 'drawn_polygon',
             'streamlined': True  # Mark as streamlined workflow asset
         }
 
@@ -6145,6 +6146,23 @@ def draw_polygon_complete(request):
         facility_data = request.session.get('climate_hazards_v2_facility_data', [])
         facility_data.append(polygon_asset)
         request.session['climate_hazards_v2_facility_data'] = facility_data
+
+        # Keep CSV/export inputs in sync (centroid-only)
+        _save_facility_data_to_csv(request, facility_data)
+
+        # Persist as Asset records for unified workflow/export
+        draw_file_id = f"drawn_polygon_{uuid.uuid4().hex[:8]}"
+        created_asset_ids = _store_uploaded_assets_as_json(
+            [polygon_asset],
+            original_filename='drawn_polygon.geojson',
+            file_upload_id=draw_file_id,
+            session_key=request.session.session_key,
+            source='session_polygon_workflow'
+        )
+        if created_asset_ids:
+            existing_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+            request.session['climate_hazards_v2_uploaded_asset_ids'] = list({*existing_asset_ids, *created_asset_ids})
+            _create_unified_assets_json(request)
 
         # Set streamlined workflow flag
         request.session['streamlined_workflow'] = True
@@ -8752,9 +8770,13 @@ def _create_unified_assets_json(request):
         # Get all uploaded assets from the current session
         session_key = request.session.session_key
         uploaded_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+        allowed_sources = ['uploaded_file', 'session_polygon_workflow']
 
         # Primary source of truth: all assets for this session key
-        session_assets_qs = Asset.objects.filter(session_key=session_key, source='uploaded_file') if session_key else Asset.objects.none()
+        session_assets_qs = (
+            Asset.objects.filter(session_key=session_key, source__in=allowed_sources)
+            if session_key else Asset.objects.none()
+        )
         session_asset_ids = list(session_assets_qs.values_list('id', flat=True))
 
         # Merge with any tracked IDs in session (legacy safety)
@@ -8773,7 +8795,7 @@ def _create_unified_assets_json(request):
         request.session.modified = True
 
         # Get all assets from database using the unified list
-        assets = Asset.objects.filter(id__in=unique_asset_ids, source='uploaded_file')
+        assets = Asset.objects.filter(id__in=unique_asset_ids, source__in=allowed_sources)
 
         # Create unified JSON structure
         unified_assets = {
@@ -9283,7 +9305,13 @@ def _export_unified_assets_to_file(request, filename=None):
         logger.error(error_msg)
         return None, error_msg
 
-def _store_uploaded_assets_as_json(facility_data, original_filename, file_upload_id, session_key=None):
+def _store_uploaded_assets_as_json(
+    facility_data,
+    original_filename,
+    file_upload_id,
+    session_key=None,
+    source='uploaded_file'
+):
     """
     Store uploaded facility data as Asset records for JSON workflow.
     Enhanced to support both point and polygon assets from all file types.
@@ -9346,7 +9374,7 @@ def _store_uploaded_assets_as_json(facility_data, original_filename, file_upload
                 archetype=archetype,
                 asset_type=asset_type,
                 polygon_geometry=polygon_geometry,
-                source='uploaded_file',
+                source=source,
                 properties=asset_properties,
                 session_key=session_key
             )
