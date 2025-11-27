@@ -682,7 +682,7 @@
   let geocoder;
   let currentCityBoundary = null;
   let cityBoundaryLayerId = null;
-  let polygonAssets = []; // Store polygon asset data
+  let polygonAssets = []; // Store polygon asset data (in-memory, mirrors localStorage)
   let heatmapLayers = []; // Store heatmap layer IDs
   let centroidMarkers = []; // Store centroid markers
 
@@ -1013,9 +1013,10 @@
     // Wait a bit for draw to complete
     setTimeout(() => {
       const data = draw.getAll();
-      if (data.features.length === 0) return;
+      if (!data.features || data.features.length === 0) return;
 
-      const polygon = data.features[0];
+      // Use the most recently drawn polygon (last entry)
+      const polygon = data.features[data.features.length - 1];
       const statusElement = document.getElementById('drawing-status');
 
       // Validate polygon has at least 3 points
@@ -1042,9 +1043,9 @@
       const areaM2 = turf.area(polygon); // Turf returns area in square meters
       const areaKm2 = areaM2 / 1000000;  // Convert to km²
 
-      // Store polygon data
+      // Store polygon data (deep copy geometry)
       drawnPolygonData = {
-        geometry: polygon.geometry,
+        geometry: JSON.parse(JSON.stringify(polygon.geometry)),
         centroid: { lat, lng },
         areaKm2: areaKm2
       };
@@ -1082,10 +1083,17 @@
       // Remove keyboard event listeners
       document.removeEventListener('keydown', handleDrawingKeys);
 
-      // Show granular settings modal first, then asset creation modal
-      console.log(`Polygon area: ${areaKm2.toFixed(2)} km² - Showing granular settings modal`);
+      // Clear draw features to avoid ghost outlines on subsequent polygons
+      try {
+        draw.deleteAll();
+      } catch (clearErr) {
+        console.warn('Could not clear draw features', clearErr);
+      }
+
+      // Skip granular modal and go straight to asset details (centroid-only)
+      console.log(`Polygon area: ${areaKm2.toFixed(2)} km² - Showing asset modal (granular disabled)`);
       currentPolygonSource = 'draw';
-      showGranularSettingsModal(lat, lng, areaKm2);
+      showPolygonAssetModal(lat, lng);
     }, 100);
   }
 
@@ -1278,53 +1286,8 @@
 
   // Show granular settings modal
   function showGranularSettingsModal(lat, lng, areaKm2) {
-    try {
-      console.log('Showing granular settings modal with coordinates:', { lat, lng, areaKm2 });
-
-      // Set the global variable used by updateEstimatedPoints
-      currentPolygonAreaKm2 = areaKm2;
-
-      // Update polygon info in the modal
-      const assetNameElement = document.getElementById('grid-asset-name');
-      const polygonAreaElement = document.getElementById('grid-polygon-area');
-
-      if (assetNameElement) {
-        assetNameElement.textContent = 'Drawn Polygon';
-      }
-
-      if (polygonAreaElement) {
-        polygonAreaElement.textContent = `${areaKm2.toFixed(2)} km²`;
-      }
-
-      // Initialize grid spacing
-      const gridSpacingSelect = document.getElementById('grid-spacing-select');
-      if (gridSpacingSelect) {
-        gridSpacingSelect.value = '100'; // Default to 100m
-        updateEstimatedPoints(); // Update the estimates
-      }
-
-      // Show modal
-      const modalElement = document.getElementById('gridSpacingModal');
-      if (modalElement) {
-        // Ensure any existing modal instance is disposed
-        const existingModal = bootstrap.Modal.getInstance(modalElement);
-        if (existingModal) {
-          existingModal.dispose();
-        }
-
-        const modal = new bootstrap.Modal(modalElement, {
-          backdrop: 'static',
-          keyboard: false
-        });
-        modal.show();
-        console.log('Granular settings modal shown');
-      } else {
-        console.error('Granular settings modal element not found');
-      }
-    } catch (error) {
-      console.error('Error showing granular settings modal:', error);
-      alert('Error: Could not open the granular settings modal. Please try again.');
-    }
+    // Granular configuration is disabled; go directly to asset modal
+    showPolygonAssetModal(lat, lng);
   }
 
   // Cancel polygon asset
@@ -1403,13 +1366,23 @@
       showProgressModal();
       updateProgress(10, 'Preparing polygon asset data...');
 
+      // Normalize geometry to plain GeoJSON geometry (defend against Draw feature objects)
+      const geometry = (polygonData && polygonData.geometry && polygonData.geometry.type)
+        ? polygonData.geometry
+        : (polygonData && polygonData.geometry && polygonData.geometry.geometry && polygonData.geometry.geometry.type)
+          ? polygonData.geometry.geometry
+          : null;
+      if (!geometry || !geometry.coordinates || !geometry.coordinates[0]) {
+        console.warn('Missing or invalid geometry for asset', assetName, polygonData);
+      }
+
       // Prepare the polygon asset data for backend
       const assetData = {
         name: assetName,
         archetype: archetype || 'default archetype',
         lat: polygonData.centroid.lat,
         lng: polygonData.centroid.lng,
-        geometry: polygonData.geometry,
+        geometry: geometry,
         areaKm2: polygonData.areaKm2,
         gridSpacing: polygonData.gridSpacing || null,
         enableGranular: polygonData.enableGranular || false,
@@ -1436,35 +1409,57 @@
       }
 
       // Handle successful polygon creation (no automatic redirect)
-      if (result.success) {
-        updateProgress(70, 'Drawing polygon on map...');
-        // Store asset ID for later workflow
-        window.currentPolygonAssetId = result.asset_id;
-      } else {
-        updateProgress(70, 'Drawing polygon on map...');
+      updateProgress(70, 'Drawing polygon on map...');
+
+      // Persist the new asset locally for map rendering
+      const localAssetId = result.asset_id || Date.now();
+      const geometryCopy = geometry && geometry.coordinates ? JSON.parse(JSON.stringify(geometry)) : null;
+      if (!geometryCopy || !geometryCopy.coordinates || !geometryCopy.coordinates[0] || geometryCopy.coordinates[0].length === 0) {
+        console.warn('Polygon geometry missing or empty for asset', assetName, geometryCopy);
       }
+
+      // Recompute centroid from stored geometry to avoid stale values
+      let storedCentroid = polygonData.centroid;
+      try {
+        if (geometryCopy) {
+          const c = turf.centroid({ type: 'Feature', geometry: geometryCopy });
+          const [clng, clat] = c.geometry.coordinates;
+          storedCentroid = { lat: clat, lng: clng };
+        }
+      } catch (e) {
+        console.warn('Failed to recompute centroid, using provided one', e);
+      }
+
+      const newAsset = {
+        id: localAssetId,
+        asset_name: assetName,
+        name: assetName,
+        asset_type: 'polygon',
+        polygon_geometry: geometryCopy,
+        centroid: storedCentroid,
+        archetype: archetype || 'default archetype',
+        created_at: new Date().toISOString()
+      };
+
+      // Sync storage and in-memory cache, drop any invalid polygons
+      let storedAssets = JSON.parse(localStorage.getItem('polygonAssets') || '[]');
+      storedAssets = storedAssets.filter(a =>
+        a &&
+        a.asset_type === 'polygon' &&
+        a.polygon_geometry &&
+        a.polygon_geometry.coordinates &&
+        a.polygon_geometry.coordinates[0] &&
+        a.polygon_geometry.coordinates[0].length > 0
+      );
+      storedAssets.push(newAsset);
+      localStorage.setItem('polygonAssets', JSON.stringify(storedAssets));
+      polygonAssets = storedAssets;
+      console.log('Polygon assets after create:', polygonAssets);
 
       // Draw the polygon and centroid on the map
       if (multiHazardMap) {
         try {
-          // Check if map is fully loaded and ready
-          if (!multiHazardMap.isStyleLoaded()) {
-            console.log('Map style not yet loaded, waiting...');
-            multiHazardMap.once('style.load', () => {
-              console.log('Map style loaded, now adding polygon features');
-              addPolygonFeaturesDelayed(assetName, polygonData.geometry, archetype, polygonData.centroid);
-
-              // Add layers after style loads and features are added
-              setTimeout(() => {
-                addPolygonLayers();
-              }, 100);
-            });
-            return; // Exit early, will retry after style loads
-          }
-
-          addPolygonFeaturesImmediate(assetName, polygonData.geometry, archetype, polygonData.centroid);
-          addPolygonLayers();
-
+          rebuildPolygonSourcesAndLayers();
         } catch (mapError) {
           console.error('Error preparing map sources:', mapError);
         }
@@ -1477,9 +1472,9 @@
       addEnhancedFacilityMarker({
         Facility: assetName,
         Archetype: archetype || 'default archetype',
-        Lat: polygonData.centroid.lat,
-        Long: polygonData.centroid.lng,
-        geometry: polygonData.geometry,
+        Lat: newAsset.centroid.lat,
+        Long: newAsset.centroid.lng,
+        geometry: newAsset.polygon_geometry ? JSON.parse(JSON.stringify(newAsset.polygon_geometry)) : null,
         areaKm2: polygonData.areaKm2,
         gridSpacing: polygonData.gridSpacing,
         'granular-points': polygonData['granular-points'] || null,
@@ -1507,100 +1502,12 @@
   }
 
   // Helper function to add polygon features immediately
-  function addPolygonFeaturesImmediate(assetName, polygonGeometry, archetype, centroid) {
+  function addPolygonFeaturesImmediate(assetName, polygonGeometry, archetype, centroid, assetId) {
     try {
       console.log('Adding polygon features immediately...');
 
-      // Create the complete polygon feature collection
-      const newPolygonFeature = {
-        type: 'Feature',
-        geometry: polygonGeometry,
-        properties: {
-          id: Date.now(),
-          asset_name: assetName,
-          asset_type: 'polygon',
-          archetype: archetype || 'default archetype'
-        }
-      };
-
-      const newCentroidFeature = {
-        type: 'Feature',
-        geometry: {
-          type: 'Point',
-          coordinates: [centroid.lng, centroid.lat]
-        },
-        properties: {
-          id: Date.now() + 1, // Different ID to avoid conflicts
-          asset_name: assetName,
-          asset_type: 'centroid'
-        }
-      };
-
-      // Add or update polygon source with proper error handling
-      let polygonSource = multiHazardMap.getSource('polygon-assets');
-      if (polygonSource) {
-        try {
-          const currentData = polygonSource.getData();
-          if (currentData && currentData.features) {
-            currentData.features.push(newPolygonFeature);
-            polygonSource.setData(currentData);
-          } else {
-            polygonSource.setData({
-              type: 'FeatureCollection',
-              features: [newPolygonFeature]
-            });
-          }
-        } catch (dataError) {
-          console.warn('Could not get current polygon source data, using empty collection:', dataError);
-          polygonSource.setData({
-            type: 'FeatureCollection',
-            features: [newPolygonFeature]
-          });
-        }
-      } else {
-        console.log('Creating new polygon-assets source');
-        multiHazardMap.addSource('polygon-assets', {
-          type: 'geojson',
-          data: {
-            type: 'FeatureCollection',
-            features: [newPolygonFeature]
-          }
-        });
-      }
-
-      // Add or update centroid source with proper error handling
-      let centroidSource = multiHazardMap.getSource('centroids');
-      if (centroidSource) {
-        try {
-          const currentCentroidData = centroidSource.getData();
-          if (currentCentroidData && currentCentroidData.features) {
-            currentCentroidData.features.push(newCentroidFeature);
-            centroidSource.setData(currentCentroidData);
-          } else {
-            centroidSource.setData({
-              type: 'FeatureCollection',
-              features: [newCentroidFeature]
-            });
-          }
-        } catch (dataError) {
-          console.warn('Could not get current centroid source data, using empty collection:', dataError);
-          centroidSource.setData({
-            type: 'FeatureCollection',
-            features: [newCentroidFeature]
-          });
-        }
-      } else {
-        console.log('Creating new centroids source');
-        multiHazardMap.addSource('centroids', {
-          type: 'geojson',
-          data: {
-            type: 'FeatureCollection',
-            features: [newCentroidFeature]
-          }
-        });
-      }
-
-      console.log('Polygon and centroid features added successfully');
+      // Rebuild sources/layers based on all known polygon assets
+      rebuildPolygonSourcesAndLayers();
 
     } catch (sourceError) {
       console.error('Error adding map sources:', sourceError);
@@ -1608,9 +1515,9 @@
   }
 
   // Helper function to add features with delay
-  function addPolygonFeaturesDelayed(assetName, polygonGeometry, archetype, centroid) {
+  function addPolygonFeaturesDelayed(assetName, polygonGeometry, archetype, centroid, assetId) {
     setTimeout(() => {
-      addPolygonFeaturesImmediate(assetName, polygonGeometry, archetype, centroid);
+      addPolygonFeaturesImmediate(assetName, polygonGeometry, archetype, centroid, assetId);
     }, 500); // Wait 500ms for map to be ready
   }
 
@@ -1687,9 +1594,12 @@
 
       updateProgress(30, 'Creating polygon asset...');
 
-      // Prepare the polygon asset data as JSON
+      // Prepare the polygon asset data as JSON (keep id consistent for map + storage)
+      const assetId = Date.now();
       const assetData = {
+        id: assetId,
         asset_name: assetName,
+        name: assetName,
         asset_type: 'polygon',
         polygon_geometry: polygonGeometry,
         centroid: centroid,
@@ -1701,35 +1611,18 @@
 
       // Store the polygon asset data as JSON
       let storedAssets = JSON.parse(localStorage.getItem('polygonAssets') || '[]');
-      storedAssets.push({
-        ...assetData,
-        id: Date.now() // Simple ID using timestamp
-      });
+      storedAssets.push(assetData);
       localStorage.setItem('polygonAssets', JSON.stringify(storedAssets));
+
+      // Keep in-memory list in sync and rebuild sources/layers
+      polygonAssets = storedAssets;
 
       updateProgress(70, 'Drawing polygon on map...');
 
       // Draw the polygon and centroid on the map
       if (multiHazardMap) {
         try {
-          // Check if map is fully loaded and ready
-          if (!multiHazardMap.isStyleLoaded()) {
-            console.log('Map style not yet loaded, waiting...');
-            multiHazardMap.once('style.load', () => {
-              console.log('Map style loaded, now adding polygon features');
-              addPolygonFeaturesDelayed(assetName, polygonGeometry, archetype, centroid);
-
-              // Add layers after style loads and features are added
-              setTimeout(() => {
-                addPolygonLayers();
-              }, 100);
-            });
-            return; // Exit early, will retry after style loads
-          }
-
-          addPolygonFeaturesImmediate(assetName, polygonGeometry, archetype, centroid);
-          addPolygonLayers();
-
+          rebuildPolygonSourcesAndLayers();
         } catch (mapError) {
           console.error('Error preparing map sources:', mapError);
         }
@@ -1773,144 +1666,18 @@
       console.log('Loading stored polygon assets...');
 
       const storedAssets = JSON.parse(localStorage.getItem('polygonAssets') || '[]');
-      console.log('Found', storedAssets.length, 'stored polygon assets');
+      polygonAssets = storedAssets;
+      console.log('Found', polygonAssets.length, 'stored polygon assets');
 
-      if (storedAssets.length === 0 || !multiHazardMap) {
-        return;
-      }
-
-      // Prepare GeoJSON data for polygons and centroids
-      const polygonFeatures = [];
-      const centroidFeatures = [];
-
-      storedAssets.forEach(asset => {
-        // Add polygon feature
-        if (asset.polygon_geometry) {
-          polygonFeatures.push({
-            type: 'Feature',
-            geometry: asset.polygon_geometry,
-            properties: {
-              id: asset.id,
-              asset_name: asset.asset_name,
-              asset_type: 'polygon',
-              archetype: asset.archetype,
-              created_at: asset.created_at
-            }
-          });
-        }
-
-        // Add centroid feature
-        if (asset.centroid) {
-          centroidFeatures.push({
-            type: 'Feature',
-            geometry: {
-              type: 'Point',
-              coordinates: [asset.centroid.lng, asset.centroid.lat]
-            },
-            properties: {
-              id: asset.id,
-              asset_name: asset.asset_name,
-              asset_type: 'centroid',
-              archetype: asset.archetype,
-              created_at: asset.created_at
-            }
-          });
-        }
-      });
-
-      // Add polygon source and layers
-      if (polygonFeatures.length > 0) {
-        multiHazardMap.addSource('polygon-assets', {
-          type: 'geojson',
-          data: {
-            type: 'FeatureCollection',
-            features: polygonFeatures
-          }
-        });
-
-        multiHazardMap.addLayer({
-          id: 'polygon-layer',
-          type: 'fill',
-          source: 'polygon-assets',
-          paint: {
-            'fill-color': '#3b82f6',
-            'fill-opacity': 0.3
-          }
-        });
-
-        multiHazardMap.addLayer({
-          id: 'polygon-outline',
-          type: 'line',
-          source: 'polygon-assets',
-          paint: {
-            'line-color': '#1d4ed8',
-            'line-width': 2
-          }
-        });
-      }
-
-      // Add centroid source and layer
-      if (centroidFeatures.length > 0) {
-        multiHazardMap.addSource('centroids', {
-          type: 'geojson',
-          data: {
-            type: 'FeatureCollection',
-            features: centroidFeatures
-          }
-        });
-
-        multiHazardMap.addLayer({
-          id: 'centroid-layer',
-          type: 'circle',
-          source: 'centroids',
-          paint: {
-            'circle-radius': 6,
-            'circle-color': '#dc2626',
-            'circle-stroke-color': '#ffffff',
-            'circle-stroke-width': 2
-          }
-        });
-
-        // Add click events for centroids
-        multiHazardMap.on('click', 'centroid-layer', (e) => {
-          const properties = e.features[0].properties;
-          const coordinates = e.features[0].geometry.coordinates;
-
-          new mapboxgl.Popup()
-            .setLngLat(coordinates)
-            .setHTML(`
-              <div style="padding: 10px;">
-                <h6 style="margin: 0 0 8px 0; font-weight: bold;">${properties.asset_name}</h6>
-                <p style="margin: 4px 0; font-size: 12px;">
-                  <strong>Type:</strong> ${properties.archetype}<br>
-                  <strong>Created:</strong> ${new Date(properties.created_at).toLocaleString()}
-                </p>
-                <button onclick="deletePolygonAsset(${properties.id})"
-                        style="margin-top: 8px; padding: 4px 8px; background: #dc2626; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">
-                  Delete Asset
-                </button>
-              </div>
-            `)
-            .addTo(multiHazardMap);
-        });
-
-        // Change cursor on hover
-        multiHazardMap.on('mouseenter', 'centroid-layer', () => {
-          multiHazardMap.getCanvas().style.cursor = 'pointer';
-        });
-
-        multiHazardMap.on('mouseleave', 'centroid-layer', () => {
-          multiHazardMap.getCanvas().style.cursor = '';
-        });
-      }
-
-      console.log('Successfully loaded', polygonFeatures.length, 'polygons and', centroidFeatures.length, 'centroids');
+      // Rebuild sources/layers for all stored assets
+      rebuildPolygonSourcesAndLayers();
 
       // Add enhanced facility markers including granular points for each stored asset
       storedAssets.forEach(asset => {
-        if (asset.centroid && asset.name) {
+        const assetName = asset.name || asset.asset_name;
+        if (asset.centroid && assetName) {
           addEnhancedFacilityMarker({
-            Facility: asset.name,
+            Facility: assetName,
             Archetype: asset.archetype || 'default archetype',
             Lat: asset.centroid.lat,
             Long: asset.centroid.lng,
@@ -1928,6 +1695,155 @@
     }
   }
 
+  // Build/update polygon + centroid sources and layers for all assets
+  function rebuildPolygonSourcesAndLayers() {
+    if (!multiHazardMap || !multiHazardMap.isStyleLoaded()) {
+      // If style not ready, try again when style loads
+      if (multiHazardMap) {
+        multiHazardMap.once('styledata', rebuildPolygonSourcesAndLayers);
+      }
+      return;
+    }
+
+    // Refresh from storage to keep cache aligned
+    polygonAssets = JSON.parse(localStorage.getItem('polygonAssets') || '[]');
+    console.log('Rebuilding sources. polygonAssets count:', polygonAssets.length, polygonAssets);
+
+    const polygonFeatures = [];
+    const centroidFeatures = [];
+
+    polygonAssets.forEach(asset => {
+      const assetName = asset.name || asset.asset_name;
+      if (!assetName) {
+        return;
+      }
+
+      if (asset.polygon_geometry && asset.polygon_geometry.coordinates && asset.polygon_geometry.coordinates[0] && asset.polygon_geometry.coordinates[0].length > 0) {
+        console.log('Adding polygon feature for', assetName, 'coords sample', asset.polygon_geometry.coordinates[0].slice(0, 3));
+        polygonFeatures.push({
+          type: 'Feature',
+          geometry: asset.polygon_geometry,
+          properties: {
+            id: asset.id,
+            asset_name: assetName,
+            asset_type: 'polygon',
+            archetype: asset.archetype || 'default archetype',
+            created_at: asset.created_at
+          }
+        });
+      } else {
+        console.warn('Skipping polygon with missing geometry for asset', assetName, asset);
+      }
+
+      if (asset.centroid && typeof asset.centroid.lng === 'number' && typeof asset.centroid.lat === 'number') {
+        console.log('Adding centroid feature for', assetName, asset.centroid);
+        centroidFeatures.push({
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [asset.centroid.lng, asset.centroid.lat]
+          },
+          properties: {
+            id: asset.id,
+            asset_name: assetName,
+            asset_type: 'centroid',
+            archetype: asset.archetype || 'default archetype',
+            created_at: asset.created_at
+          }
+        });
+      } else {
+        console.warn('Skipping centroid with missing coordinates for asset', assetName, asset);
+      }
+    });
+
+    // Polygon source + layers
+    const polygonSource = multiHazardMap.getSource('polygon-assets');
+    const polygonData = { type: 'FeatureCollection', features: polygonFeatures };
+    if (polygonSource) {
+      polygonSource.setData(polygonData);
+    } else {
+      multiHazardMap.addSource('polygon-assets', { type: 'geojson', data: polygonData });
+    }
+
+    if (!multiHazardMap.getLayer('polygon-layer')) {
+      multiHazardMap.addLayer({
+        id: 'polygon-layer',
+        type: 'fill',
+        source: 'polygon-assets',
+        paint: {
+          'fill-color': '#3b82f6',
+          'fill-opacity': 0.3
+        }
+      });
+    }
+    if (!multiHazardMap.getLayer('polygon-outline')) {
+      multiHazardMap.addLayer({
+        id: 'polygon-outline',
+        type: 'line',
+        source: 'polygon-assets',
+        paint: {
+          'line-color': '#1d4ed8',
+          'line-width': 2
+        }
+      });
+    }
+
+    // Centroid source + layer
+    const centroidSource = multiHazardMap.getSource('centroids');
+    const centroidData = { type: 'FeatureCollection', features: centroidFeatures };
+    if (centroidSource) {
+      centroidSource.setData(centroidData);
+    } else {
+      multiHazardMap.addSource('centroids', { type: 'geojson', data: centroidData });
+    }
+
+    if (!multiHazardMap.getLayer('centroid-layer')) {
+      multiHazardMap.addLayer({
+        id: 'centroid-layer',
+        type: 'circle',
+        source: 'centroids',
+        paint: {
+          'circle-radius': 6,
+          'circle-color': '#dc2626',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2
+        }
+      });
+
+      multiHazardMap.on('click', 'centroid-layer', (e) => {
+        const properties = e.features[0].properties;
+        const coordinates = e.features[0].geometry.coordinates;
+
+        new mapboxgl.Popup()
+          .setLngLat(coordinates)
+          .setHTML(`
+            <div style="padding: 10px;">
+              <h6 style="margin: 0 0 8px 0; font-weight: bold;">${properties.asset_name}</h6>
+              <p style="margin: 4px 0; font-size: 12px;">
+                <strong>Type:</strong> ${properties.archetype}<br>
+                <strong>Created:</strong> ${properties.created_at || ''}
+              </p>
+              <button onclick="deletePolygonAsset(${properties.id})"
+                      style="margin-top: 8px; padding: 4px 8px; background: #dc2626; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">
+                Delete Asset
+              </button>
+            </div>
+          `)
+          .addTo(multiHazardMap);
+      });
+
+      multiHazardMap.on('mouseenter', 'centroid-layer', () => {
+        multiHazardMap.getCanvas().style.cursor = 'pointer';
+      });
+
+      multiHazardMap.on('mouseleave', 'centroid-layer', () => {
+        multiHazardMap.getCanvas().style.cursor = '';
+      });
+    }
+
+      console.log('Rebuilt polygon/centroid sources:', polygonFeatures.length, 'polygons,', centroidFeatures.length, 'centroids');
+  }
+
   // Delete a polygon asset
   function deletePolygonAsset(assetId) {
     try {
@@ -1942,26 +1858,9 @@
       // Update localStorage
       localStorage.setItem('polygonAssets', JSON.stringify(storedAssets));
 
-      // Remove from map
-      if (multiHazardMap) {
-        // Get current sources
-        const polygonSource = multiHazardMap.getSource('polygon-assets');
-        const centroidSource = multiHazardMap.getSource('centroids');
-
-        // Update polygon source
-        if (polygonSource) {
-          const polygonData = polygonSource.getData();
-          polygonData.features = polygonData.features.filter(f => f.properties.id !== assetId);
-          polygonSource.setData(polygonData);
-        }
-
-        // Update centroid source
-        if (centroidSource) {
-          const centroidData = centroidSource.getData();
-          centroidData.features = centroidData.features.filter(f => f.properties.id !== assetId);
-          centroidSource.setData(centroidData);
-        }
-      }
+      // Sync in-memory and rebuild map
+      polygonAssets = storedAssets;
+      rebuildPolygonSourcesAndLayers();
 
       showNotification('Polygon asset deleted successfully!', 'success');
 
@@ -2709,14 +2608,6 @@ function addEnhancedFacilityMarker(facility) {
     // NOTE: Heatmap visualization is now created only during step 6
     // (Generate Asset Exposure), not during asset creation
     // This removes the premature hazard analysis
-
-    // Store polygon asset data for later hazard analysis
-    polygonAssets.push({
-      id: facility.Facility,
-      facility: facility,
-      hasGranularAnalysis: facility['granular-points'] ? facility['granular-points'].length > 0 : false,
-      gridSpacing: facility.gridSpacing || facility.grid_spacing_meters
-    });
   }
 }
 

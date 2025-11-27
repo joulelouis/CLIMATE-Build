@@ -422,11 +422,11 @@
             </div>
             <div class="summary-item">
                 <div class="summary-label">Grid Spacing</div>
-                <div class="summary-value">{{ polygon_asset.grid_spacing_meters }}m</div>
+                <div class="summary-value">Centroid only</div>
             </div>
             <div class="summary-item">
                 <div class="summary-label">Granular Points</div>
-                <div class="summary-value">{{ polygon_asset.sample_points_count }}</div>
+                <div class="summary-value">Disabled</div>
             </div>
             <div class="summary-item">
                 <div class="summary-label">Hazard Analysis</div>
@@ -459,9 +459,9 @@
                         {% if result.is_child %}style="display: none;"{% endif %}>
 
                         <td>
-                            {% if result.is_parent %}
+                            {% if result.is_parent and result.child_count > 0 %}
                                 <button class="expand-button" onclick="toggleChildren('{{ result.id }}')" title="Show/Hide granular points">
-                                    <span class="expand-icon">▶</span>
+                                    <span class="expand-icon">+</span>
                                 </button>
                             {% else %}
                                 <span class="child-indicator"></span>
@@ -470,8 +470,10 @@
 
                         <td>
                             <strong>{{ result.facility_name }}</strong>
-                            {% if result.is_parent %}
+                            {% if result.is_parent and result.child_count > 0 %}
                                 <br><small style="opacity: 0.7;">{{ result.child_count }} analysis points</small>
+                            {% elif result.is_parent %}
+                                <br><small style="opacity: 0.7;">Centroid-only analysis</small>
                             {% endif %}
                         </td>
 

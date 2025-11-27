@@ -6118,8 +6118,8 @@ def draw_polygon_complete(request):
         centroid_lat = data.get('lat')
         centroid_lng = data.get('lng')
         area_km2 = data.get('areaKm2', 0)
-        grid_spacing = data.get('gridSpacing')
-        granular_points = data.get('granular-points')
+        grid_spacing = None  # Granular analysis disabled; keep placeholder
+        granular_points = []
 
         # Initialize streamlined workflow
         GranularAnalysisSessionManager.initialize_granular_workflow(request)
@@ -6151,7 +6151,7 @@ def draw_polygon_complete(request):
         request.session['streamlined_workflow'] = True
         request.session.modified = True
 
-        logger.info(f"Streamlined polygon asset created: {asset_name} with {len(granular_points) if granular_points else 0} granular points")
+        logger.info(f"Streamlined polygon asset created: {asset_name} (centroid-only analysis)")
 
         return JsonResponse({
             'success': True,
@@ -6180,66 +6180,11 @@ def granular_analysis_grid(request):
     API endpoint to process grid spacing for granular analysis and generate grid points.
     This endpoint creates the granular analysis framework for the polygon asset.
     """
-    try:
-        data = json.loads(request.body)
-
-        # Get polygon geometry from session
-        polygon_geometry = GranularAnalysisSessionManager.get_polygon_geometry(request)
-        if not polygon_geometry:
-            return JsonResponse({
-                'success': False,
-                'error': 'No polygon geometry found. Please redraw polygon.'
-            }, status=400)
-
-        # Validate grid spacing
-        grid_spacing = data.get('grid_spacing', 0.001)  # Default ~100m
-        try:
-            grid_spacing = float(grid_spacing)
-            if grid_spacing <= 0 or grid_spacing > 1:  # Validate reasonable range
-                return JsonResponse({
-                    'success': False,
-                    'error': 'Grid spacing must be between 0 and 1 degree'
-                }, status=400)
-        except (ValueError, TypeError):
-            return JsonResponse({
-                'success': False,
-                'error': 'Invalid grid spacing value'
-            }, status=400)
-
-        # Generate grid points
-        grid_points = generate_grid_points_from_polygon(polygon_geometry, grid_spacing)
-
-        if not grid_points:
-            return JsonResponse({
-                'success': False,
-                'error': 'Failed to generate grid points from polygon. Polygon may be too small or invalid.'
-            }, status=400)
-
-        # Store grid points and settings in session
-        GranularAnalysisSessionManager.store_grid_configuration(request, grid_points, grid_spacing)
-
-        logger.info(f"Generated {len(grid_points)} grid points with spacing {grid_spacing}°")
-
-        return JsonResponse({
-            'success': True,
-            'grid_points_count': len(grid_points),
-            'grid_spacing': grid_spacing,
-            'estimated_processing_time': max(1, len(grid_points) * 0.1),  # Rough estimate
-            'message': f'Generated {len(grid_points)} grid points for analysis.',
-            'next_step': 'asset_creation'
-        })
-
-    except json.JSONDecodeError:
-        return JsonResponse({
-            'success': False,
-            'error': 'Invalid JSON data provided'
-        }, status=400)
-    except Exception as e:
-        logger.exception(f"Error processing granular analysis grid: {str(e)}")
-        return JsonResponse({
-            'success': False,
-            'error': 'Failed to process granular analysis grid'
-        }, status=500)
+    return JsonResponse({
+        'success': False,
+        'disabled': True,
+        'error': 'Granular analysis is temporarily disabled. Centroid-only hazard exposure is available.'
+    })
 
 
 @csrf_exempt
@@ -6249,93 +6194,11 @@ def create_polygon_asset_with_granular(request):
     API endpoint to create a polygon asset with granular analysis data.
     This creates both the asset record and initiates granular analysis processing.
     """
-    try:
-        if not request.session.session_key:
-            return JsonResponse({
-                'success': False,
-                'error': 'No active session'
-            }, status=401)
-
-        data = json.loads(request.body)
-
-        # Validate required fields
-        if not data.get('name', '').strip():
-            return JsonResponse({
-                'success': False,
-                'error': 'Asset name is required'
-            }, status=400)
-
-        # Get granular analysis data from session
-        polygon_geometry = GranularAnalysisSessionManager.get_polygon_geometry(request)
-        grid_points, grid_spacing = GranularAnalysisSessionManager.get_grid_configuration(request)
-        if not grid_spacing:
-            grid_spacing = 0.001
-
-        if not polygon_geometry or not grid_points:
-            return JsonResponse({
-                'success': False,
-                'error': 'Granular analysis data not found. Please complete the drawing workflow first.'
-            }, status=400)
-
-        # Get selected hazards from session or request
-        selected_hazards = data.get('hazards') or request.session.get('climate_hazards_v2_selected_hazards', [])
-        if not selected_hazards:
-            selected_hazards = ['Heat', 'Flooding', 'Sea Level Rise']  # Default hazards
-
-        # Calculate centroid from grid points
-        centroid_lat = sum(point[0] for point in grid_points) / len(grid_points)
-        centroid_lng = sum(point[1] for point in grid_points) / len(grid_points)
-
-        # Create the asset
-        asset = Asset.objects.create(
-            name=data['name'].strip(),
-            archetype=data.get('archetype', 'default archetype').strip() or 'default archetype',
-            latitude=centroid_lat,
-            longitude=centroid_lng,
-            polygon_geometry=polygon_geometry,
-            asset_type='polygon',
-            has_granular_analysis=True,
-            granular_grid_spacing=grid_spacing,
-            granular_analysis_status='pending'
-        )
-
-        # Create granular analysis results
-        granular_results = create_granular_analysis_results(
-            asset, grid_points, selected_hazards, scenario='current'
-        )
-
-        # Update session with asset data for workflow
-        GranularAnalysisSessionManager.store_asset_id(request, asset.id)
-
-        # Store asset ID in session for enhanced preview filtering
-        if 'polygon_asset_ids' not in request.session:
-            request.session['polygon_asset_ids'] = []
-        request.session['polygon_asset_ids'].append(asset.id)
-        request.session.save()
-
-        logger.info(f"Created polygon asset with granular analysis: {asset.name} (ID: {asset.id})")
-        logger.info(f"Created {len(granular_results)} granular analysis records")
-
-        return JsonResponse({
-            'success': True,
-            'asset': asset.geojson,
-            'granular_results_count': len(granular_results),
-            'selected_hazards': selected_hazards,
-            'message': f'Polygon asset "{asset.name}" created with {len(granular_results)} analysis points.',
-            'next_step': 'hazard_analysis'
-        })
-
-    except json.JSONDecodeError:
-        return JsonResponse({
-            'success': False,
-            'error': 'Invalid JSON data provided'
-        }, status=400)
-    except Exception as e:
-        logger.exception(f"Error creating polygon asset with granular data: {str(e)}")
-        return JsonResponse({
-            'success': False,
-            'error': 'Failed to create polygon asset with granular data'
-        }, status=500)
+    return JsonResponse({
+        'success': False,
+        'disabled': True,
+        'error': 'Granular analysis is temporarily disabled. Centroid-only hazard exposure is available.'
+    })
 
 
 @require_GET
@@ -6344,88 +6207,11 @@ def get_heatmap_data(request, asset_id):
     API endpoint to retrieve heatmap data for a polygon asset.
     Returns pre-computed heatmap data for visualization.
     """
-    try:
-        asset = Asset.objects.get(id=asset_id)
-
-        if asset.asset_type != 'polygon':
-            return JsonResponse({
-                'success': False,
-                'error': 'Heatmap data is only available for polygon assets'
-            }, status=400)
-
-        # Get hazard type from query parameter
-        hazard_type = request.GET.get('hazard_type')
-        if not hazard_type:
-            return JsonResponse({
-                'success': False,
-                'error': 'Hazard type parameter is required'
-            }, status=400)
-
-        scenario = request.GET.get('scenario', 'current')
-
-        # Try to get existing heatmap data
-        heatmap_data = HeatmapData.objects.filter(
-            asset=asset,
-            hazard_type=hazard_type,
-            scenario=scenario,
-            processing_status='completed'
-        ).first()
-
-        if not heatmap_data:
-            # Generate heatmap data if not exists
-            logger.info(f"Generating heatmap data for asset {asset.name}, hazard {hazard_type}")
-            heatmap_data = create_heatmap_data(asset, hazard_type, scenario)
-
-            if not heatmap_data:
-                return JsonResponse({
-                    'success': False,
-                    'error': 'No granular analysis data available for heatmap generation'
-                }, status=404)
-
-        # Get heatmap grid data
-        grid_data = heatmap_data.get_heatmap_grid()
-
-        response_data = {
-            'success': True,
-            'heatmap_data': {
-                'grid_points': grid_data,
-                'metadata': {
-                    'asset_id': asset.id,
-                    'asset_name': asset.name,
-                    'hazard_type': hazard_type,
-                    'scenario': scenario,
-                    'grid_rows': heatmap_data.grid_rows,
-                    'grid_cols': heatmap_data.grid_cols,
-                    'grid_spacing': heatmap_data.grid_spacing,
-                    'bounding_box': {
-                        'min_lat': float(heatmap_data.min_lat),
-                        'max_lat': float(heatmap_data.max_lat),
-                        'min_lng': float(heatmap_data.min_lng),
-                        'max_lng': float(heatmap_data.max_lng)
-                    },
-                    'statistics': {
-                        'min_value': heatmap_data.min_value,
-                        'max_value': heatmap_data.max_value,
-                        'mean_value': heatmap_data.mean_value,
-                        'median_value': heatmap_data.median_value
-                    }
-                }
-            }
-        }
-
-        return JsonResponse(response_data)
-
-    except Asset.DoesNotExist:
-        return JsonResponse({
-            'success': False,
-            'error': 'Asset not found'
-        }, status=404)
-    except Exception as e:
-        logger.exception(f"Error getting heatmap data: {str(e)}")
-        return JsonResponse({
-            'success': False,
-            'error': 'Failed to get heatmap data'
-        }, status=500)
+    return JsonResponse({
+        'success': False,
+        'disabled': True,
+        'error': 'Granular heatmap data is temporarily disabled. Centroid-only hazard exposure is available.'
+    })
 
 
 @require_GET
@@ -6433,55 +6219,11 @@ def get_granular_analysis_status(request, asset_id):
     """
     API endpoint to get the status and progress of granular analysis for an asset.
     """
-    try:
-        asset = Asset.objects.get(id=asset_id)
-
-        if not asset.has_granular_analysis:
-            return JsonResponse({
-                'success': False,
-                'error': 'Asset does not have granular analysis enabled'
-            }, status=400)
-
-        # Get progress information
-        progress = get_granular_analysis_progress(asset)
-
-        # Get hazard-wise statistics
-        hazard_stats = {}
-        hazard_types = GranularAnalysisResult.objects.filter(
-            asset=asset
-        ).values_list('hazard_type', flat=True).distinct()
-
-        for hazard_type in hazard_types:
-            stats = calculate_granular_statistics(asset, hazard_type)
-            if stats:
-                hazard_stats[hazard_type] = stats
-
-        response_data = {
-            'success': True,
-            'asset_id': asset.id,
-            'analysis_status': asset.granular_analysis_status,
-            'progress': progress,
-            'hazard_statistics': hazard_stats,
-            'metadata': {
-                'has_granular_analysis': asset.has_granular_analysis,
-                'grid_spacing': asset.granular_grid_spacing,
-                'total_grid_points': asset.granular_grid_points_count
-            }
-        }
-
-        return JsonResponse(response_data)
-
-    except Asset.DoesNotExist:
-        return JsonResponse({
-            'success': False,
-            'error': 'Asset not found'
-        }, status=404)
-    except Exception as e:
-        logger.exception(f"Error getting granular analysis status: {str(e)}")
-        return JsonResponse({
-            'success': False,
-            'error': 'Failed to get granular analysis status'
-        }, status=500)
+    return JsonResponse({
+        'success': False,
+        'disabled': True,
+        'error': 'Granular analysis is temporarily disabled. Centroid-only hazard exposure is available.'
+    })
 
 
 def _convert_hierarchical_to_original_format(hierarchical_data: Dict[str, Any], selected_hazards: List[str]) -> List[Dict[str, Any]]:
@@ -8485,17 +8227,6 @@ def hazard_exposure_results_streamlined(request):
         return redirect('climate_hazards_analysis_v2:view_map')
 
     try:
-        # Generate grid points from polygon
-        grid_spacing = 0.001  # Default ~100m spacing
-        grid_points = generate_grid_points_from_polygon(polygon_geometry, grid_spacing)
-
-        if not grid_points:
-            logger.error("Failed to generate grid points from polygon")
-            return render(request, 'climate_hazards_analysis_v2/hazard_exposure_results_streamlined.html', {
-                'error': 'Failed to generate analysis points from polygon. The polygon may be too small.',
-                'selected_hazards': selected_hazards
-            })
-
         # Calculate polygon centroid
         centroid = calculate_polygon_centroid(polygon_geometry)
 
@@ -8509,15 +8240,15 @@ def hazard_exposure_results_streamlined(request):
             'Long': centroid[1],
             'geometry': polygon_geometry,
             'polygon_area_km2': calculate_polygon_area_km2(polygon_geometry),
-            'grid_spacing_meters': int(grid_spacing * 111320),  # Convert degrees to meters
-            'granular-points': grid_points,
-            'granular_analysis_enabled': True,
-            'sample_points_count': len(grid_points)
+            'grid_spacing_meters': None,
+            'granular-points': [],
+            'granular_analysis_enabled': False,
+            'sample_points_count': 0
         }
 
         # Analyze hazards for all points (centroid + granular points)
         hazard_analysis_results = _analyze_polygon_asset_hazards_streamlined(
-            polygon_asset, selected_hazards, request.session.session_key
+            polygon_asset, selected_hazards, request.session.session_key, centroid_only=True
         )
 
         if not hazard_analysis_results:
@@ -8536,9 +8267,10 @@ def hazard_exposure_results_streamlined(request):
             'polygon_asset': polygon_asset,
             'hierarchical_results': hierarchical_results,
             'selected_hazards': selected_hazards,
-            'total_points': len(grid_points) + 1,  # +1 for centroid
+            'total_points': 1,  # centroid only
             'analysis_timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'streamlined_workflow': True
+            'streamlined_workflow': True,
+            'requires_hierarchical_display': False
         }
 
         return render(request, 'climate_hazards_analysis_v2/hazard_exposure_results_streamlined.html', context)
@@ -8551,10 +8283,10 @@ def hazard_exposure_results_streamlined(request):
         })
 
 
-def _analyze_polygon_asset_hazards_streamlined(polygon_asset, selected_hazards, session_key):
+def _analyze_polygon_asset_hazards_streamlined(polygon_asset, selected_hazards, session_key, centroid_only=False):
     """
     Analyze hazards for polygon asset using existing hazard functions.
-    Returns hierarchical results with centroid (parent) and granular points (children).
+    Supports centroid-only mode (no granular points) while keeping structure for future granular reuse.
     """
     try:
         geometry = polygon_asset.get('geometry')
@@ -8562,22 +8294,19 @@ def _analyze_polygon_asset_hazards_streamlined(polygon_asset, selected_hazards, 
             logger.error("Polygon asset has no geometry")
             return None
 
-        granular_points = polygon_asset.get('granular-points', [])
-        if not granular_points:
-            logger.error("No granular points found for polygon asset")
-            return None
+        granular_points = [] if centroid_only else polygon_asset.get('granular-points', [])
+        if granular_points:
+            logger.info(f"Analyzing hazards for {len(granular_points)} granular points + centroid")
+        else:
+            logger.info("Granular analysis disabled: analyzing centroid only")
 
-        logger.info(f"Analyzing hazards for {len(granular_points)} granular points + centroid")
-
-        # Analyze hazards for each granular point
+        # Analyze hazards for each granular point (skipped when centroid_only is True)
         granular_results = []
         for i, point in enumerate(granular_points):
-            # Handle both dictionary and tuple formats
             if isinstance(point, dict):
                 lat = point.get('latitude') or point.get('lat')
                 lng = point.get('longitude') or point.get('lng') or point.get('long')
             else:
-                # Assume tuple format: (latitude, longitude)
                 lat, lng = point[0], point[1]
 
             point_result = {
@@ -8587,7 +8316,6 @@ def _analyze_polygon_asset_hazards_streamlined(polygon_asset, selected_hazards, 
                 'hazards': {}
             }
 
-            # Analyze each selected hazard
             for hazard in selected_hazards:
                 try:
                     hazard_value = _get_hazard_value_at_point(lat, lng, hazard)
@@ -8608,30 +8336,36 @@ def _analyze_polygon_asset_hazards_streamlined(polygon_asset, selected_hazards, 
             'hazards': {}
         }
 
-        # Calculate centroid hazard values as average of all granular points
+        # Calculate centroid hazard values
         for hazard in selected_hazards:
-            point_values = [point['hazards'].get(hazard) for point in granular_results if point['hazards'].get(hazard) is not None]
+            if granular_results:
+                point_values = [
+                    point['hazards'].get(hazard)
+                    for point in granular_results
+                    if point['hazards'].get(hazard) is not None
+                ]
+                if point_values:
+                    centroid_result['hazards'][hazard] = sum(point_values) / len(point_values)
+                    continue
 
-            if point_values:
-                centroid_result['hazards'][hazard] = sum(point_values) / len(point_values)
-            else:
-                # Fallback: analyze actual centroid location
-                try:
-                    centroid_result['hazards'][hazard] = _get_hazard_value_at_point(
-                        centroid_lat, centroid_lng, hazard
-                    )
-                except Exception as e:
-                    logger.warning(f"Error getting {hazard} value at centroid: {str(e)}")
-                    centroid_result['hazards'][hazard] = None
+            # Fallback: analyze actual centroid location (used in centroid-only mode)
+            try:
+                centroid_result['hazards'][hazard] = _get_hazard_value_at_point(
+                    centroid_lat, centroid_lng, hazard
+                )
+            except Exception as e:
+                logger.warning(f"Error getting {hazard} value at centroid: {str(e)}")
+                centroid_result['hazards'][hazard] = None
 
-        # Create hierarchical structure
         hierarchical_analysis = {
             'centroid': centroid_result,
             'granular_points': granular_results,
             'aggregated_stats': _calculate_aggregated_hazard_stats(granular_results, selected_hazards)
         }
 
-        logger.info(f"Completed hazard analysis for polygon asset: {len(granular_results)} points + centroid")
+        logger.info(
+            f"Completed hazard analysis for polygon asset: {len(granular_results)} granular points + centroid"
+        )
         return hierarchical_analysis
 
     except Exception as e:
