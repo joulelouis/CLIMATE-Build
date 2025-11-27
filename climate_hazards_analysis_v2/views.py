@@ -527,13 +527,15 @@ def preview_enhanced_facilities(request):
 
         # Process polygon assets
         for asset in polygon_assets:
+            geometry = asset.get('geometry')
+            area_km2 = asset.get('polygon_area_km2')
             polygon_data = {
                 'id': asset.get('AssetId'),
                 'name': asset['Facility'],
                 'archetype': asset.get('Archetype', 'default archetype'),
                 'latitude': float(asset['Lat']),
                 'longitude': float(asset['Long']),
-                'area_km2': asset.get('polygon_area_km2'),
+                'area_km2': area_km2,
                 'has_granular_analysis': asset.get('granular_analysis_enabled', False),
                 'granular_grid_spacing': asset.get('granular_grid_spacing'),
                 'granular_points_count': asset.get('granular_points_count', 0),
@@ -546,13 +548,10 @@ def preview_enhanced_facilities(request):
             }
 
             # Calculate polygon area if geometry is available
-            if asset.get('geometry'):
+            if geometry:
                 try:
-                    import json
-                    from shapely.geometry import shape
-                    geometry = shape(asset['geometry'])
-                    # Convert from square meters to square kilometers
-                    polygon_data['area_km2'] = geometry.area / 1000000
+                    if area_km2 is None:
+                        polygon_data['area_km2'] = calculate_polygon_area_km2(geometry)
                 except Exception as e:
                     logger.warning(f"Could not calculate area for asset {asset.get('AssetId')}: {e}")
                     polygon_data['area_km2'] = 0

@@ -651,28 +651,22 @@
               </h6>
             </div>
             <div class="card-body">
-              <div class="row text-center">
-                <div class="col-md-3">
-                  <div class="stat-item">
-                    <h4 id="summary-total-facilities" class="text-primary mb-0">0</h4>
+              <div class="row text-center justify-content-center g-3">
+                <div class="col-12 col-md-4">
+                  <div class="stat-item p-3 border rounded h-100">
+                    <h4 id="summary-total-facilities" class="text-primary mb-1">0</h4>
                     <small class="text-muted">Regular Facilities</small>
                   </div>
                 </div>
-                <div class="col-md-3">
-                  <div class="stat-item">
-                    <h4 id="summary-total-polygons" class="text-success mb-0">0</h4>
+                <div class="col-12 col-md-4">
+                  <div class="stat-item p-3 border rounded h-100">
+                    <h4 id="summary-total-polygons" class="text-success mb-1">0</h4>
                     <small class="text-muted">Polygon Assets</small>
                   </div>
                 </div>
-                <div class="col-md-3">
-                  <div class="stat-item">
-                    <h4 id="summary-total-granular" class="text-info mb-0">0</h4>
-                    <small class="text-muted">Granular Points</small>
-                  </div>
-                </div>
-                <div class="col-md-3">
-                  <div class="stat-item">
-                    <h4 id="summary-total-all" class="text-warning mb-0">0</h4>
+                <div class="col-12 col-md-4">
+                  <div class="stat-item p-3 border rounded h-100">
+                    <h4 id="summary-total-all" class="text-warning mb-1">0</h4>
                     <small class="text-muted">Total Points</small>
                   </div>
                 </div>
@@ -1194,7 +1188,7 @@
         // Display regular facilities
         displayRegularFacilities(data.regular_facilities);
 
-        // Display polygon assets with granular points
+        // Display polygon assets (granular points disabled)
         displayPolygonAssets(data.polygon_assets);
 
         // Hide loading and show content
@@ -1205,8 +1199,7 @@
     function updateSummaryStats(summary) {
         document.getElementById('summary-total-facilities').textContent = summary.total_facilities;
         document.getElementById('summary-total-polygons').textContent = summary.total_polygons;
-        document.getElementById('summary-total-granular').textContent = summary.total_granular_points;
-        document.getElementById('summary-total-all').textContent = summary.total_facilities + summary.total_granular_points;
+        document.getElementById('summary-total-all').textContent = summary.total_facilities;
     }
 
     function displayRegularFacilities(facilities) {
@@ -1247,6 +1240,8 @@
         } else {
             noAssetsMsg.style.display = 'none';
 
+            console.log('Enhanced preview polygon assets:', polygonAssets);
+
             polygonAssets.forEach(asset => {
                 const assetCard = createPolygonAssetCard(asset);
                 container.appendChild(assetCard);
@@ -1259,10 +1254,21 @@
         card.className = 'card mb-3 border-success';
 
         // Determine analysis status badge
-        const statusBadge = getAnalysisStatusBadge(asset.granular_analysis_status);
-
-        // Format area
-        const area = asset.area_km2 ? `${asset.area_km2.toFixed(2)} km²` : 'N/A';
+        const statusBadge = getAnalysisStatusBadge(asset.granular_analysis_status);        // Format area with fallbacks and geometry computation
+        let areaValue = null;
+        if (typeof asset.area_km2 === 'number' && !isNaN(asset.area_km2)) {
+            areaValue = asset.area_km2;
+        } else if (typeof asset.areaKm2 === 'number' && !isNaN(asset.areaKm2)) {
+            areaValue = asset.areaKm2;
+        } else if (asset.geometry && typeof turf !== 'undefined') {
+            try {
+                const areaSqMeters = turf.area({ type: 'Feature', geometry: asset.geometry });
+                areaValue = areaSqMeters / 1_000_000; // convert to km^2
+            } catch (e) {
+                console.warn('Failed to compute area from geometry', e);
+            }
+        }
+        const area = areaValue !== null ? `${areaValue.toFixed(2)} km²` : 'N/A';
 
         // Format grid spacing
         const gridSpacing = asset.granular_grid_spacing ? `${asset.granular_grid_spacing}m` : 'N/A';
