@@ -149,6 +149,12 @@
         box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
     }
 
+    #proceed-button.disabled-state {
+        pointer-events: auto; /* keep click handler active for messaging */
+        cursor: not-allowed;
+        opacity: 0.65;
+    }
+
     /* Clear Site Data button styles */
     #clear-site-data-btn {
         transition: all 0.3s ease;
@@ -562,7 +568,7 @@
             <!-- Add proceed button below the map -->
             <div class="text-end mt-3">
                 <button id="proceed-button" class="btn btn-warning btn-lg shadow" 
-                        onclick="proceedToSelectHazards()" 
+                        onclick="return proceedToSelectHazards(event)" 
                         style="display: block !important;">
                     <strong>Proceed to Select Hazards and Scenarios</strong>
                     <i class="fas fa-arrow-right ms-2"></i>
@@ -812,16 +818,25 @@
     // Call loadFacilityData when page loads to ensure markers are shown
     document.addEventListener('DOMContentLoaded', function() {
         console.log("DOM loaded, checking proceed button");
-        
-        // Make sure the button is visible regardless of conditions
+
         const proceedBtn = document.getElementById('proceed-button');
         if (proceedBtn) {
             proceedBtn.style.display = 'block';
-            console.log("Proceed button display set to block");
-        } else {
-            console.log("Proceed button not found in DOM");
+
+            // Show disabled hint on hover when no assets
+            let hoverNoticeCooldown = null;
+            proceedBtn.addEventListener('mouseenter', () => {
+                if (!hasAssetDataAvailable() && !hoverNoticeCooldown) {
+                    if (typeof showErrorMessage === 'function') {
+                        showErrorMessage('missing input asset data');
+                    } else {
+                        alert('missing input asset data');
+                    }
+                    hoverNoticeCooldown = setTimeout(() => { hoverNoticeCooldown = null; }, 2000);
+                }
+            });
         }
-        
+
         // If the map is initialized, try to load facility data
         if (typeof loadFacilityData === 'function') {
             setTimeout(loadFacilityData, 1000); // Delay slightly to ensure map is fully loaded
@@ -831,21 +846,54 @@
         if (typeof updateProgressSteps === 'function') {
             updateProgressSteps();
         }
+
+        // Initialize proceed button state
+        if (typeof updateProceedButtonVisibility === 'function') {
+            updateProceedButtonVisibility();
+        }
     });
 
     // Override updateProceedButtonVisibility to always show the button
+    function hasAssetDataAvailable() {
+        const markerCount = Array.isArray(window.facilityMarkers) ? window.facilityMarkers.length : 0;
+        const polygonCount = (typeof polygonAssets !== 'undefined' && Array.isArray(polygonAssets)) ? polygonAssets.length : 0;
+        return (markerCount + polygonCount) > 0;
+    }
+
     function updateProceedButtonVisibility() {
         const proceedButton = document.getElementById('proceed-button');
-        if (proceedButton) {
-            // Always show the button for now
-            proceedButton.style.display = 'block';
-            console.log("Force showing proceed button");
-        }
+        if (!proceedButton) return;
+
+        const hasAssets = hasAssetDataAvailable();
+
+        proceedButton.style.display = 'block';
+        proceedButton.dataset.enabled = hasAssets ? 'true' : 'false';
+        proceedButton.classList.toggle('disabled-state', !hasAssets);
+        proceedButton.setAttribute('aria-disabled', String(!hasAssets));
+        proceedButton.classList.toggle('btn-warning', hasAssets);
+        proceedButton.classList.toggle('btn-secondary', !hasAssets);
     }
     
     // Function to handle proceeding to the next step
-    function proceedToSelectHazards() {
+    function proceedToSelectHazards(event) {
+        if (event && typeof event.preventDefault === 'function') {
+            event.preventDefault();
+        }
         console.log("Proceed button clicked");
+
+        const proceedBtn = document.getElementById('proceed-button');
+        const isEnabledFlag = proceedBtn && proceedBtn.dataset.enabled === 'true';
+        const isVisuallyDisabled = proceedBtn && proceedBtn.classList.contains('disabled-state');
+        const enabled = isEnabledFlag && !isVisuallyDisabled && hasAssetDataAvailable();
+
+        if (!enabled) {
+            if (typeof showErrorMessage === 'function') {
+                showErrorMessage('missing input asset data');
+            } else {
+                alert('missing input asset data');
+            }
+            return false;
+        }
         
         // Update the progress steps
         const step2 = document.querySelectorAll('.step-item')[1];

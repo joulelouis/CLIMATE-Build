@@ -3964,33 +3964,19 @@ function updateProgressSteps(currentStep = null) {
  * Update proceed button visibility and state
  */
 function updateProceedButtonVisibility() {
-  // Check if we have a proceed button to show
   const proceedBtn = document.getElementById('proceed-button');
-  if (proceedBtn) {
-    proceedBtn.style.display = 'block';
-    return;
-  }
+  if (!proceedBtn) return;
 
-  // For the climate hazard map page, show "Proceed to Select Hazards" after polygon creation
-  if (window.drawnPolygon) {
-    // Create proceed button if it doesn't exist
-    if (!document.getElementById('proceed-select-hazards-btn')) {
-      const proceedBtn = document.createElement('button');
-      proceedBtn.id = 'proceed-select-hazards-btn';
-      proceedBtn.className = 'btn btn-warning btn-lg shadow';
-      proceedBtn.innerHTML = '<i class="fas fa-arrow-right me-2"></i><strong>Proceed to Select Hazards</strong>';
-      proceedBtn.onclick = autoSelectHazardsAndProceed;
-      proceedBtn.style.position = 'absolute';
-      proceedBtn.style.bottom = '20px';
-      proceedBtn.style.left = '50%';
-      proceedBtn.style.transform = 'translateX(-50%)';
-      proceedBtn.style.zIndex = '1000';
+  const markerCount = Array.isArray(window.facilityMarkers) ? window.facilityMarkers.length : 0;
+  const polygonCount = (typeof polygonAssets !== 'undefined' && Array.isArray(polygonAssets)) ? polygonAssets.length : 0;
+  const hasAssets = (markerCount + polygonCount) > 0;
 
-      document.getElementById('climate-hazard-map').appendChild(proceedBtn);
-    } else {
-      document.getElementById('proceed-select-hazards-btn').style.display = 'block';
-    }
-  }
+  proceedBtn.style.display = 'block';
+  proceedBtn.dataset.enabled = hasAssets ? 'true' : 'false';
+  proceedBtn.classList.toggle('disabled-state', !hasAssets);
+  proceedBtn.setAttribute('aria-disabled', String(!hasAssets));
+  proceedBtn.classList.toggle('btn-warning', hasAssets);
+  proceedBtn.classList.toggle('btn-secondary', !hasAssets);
 }
 
 /**
