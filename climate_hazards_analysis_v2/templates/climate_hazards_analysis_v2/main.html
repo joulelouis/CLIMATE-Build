@@ -89,6 +89,31 @@
         color: #495057;
     }
 
+    .progress-line {
+        position: absolute;
+        top: 25px; /* center of the 50px step circles */
+        left: 50px;
+        right: 50px;
+        height: 2px;
+        background-color: #e9ecef;
+        z-index: 1;
+    }
+
+    /* Enhanced preview table sizing */
+    #regular-facilities-section .table-responsive {
+        width: 100%;
+    }
+
+    #regular-facilities-table {
+        width: 100% !important;
+        table-layout: fixed;
+    }
+
+    #regular-facilities-table th,
+    #regular-facilities-table td {
+        word-break: break-word;
+    }
+
     /* Loading overlay styles */
     .loading-overlay {
         position: fixed;
@@ -404,10 +429,10 @@
     <div class="row mt-4 mb-4">
         <div class="col-12">
             <div class="card">
-                <div class="card-body p-4">
-                    <div class="d-flex justify-content-between align-items-center position-relative">
-                        <!-- Progress Line -->
-                        <div style="position: absolute; top: 25px; left: 50px; right: 50px; height: 2px; background-color: #e9ecef; z-index: 1;"></div>
+                        <div class="card-body p-4">
+                            <div class="d-flex justify-content-between align-items-center position-relative">
+                                <!-- Progress Line -->
+                                <div class="progress-line"></div>
 
                         <!-- Step 1 -->
                         <div class="step-item" data-step="1">
@@ -688,8 +713,14 @@
               </h6>
             </div>
             <div class="card-body">
-              <div class="table-responsive">
-                <table id="regular-facilities-table" class="table table-striped table-hover">
+              <div class="table-responsive" style="width: 100%;">
+                <table id="regular-facilities-table" class="table table-striped table-hover w-100">
+                  <colgroup>
+                    <col style="width: 40%;">
+                    <col style="width: 20%;">
+                    <col style="width: 20%;">
+                    <col style="width: 20%;">
+                  </colgroup>
                   <thead class="table-light">
                     <tr>
                       <th>Facility Name</th>
@@ -1253,16 +1284,17 @@
     function displayRegularFacilities(facilities) {
         const tbody = document.getElementById('regular-facilities-body');
         const noFacilitiesMsg = document.getElementById('no-regular-facilities');
+        const table = document.getElementById('regular-facilities-table');
 
         // Clear existing content
         tbody.innerHTML = '';
 
         if (facilities.length === 0) {
             noFacilitiesMsg.style.display = 'block';
-            tbody.parentElement.style.display = 'none';
+            if (table) table.style.display = 'none';
         } else {
             noFacilitiesMsg.style.display = 'none';
-            tbody.parentElement.style.display = 'block';
+            if (table) table.style.display = 'table';
 
             facilities.forEach(facility => {
                 const row = tbody.insertRow();

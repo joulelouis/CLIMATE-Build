@@ -80,6 +80,16 @@ Climate Hazard Analysis Results
         color: #495057;
     }
 
+    .progress-line {
+        position: absolute;
+        top: 25px; /* center of 50px circles */
+        left: 50px;
+        right: 50px;
+        height: 2px;
+        background-color: #e9ecef;
+        z-index: 1;
+    }
+
     /* Custom Table Styling */
     .custom-table {
         background-color: white;
@@ -540,10 +550,10 @@ Climate Hazard Analysis Results
     <div class="row mt-4 mb-4">
         <div class="col-12">
             <div class="card">
-                <div class="card-body p-4">
-                    <div class="d-flex justify-content-between align-items-center position-relative">
-                        <!-- Progress Line -->
-                        <div style="position: absolute; top: 25px; left: 50px; right: 50px; height: 2px; background-color: #e9ecef; z-index: 1;"></div>
+                        <div class="card-body p-4">
+                            <div class="d-flex justify-content-between align-items-center position-relative">
+                                <!-- Progress Line -->
+                                <div class="progress-line"></div>
 
                         <!-- Step 1 -->
                         <div class="step-item" data-step="1">
