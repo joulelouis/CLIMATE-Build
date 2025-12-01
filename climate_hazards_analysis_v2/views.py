@@ -3939,8 +3939,28 @@ def sensitivity_parameters(request):
     # Extract Asset Archetypes from the facility data
     asset_archetypes = []
     facility_csv_path = request.session.get('climate_hazards_v2_facility_csv_path')
+    archetype_candidates = set()
 
-    if facility_csv_path and os.path.exists(facility_csv_path):
+    # First preference: gather archetypes directly from session facility data (all sources)
+    possible_names = [
+        'Asset Archetype', 'asset archetype', 'AssetArchetype', 'assetarchetype',
+        'Archetype', 'archetype', 'Asset Type', 'asset type', 'AssetType', 'assettype',
+        'Type', 'type', 'Category', 'category', 'Asset Category', 'asset category'
+    ]
+    for fac in facility_data:
+        for key in possible_names:
+            if key in fac and fac.get(key):
+                archetype_candidates.add(str(fac.get(key)).strip())
+                break
+
+    if archetype_candidates:
+        unique_archetypes = sorted(archetype_candidates)
+        asset_archetypes = [
+            {'number': i + 1, 'name': archetype}
+            for i, archetype in enumerate(unique_archetypes)
+        ]
+        logger.info(f"Found {len(asset_archetypes)} asset archetypes from session facility data")
+    elif facility_csv_path and os.path.exists(facility_csv_path):
         try:
             # Read the CSV file to get asset archetypes
             try:
@@ -3953,12 +3973,6 @@ def sensitivity_parameters(request):
             
             # Look for Asset Archetype column with various naming conventions
             archetype_column = None
-            possible_names = [
-                'Asset Archetype', 'asset archetype', 'AssetArchetype', 'assetarchetype',
-                'Archetype', 'archetype', 'Asset Type', 'asset type', 'AssetType', 'assettype',
-                'Type', 'type', 'Category', 'category', 'Asset Category', 'asset category'
-            ]
-            
             for col_name in possible_names:
                 if col_name in df.columns:
                     archetype_column = col_name
@@ -4204,6 +4218,23 @@ def sensitivity_results(request):
         
         # Load the facility CSV to get archetype information
         archetype_mapping = {}
+        # Build mapping from session facility data first (covers multiple uploads and drawn assets)
+        possible_names = [
+            'Asset Archetype', 'asset archetype', 'AssetArchetype', 'assetarchetype',
+            'Archetype', 'archetype', 'Asset Type', 'asset type', 'AssetType', 'assettype',
+            'Type', 'type', 'Category', 'category', 'Asset Category', 'asset category'
+        ]
+        for fac in facility_data:
+            facility_name = fac.get('Facility')
+            if not facility_name:
+                continue
+            for key in possible_names:
+                if key in fac and fac.get(key):
+                    archetype_mapping[facility_name] = str(fac.get(key)).strip()
+                    break
+        if archetype_mapping:
+            logger.info(f"Created archetype mapping from session data for {len(archetype_mapping)} facilities")
+        
         if facility_csv_path and os.path.exists(facility_csv_path):
             try:
                 df = pd.read_csv(facility_csv_path, encoding='utf-8')
@@ -4217,11 +4248,6 @@ def sensitivity_results(request):
             
             # Find archetype column
             archetype_column = None
-            possible_names = [
-                'Asset Archetype', 'asset archetype', 'AssetArchetype', 'assetarchetype',
-                'Archetype', 'archetype', 'Asset Type', 'asset type', 'AssetType', 'assettype',
-                'Type', 'type', 'Category', 'category', 'Asset Category', 'asset category'
-            ]
             
             for col_name in possible_names:
                 if col_name in df.columns:
