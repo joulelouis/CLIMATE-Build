@@ -2972,9 +2972,9 @@ function setupSearch() {
                     <span class="input-group-text">
                         <i class="fas fa-search"></i>
                     </span>
-                    <input type="text" id="search-input" class="form-control"
+                    <input type="text" id="hazard-search-input" class="form-control"
                            placeholder="Search in table...">
-                    <button class="btn btn-outline-secondary" type="button" id="clear-search">
+                    <button class="btn btn-outline-secondary" type="button" id="hazard-clear-search">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -2992,13 +2992,13 @@ function setupSearch() {
     $('#hazard-data-table').closest('.table-responsive').before(searchHtml);
 
     // Handle search
-    $('#search-input').on('input', function() {
+    $('#hazard-search-input').on('input', function() {
         const searchTerm = $(this).val().toLowerCase().trim();
         performSearch(searchTerm);
     });
 
-    $('#clear-search').on('click', function() {
-        $('#search-input').val('');
+    $('#hazard-clear-search').on('click', function() {
+        $('#hazard-search-input').val('');
         performSearch('');
     });
 

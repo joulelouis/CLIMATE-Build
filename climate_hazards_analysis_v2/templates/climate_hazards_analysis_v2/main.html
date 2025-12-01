@@ -768,9 +768,6 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        <button type="button" class="btn btn-primary" onclick="refreshEnhancedPreview()">
-          <i class="fas fa-sync me-2"></i>Refresh
-        </button>
       </div>
     </div>
   </div>
@@ -1459,10 +1456,6 @@
         document.getElementById('enhanced-preview-content').style.display = 'none';
         document.getElementById('enhanced-preview-error').style.display = 'block';
         document.getElementById('error-message').textContent = message;
-    }
-
-    function refreshEnhancedPreview() {
-        showEnhancedPreview();
     }
 
     // =============== UPLOADED FILES MANAGEMENT ===============
