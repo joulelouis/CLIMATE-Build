@@ -255,16 +255,26 @@
                 </div>
                 <div class="card-body">
                     <p class="mb-4">
-    You have
-    <strong>{{ facility_count }}{% if polygon_assets_count > 0 %} regular assets{% endif %}</strong>
-    {% if polygon_assets_count > 0 %}
-        and <strong>{{ polygon_assets_count }} polygon asset{{ polygon_assets_count|pluralize }}</strong>
-        {% if granular_points_count > 0 %}
-            with <strong>{{ granular_points_count }} total granular point{{ granular_points_count|pluralize }}</strong>
-        {% endif %}
-    {% endif %}
-    loaded. Select the climate/weather hazards you want to analyze:
-</p>
+                        {% if facility_count > 0 and polygon_assets_count > 0 %}
+                            You have <strong>{{ facility_count }} regular asset{{ facility_count|pluralize }}</strong>
+                            and <strong>{{ polygon_assets_count }} polygon asset{{ polygon_assets_count|pluralize }}</strong>
+                            {% if granular_points_count > 0 %}
+                                with <strong>{{ granular_points_count }} total granular point{{ granular_points_count|pluralize }}</strong>
+                            {% endif %}
+                            loaded. Select the climate/weather hazards you want to analyze:
+                        {% elif facility_count > 0 %}
+                            You have <strong>{{ facility_count }} regular asset{{ facility_count|pluralize }}</strong>.
+                            Select the climate/weather hazards you want to analyze:
+                        {% elif polygon_assets_count > 0 %}
+                            You have <strong>{{ polygon_assets_count }} polygon asset{{ polygon_assets_count|pluralize }}</strong>
+                            {% if granular_points_count > 0 %}
+                                with <strong>{{ granular_points_count }} total granular point{{ granular_points_count|pluralize }}</strong>
+                            {% endif %}
+                            loaded. Select the climate/weather hazards you want to analyze:
+                        {% else %}
+                            No assets loaded. Please go back and upload facility data before selecting hazards.
+                        {% endif %}
+                    </p>
                     
                     <form id="hazard-form" method="POST" action="{% url 'climate_hazards_analysis_v2:select_hazards' %}" onsubmit="return handleFormSubmit(event)">
                         {% csrf_token %}
