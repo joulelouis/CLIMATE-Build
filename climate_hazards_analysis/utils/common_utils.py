@@ -271,15 +271,24 @@ def validate_shapefile(gdf: gpd.GeoDataFrame) -> List[str]:
     ]
 
     if not any(col.strip().lower() in facility_name_variations for col in attribute_columns):
-        # For mocked/empty frames in tests, be permissive
-        if attribute_columns:
-            raise ValueError(
-                f"Shapefile attribute table must include a facility name column. "
-                f"Looked for: {facility_name_variations}. "
-                f"Available columns: {attribute_columns}"
+        # No friendly facility column; create one instead of failing uploads
+        try:
+            gdf["facility"] = [f"Facility {i+1}" for i in range(len(gdf))]
+            if "facility" not in attribute_columns:
+                attribute_columns.append("facility")
+            logger.warning(
+                "Missing facility name column. Added fallback 'facility' column with default labels."
             )
-        else:
-            return []
+        except Exception:
+            # For mocked/empty frames in tests, be permissive
+            if attribute_columns:
+                raise ValueError(
+                    f"Shapefile attribute table must include a facility name column. "
+                    f"Looked for: {facility_name_variations}. "
+                    f"Available columns: {attribute_columns}"
+                )
+            else:
+                return []
 
     logger.info(f"Shapefile validation passed. Found {len(gdf)} features with columns: {attribute_columns}")
     return attribute_columns

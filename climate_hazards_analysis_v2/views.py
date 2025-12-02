@@ -298,13 +298,26 @@ def view_map(request):
                     for i, row in df.iterrows():
                         record = row.to_dict()
                         geom = gdf.geometry.iloc[i]
-                        if getattr(geom, "geom_type", None) == 'MultiPoint':
-                            record['geometry'] = geom.convex_hull.__geo_interface__
-                        elif getattr(geom, "geom_type", None) in ['Polygon', 'MultiPolygon']:
-                            record['geometry'] = geom.__geo_interface__
+                        geom_type = getattr(geom, "geom_type", "") or ""
+                        geom_type_lower = geom_type.lower()
 
-                        # Mark shapefile/geopackage records as polygon assets to prevent double counting
-                        record['AssetType'] = 'polygon'
+                        # Map geometry type to asset type for correct downstream handling
+                        asset_type_map = {
+                            'point': 'point',
+                            'multipoint': 'point',
+                            'linestring': 'line',
+                            'multilinestring': 'line',
+                            'polygon': 'polygon',
+                            'multipolygon': 'polygon',
+                        }
+                        record['AssetType'] = asset_type_map.get(geom_type_lower, 'unknown')
+
+                        if geom_type == 'MultiPoint':
+                            record['geometry'] = geom.convex_hull.__geo_interface__
+                        elif geom_type in ['Polygon', 'MultiPolygon']:
+                            record['geometry'] = geom.__geo_interface__
+                        elif geom_type in ['Point', 'LineString', 'MultiLineString']:
+                            record['geometry'] = geom.__geo_interface__
 
                         uploaded_facilities.append(record)
                 else:
