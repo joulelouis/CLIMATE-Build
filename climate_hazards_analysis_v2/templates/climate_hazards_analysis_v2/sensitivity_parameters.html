@@ -912,7 +912,11 @@ Adjust Sensitivity Thresholds
         const high = document.getElementById(prefix + 'High');
         if (!low || !high) return;
 
-        if (parseFloat(low.value) > parseFloat(high.value)) {
+        // Avoid fighting user input while they are typing in the high bound
+        const activeId = document.activeElement ? document.activeElement.id : '';
+        const isEditingHigh = activeId === `${prefix}HighValue` || activeId === `${prefix}MediumHigh`;
+
+        if (!isEditingHigh && parseFloat(low.value) > parseFloat(high.value)) {
             high.value = low.value;
         }
     }
@@ -941,8 +945,11 @@ Adjust Sensitivity Thresholds
     function updateSliderFromInput(prefix, bound, value) {
         try {
             const slider = document.getElementById(prefix + bound);
+            const numericValue = parseFloat(value);
+            if (!slider || Number.isNaN(numericValue)) return;
+
             if (slider) {
-                slider.value = value;
+                slider.value = numericValue;
                 updateAllDisplayValues();
             }
         } catch (error) {
