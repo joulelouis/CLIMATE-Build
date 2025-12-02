@@ -705,56 +705,86 @@
             </div>
           </div>
 
-          <!-- Regular Facilities Section -->
-          <div class="card mb-4" id="regular-facilities-section">
-            <div class="card-header bg-secondary text-white">
-              <h6 class="mb-0">
-                <i class="fas fa-map-marker-alt me-2"></i>Regular Facilities (Point Assets)
-              </h6>
-            </div>
-            <div class="card-body">
-              <div class="table-responsive" style="width: 100%;">
-                <table id="regular-facilities-table" class="table table-striped table-hover w-100">
-                  <colgroup>
-                    <col style="width: 40%;">
-                    <col style="width: 20%;">
-                    <col style="width: 20%;">
-                    <col style="width: 20%;">
-                  </colgroup>
-                  <thead class="table-light">
-                    <tr>
-                      <th>Facility Name</th>
-                      <th>Latitude</th>
-                      <th>Longitude</th>
-                      <th>Archetype</th>
-                    </tr>
-                  </thead>
-                  <tbody id="regular-facilities-body">
-                    <!-- Regular facilities will be populated here -->
-                  </tbody>
-                </table>
+          <div class="row g-3">
+            <!-- Regular Facilities Section -->
+            <div class="col-12 col-lg-6">
+              <div class="card h-100" id="regular-facilities-section">
+                <div class="card-header bg-secondary text-white">
+                  <h6 class="mb-0">
+                    <i class="fas fa-map-marker-alt me-2"></i>Regular Facilities (Point Assets)
+                  </h6>
+                </div>
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="flex-grow-1 me-2">
+                      <input type="text" class="form-control form-control-sm" placeholder="Search facilities..." oninput="handleRegularFacilitiesSearch(this.value)">
+                    </div>
+                  </div>
+                  <div class="table-responsive" style="width: 100%;">
+                    <table id="regular-facilities-table" class="table table-striped table-hover w-100">
+                      <colgroup>
+                        <col style="width: 40%;">
+                        <col style="width: 20%;">
+                        <col style="width: 20%;">
+                        <col style="width: 20%;">
+                      </colgroup>
+                      <thead class="table-light">
+                        <tr>
+                          <th>Facility Name</th>
+                          <th>Latitude</th>
+                          <th>Longitude</th>
+                          <th>Archetype</th>
+                        </tr>
+                      </thead>
+                      <tbody id="regular-facilities-body">
+                        <!-- Regular facilities will be populated here -->
+                      </tbody>
+                    </table>
+                  </div>
+                  <div id="no-regular-facilities" class="text-center text-muted py-3" style="display: none;">
+                    <i class="fas fa-inbox fa-2x mb-2"></i>
+                    <p>No regular facilities found</p>
+                  </div>
+                  <div class="d-flex justify-content-between align-items-center mt-3" id="regular-facilities-pagination" style="display: none;">
+                    <div class="small text-muted" id="regular-facilities-page-info"></div>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Regular facilities pagination">
+                      <button type="button" class="btn btn-outline-secondary" onclick="changeRegularFacilitiesPage(-1)">Previous</button>
+                      <button type="button" class="btn btn-outline-secondary" onclick="changeRegularFacilitiesPage(1)">Next</button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div id="no-regular-facilities" class="text-center text-muted py-3" style="display: none;">
-                <i class="fas fa-inbox fa-2x mb-2"></i>
-                <p>No regular facilities found</p>
-              </div>
             </div>
-          </div>
 
-          <!-- Polygon Assets Section -->
-          <div class="card mb-4" id="polygon-assets-section">
-            <div class="card-header bg-success text-white">
-              <h6 class="mb-0">
-                <i class="fas fa-draw-polygon me-2"></i>Polygon Assets
-              </h6>
-            </div>
-            <div class="card-body">
-              <div id="polygon-assets-container">
-                <!-- Polygon assets will be populated here -->
-              </div>
-              <div id="no-polygon-assets" class="text-center text-muted py-3" style="display: none;">
-                <i class="fas fa-shapes fa-2x mb-2"></i>
-                <p>No polygon assets found</p>
+            <!-- Polygon Assets Section -->
+            <div class="col-12 col-lg-6">
+              <div class="card h-100" id="polygon-assets-section">
+                <div class="card-header bg-success text-white">
+                  <h6 class="mb-0">
+                    <i class="fas fa-draw-polygon me-2"></i>Polygon Assets
+                  </h6>
+                </div>
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="flex-grow-1 me-2">
+                      <input type="text" class="form-control form-control-sm" placeholder="Search polygon assets..." oninput="handlePolygonAssetsSearch(this.value)">
+                    </div>
+                  </div>
+                  <div id="polygon-assets-container" class="flex-grow-1">
+                    <!-- Polygon assets will be populated here -->
+                  </div>
+                  <div id="no-polygon-assets" class="text-center text-muted py-3" style="display: none;">
+                    <i class="fas fa-shapes fa-2x mb-2"></i>
+                    <p>No polygon assets found</p>
+                  </div>
+                  <div class="d-flex justify-content-between align-items-center mt-3" id="polygon-assets-pagination" style="display: none;">
+                    <div class="small text-muted" id="polygon-assets-page-info"></div>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Polygon assets pagination">
+                      <button type="button" class="btn btn-outline-secondary" onclick="changePolygonAssetsPage(-1)">Previous</button>
+                      <button type="button" class="btn btn-outline-secondary" onclick="changePolygonAssetsPage(1)">Next</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -777,6 +807,16 @@
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>window.jQuery || document.write('<script src="{% static "js/jquery-3.6.0.min.js" %}"><\\/script>')</script>
 <script>
+    // Enhanced preview pagination settings
+    const REGULAR_FACILITIES_PAGE_SIZE = 10;
+    const POLYGON_ASSETS_PAGE_SIZE = 5;
+    let regularFacilitiesData = [];
+    let polygonAssetsData = [];
+    let regularFacilitiesQuery = '';
+    let polygonAssetsQuery = '';
+    let regularFacilitiesPage = 1;
+    let polygonAssetsPage = 1;
+
     // Debug console output
     console.log("Main script loaded");
 
@@ -1262,10 +1302,10 @@
         updateSummaryStats(data.summary);
 
         // Display regular facilities
-        displayRegularFacilities(data.regular_facilities);
+        setRegularFacilities(data.regular_facilities);
 
         // Display polygon assets (granular points disabled)
-        displayPolygonAssets(data.polygon_assets);
+        setPolygonAssets(data.polygon_assets);
 
         // Hide loading and show content
         document.getElementById('enhanced-preview-loading').style.display = 'none';
@@ -1278,22 +1318,61 @@
         document.getElementById('summary-total-all').textContent = summary.total_facilities;
     }
 
-    function displayRegularFacilities(facilities) {
+    function setRegularFacilities(facilities) {
+        regularFacilitiesData = Array.isArray(facilities) ? facilities : [];
+        regularFacilitiesPage = 1;
+        regularFacilitiesQuery = '';
+        renderRegularFacilities();
+    }
+
+    function changeRegularFacilitiesPage(delta) {
+        renderRegularFacilities(regularFacilitiesPage + delta);
+    }
+
+    function handleRegularFacilitiesSearch(query) {
+        regularFacilitiesQuery = (query || '').trim().toLowerCase();
+        regularFacilitiesPage = 1;
+        renderRegularFacilities();
+    }
+
+    function renderRegularFacilities(page = 1) {
         const tbody = document.getElementById('regular-facilities-body');
         const noFacilitiesMsg = document.getElementById('no-regular-facilities');
         const table = document.getElementById('regular-facilities-table');
+        const pagination = document.getElementById('regular-facilities-pagination');
+        const pageInfo = document.getElementById('regular-facilities-page-info');
 
         // Clear existing content
         tbody.innerHTML = '';
 
-        if (facilities.length === 0) {
+        const filtered = regularFacilitiesData.filter(facility => {
+            if (!regularFacilitiesQuery) return true;
+            const haystack = [
+                facility.Facility,
+                facility.Archetype,
+                facility.Lat,
+                facility.Latitude,
+                facility.Long,
+                facility.Longitude
+            ].map(v => (v === undefined || v === null) ? '' : String(v).toLowerCase()).join(' ');
+            return haystack.includes(regularFacilitiesQuery);
+        });
+
+        const total = filtered.length;
+        if (total === 0) {
             noFacilitiesMsg.style.display = 'block';
             if (table) table.style.display = 'none';
+            if (pagination) pagination.style.display = 'none';
         } else {
             noFacilitiesMsg.style.display = 'none';
             if (table) table.style.display = 'table';
 
-            facilities.forEach(facility => {
+            const totalPages = Math.ceil(total / REGULAR_FACILITIES_PAGE_SIZE);
+            regularFacilitiesPage = Math.min(Math.max(page, 1), totalPages);
+            const start = (regularFacilitiesPage - 1) * REGULAR_FACILITIES_PAGE_SIZE;
+            const slice = filtered.slice(start, start + REGULAR_FACILITIES_PAGE_SIZE);
+
+            slice.forEach(facility => {
                 const row = tbody.insertRow();
                 row.innerHTML = `
                     <td>${facility.Facility || 'N/A'}</td>
@@ -1302,27 +1381,83 @@
                     <td>${facility.Archetype || 'N/A'}</td>
                 `;
             });
+
+            if (pagination && pageInfo) {
+                pagination.style.display = 'flex';
+                pageInfo.textContent = `Page ${regularFacilitiesPage} of ${totalPages}`;
+                const buttons = pagination.querySelectorAll('button');
+                if (buttons.length === 2) {
+                    buttons[0].disabled = regularFacilitiesPage === 1;
+                    buttons[1].disabled = regularFacilitiesPage === totalPages;
+                }
+            }
         }
     }
 
-    function displayPolygonAssets(polygonAssets) {
+    function setPolygonAssets(polygonAssets) {
+        polygonAssetsData = Array.isArray(polygonAssets) ? polygonAssets : [];
+        polygonAssetsPage = 1;
+        polygonAssetsQuery = '';
+        renderPolygonAssets();
+    }
+
+    function changePolygonAssetsPage(delta) {
+        renderPolygonAssets(polygonAssetsPage + delta);
+    }
+
+    function handlePolygonAssetsSearch(query) {
+        polygonAssetsQuery = (query || '').trim().toLowerCase();
+        polygonAssetsPage = 1;
+        renderPolygonAssets();
+    }
+
+    function renderPolygonAssets(page = 1) {
         const container = document.getElementById('polygon-assets-container');
         const noAssetsMsg = document.getElementById('no-polygon-assets');
+        const pagination = document.getElementById('polygon-assets-pagination');
+        const pageInfo = document.getElementById('polygon-assets-page-info');
 
         // Clear existing content
         container.innerHTML = '';
 
-        if (polygonAssets.length === 0) {
+        const filtered = polygonAssetsData.filter(asset => {
+            if (!polygonAssetsQuery) return true;
+            const haystack = [
+                asset.name,
+                asset.archetype,
+                asset.granular_analysis_status
+            ].map(v => (v === undefined || v === null) ? '' : String(v).toLowerCase()).join(' ');
+            return haystack.includes(polygonAssetsQuery);
+        });
+
+        const total = filtered.length;
+        if (total === 0) {
             noAssetsMsg.style.display = 'block';
+            if (pagination) pagination.style.display = 'none';
         } else {
             noAssetsMsg.style.display = 'none';
 
-            console.log('Enhanced preview polygon assets:', polygonAssets);
+            const totalPages = Math.ceil(total / POLYGON_ASSETS_PAGE_SIZE);
+            polygonAssetsPage = Math.min(Math.max(page, 1), totalPages);
+            const start = (polygonAssetsPage - 1) * POLYGON_ASSETS_PAGE_SIZE;
+            const slice = filtered.slice(start, start + POLYGON_ASSETS_PAGE_SIZE);
 
-            polygonAssets.forEach(asset => {
+            console.log('Enhanced preview polygon assets:', slice);
+
+            slice.forEach(asset => {
                 const assetCard = createPolygonAssetCard(asset);
                 container.appendChild(assetCard);
             });
+
+            if (pagination && pageInfo) {
+                pagination.style.display = 'flex';
+                pageInfo.textContent = `Page ${polygonAssetsPage} of ${totalPages}`;
+                const buttons = pagination.querySelectorAll('button');
+                if (buttons.length === 2) {
+                    buttons[0].disabled = polygonAssetsPage === 1;
+                    buttons[1].disabled = polygonAssetsPage === totalPages;
+                }
+            }
         }
     }
 
