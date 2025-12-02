@@ -1203,33 +1203,23 @@ function performSearch(searchTerm) {
 // EXCEL EXPORT FUNCTIONALITY
 function exportToExcel() {
     try {
-        // Get visible columns
-        const visibleColumns = [];
-        const visibleColumnNames = [];
-
-        Object.keys(tableState.columnHeaderMap).forEach(function(columnName) {
-            const columnIndex = tableState.columnHeaderMap[columnName];
-            const $header = $(`#sensitivity-data-table thead tr.custom-table-header th:nth-child(${columnIndex + 1})`);
-
-            if ($header.is(':visible')) {
-                visibleColumns.push(columnIndex);
-                visibleColumnNames.push(columnName);
+        // Get visible headers and their indexes (DOM-based to mirror current view)
+        const visibleHeaders = [];
+        const visibleIndexes = [];
+        $('#sensitivity-data-table thead tr.custom-table-header th').each(function(idx) {
+            if ($(this).is(':visible')) {
+                visibleHeaders.push($(this).text().trim());
+                visibleIndexes.push(idx);
             }
         });
 
-        // Prepare data for export
-        const exportData = [];
-
-        // Add headers
-        exportData.push(visibleColumnNames);
-
-        // Add data rows (use all filtered data, not just current page)
-        tableState.filteredRows.forEach(function(row) {
-            const rowData = [];
-            visibleColumns.forEach(function(colIndex) {
-                // Extract text content without HTML tags
-                const cellValue = $(row.data[colIndex]).text().trim();
-                rowData.push(cellValue);
+        // Build data rows from visible table cells
+        const exportData = [visibleHeaders];
+        $('#sensitivity-data-table tbody tr:visible').each(function() {
+            const $row = $(this);
+            const rowData = visibleIndexes.map(colIdx => {
+                const cellText = $row.find('td').eq(colIdx).text().trim();
+                return cellText;
             });
             exportData.push(rowData);
         });
@@ -1241,9 +1231,10 @@ function exportToExcel() {
         // Add worksheet to workbook
         XLSX.utils.book_append_sheet(wb, ws, "Sensitivity Results");
 
-        // Generate filename with timestamp
-        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-        const filename = `sensitivity_analysis_${timestamp}.xlsx`;
+        // Generate filename with date stamp: sensitivity_results_year_month_date.xlsx
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}_${String(now.getDate()).padStart(2, '0')}`;
+        const filename = `sensitivity_results_${dateStr}.xlsx`;
 
         // Save file
         XLSX.writeFile(wb, filename);

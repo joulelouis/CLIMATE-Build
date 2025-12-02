@@ -1381,6 +1381,9 @@ Climate Hazard Analysis Results
 <script>window.JSZip || document.write('<script src="{% static "js/jszip.min.js" %}"><\\/script>')</script>
 <script src="https://cdn.datatables.net/buttons/2.3.6/js/buttons.html5.min.js"></script>
 <script>if (!($.fn && $.fn.dataTable && $.fn.dataTable.Buttons)) document.write('<script src="{% static "js/buttons.html5.min.js" %}"><\\/script>')</script>
+<!-- XLSX library for Excel export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>if (typeof XLSX === 'undefined') document.write('<script src="{% static "js/xlsx.full.min.js" %}"><\\/script>')</script>
 <script src="https://cdn.datatables.net/buttons/2.3.6/js/buttons.print.min.js"></script>
 <script>if (!($.fn && $.fn.dataTable && $.fn.dataTable.Buttons)) document.write('<script src="{% static "js/buttons.print.min.js" %}"><\\/script>')</script>
 <script src="https://cdn.datatables.net/fixedcolumns/4.2.2/js/dataTables.fixedColumns.min.js"></script>
@@ -3200,47 +3203,9 @@ function exportTableToExcel() {
         const originalText = $exportBtn.html();
         $exportBtn.html('<i class="fas fa-spinner fa-spin"></i> Exporting...').prop('disabled', true);
 
-        // Try backend Excel export first (if available)
-        tryBackendExport()
-            .then(response => {
-                // If backend export succeeds, download the Excel file
-                if (response.ok) {
-                    return response.blob().then(blob => {
-                        // Get filename from Content-Disposition header
-                        const contentDisposition = response.headers.get('Content-Disposition');
-                        let filename = 'climate_hazard_exposure_results.xlsx';
-                        if (contentDisposition) {
-                            const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-                            if (filenameMatch) {
-                                filename = filenameMatch[1];
-                            }
-                        }
-
-                        // Create download link
-                        const url = window.URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = filename;
-                        document.body.appendChild(a);
-                        a.click();
-                        window.URL.revokeObjectURL(url);
-                        document.body.removeChild(a);
-
-                        console.log('Excel export completed successfully via backend');
-                    });
-                } else {
-                    throw new Error('Backend export failed');
-                }
-            })
-            .catch(error => {
-                console.warn('Backend export not available, falling back to CSV export:', error);
-                // Fallback to frontend CSV export
-                performCSVExport();
-            })
-            .finally(() => {
-                // Restore button state
-                $exportBtn.html(originalText).prop('disabled', false);
-            });
+        // Perform export synchronously; restore button state afterward
+        performExcelExport();
+        $exportBtn.html(originalText).prop('disabled', false);
 
     } catch (error) {
         console.error('Export error:', error);
@@ -3385,6 +3350,99 @@ function downloadCSV(csv, filename) {
     } catch (error) {
         console.error('Download error:', error);
         throw new Error('Failed to download file: ' + error.message);
+    }
+}
+
+// Frontend Excel export for hazard exposure table
+function performExcelExport() {
+    try {
+        console.log('Starting Excel export (frontend)...');
+
+        // Get current filtered data
+        let exportData = tableState.filteredRows.map(row => {
+            // Convert HTML row back to data object
+            const rowData = {};
+            const $tempDiv = $('<div>').html(row.element);
+            const $cells = $tempDiv.find('td');
+
+            // Get column names from the table headers
+            const $headers = $('#hazard-data-table thead tr.custom-table-header th');
+            $headers.each(function(colIndex) {
+                const columnName = $(this).attr('data-column-name') || $(this).text().trim();
+                const $cell = $cells.eq(colIndex);
+
+                if ($cell.length > 0) {
+                    // Get the text content, removing HTML tags
+                    let cellValue = $cell.text().trim();
+
+                    // Handle special cases for styling
+                    if ($cell.find('span').length > 0) {
+                        cellValue = $cell.find('span').first().text().trim();
+                    }
+
+                    rowData[columnName] = cellValue;
+                }
+            });
+
+            return rowData;
+        });
+
+        // Get visible columns only
+        const visibleColumns = [];
+        const visibleColumnNames = new Set(['Facility']); // Always include Facility
+
+        // Add base columns if checked
+        $('.base-column:checked').each(function() {
+            const columnName = $(this).data('column');
+            visibleColumnNames.add(columnName);
+        });
+
+        // Add hazard columns if checked
+        $('.hazard-column:checked').each(function() {
+            const columnName = $(this).data('column');
+            visibleColumnNames.add(columnName);
+        });
+
+        // Get column order from the table
+        $('#hazard-data-table thead tr.custom-table-header th').each(function() {
+            const columnName = $(this).attr('data-column-name') || $(this).text().trim();
+            if (visibleColumnNames.has(columnName)) {
+                visibleColumns.push(columnName);
+            }
+        });
+
+        console.log(`Exporting ${exportData.length} rows with ${visibleColumns.length} columns`);
+
+        // Build header and rows for Excel
+        const headerRow = visibleColumns.map(col => col === 'Facility' ? 'Asset' : col);
+        const dataRows = exportData.map(row => visibleColumns.map(col => row[col] !== undefined ? row[col] : ''));
+        const worksheetData = [headerRow, ...dataRows];
+
+        // Create workbook and worksheet
+        const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Hazard Exposure');
+
+        // Autosize columns
+        const colWidths = headerRow.map((header, idx) => {
+            const columnValues = [header, ...dataRows.map(r => r[idx] || '')];
+            const maxLen = Math.max(...columnValues.map(val => String(val).length), header.length);
+            return { wch: Math.min(Math.max(maxLen + 2, 10), 50) };
+        });
+        worksheet['!cols'] = colWidths;
+
+        // Filename: hazard_exposure_analysis_year_month_date.xlsx
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}_${String(now.getDate()).padStart(2, '0')}`;
+        const filename = `hazard_exposure_analysis_${dateStr}.xlsx`;
+
+        XLSX.writeFile(workbook, filename);
+        console.log('Excel export completed successfully');
+
+    } catch (error) {
+        console.error('Excel export error:', error);
+        showError('Export failed: ' + error.message);
+        throw error;
     }
 }
 
