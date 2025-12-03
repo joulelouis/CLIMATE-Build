@@ -1290,6 +1290,10 @@ Climate Hazard Analysis Results
                                             <label class="form-label"><strong>Override Value <span class="text-danger">*</span></strong></label>
                                             <input type="text" id="override-value" class="form-control" placeholder="Enter override value" required>
                                         </div>
+                                        <div class="mb-3 d-none" id="override-flood-raw-group">
+                                            <label class="form-label"><strong>Flood depth (meters) value</strong></label>
+                                            <input type="number" step="any" id="override-flood-raw" class="form-control" placeholder="Enter depth in meters">
+                                        </div>
                                         <div class="mb-3">
                                             <label class="form-label"><strong>Reason/Explanation <span class="text-danger">*</span></strong></label>
                                             <textarea id="override-reason" class="form-control" required></textarea>
@@ -1511,15 +1515,60 @@ function attachEditableHandlers() {
 
 let overrideModalInstance;
 
+    function categorizeFloodDepthFromNumber(val) {
+        const num = parseFloat(val);
+        if (isNaN(num)) return '';
+        if (num < 0.1) return 'Little to none';
+        if (num < 0.5) return '0.1 to 0.5';
+        if (num <= 1.5) return '0.5 to 1.5';
+        return 'Greater than 1.5';
+    }
+
 function openOverrideModal($cell) {
     currentEditCell = $cell;
     const facilityName = $cell.closest('tr').find('td').first().text().trim();
     $('#override-facility').val(facilityName);
-    $('#override-field').val($cell.attr('data-column'));
+    const columnName = $cell.attr('data-column') || '';
+    $('#override-field').val(columnName);
     const currentValue = $cell.attr('data-original-value') || $cell.text().trim();
+    const rawFloodAttr = $cell.attr('data-flood-raw');
+    let numericFlood = parseFloat(rawFloodAttr);
+    if (isNaN(numericFlood)) {
+        const parsed = parseFloat(currentValue);
+        numericFlood = isNaN(parsed) ? null : parsed;
+    }
+
+    // Default override value: current cell text
     $('#override-value').val(currentValue);
     $('#override-reason').val($cell.attr('data-reason') || '');
     $('#override-file').val('');
+
+    // Show raw flood value (numeric) when applicable
+    const rawGroup = $('#override-flood-raw-group');
+    const rawInput = $('#override-flood-raw');
+    if (columnName.startsWith('Flood Depth (meters)')) {
+        rawGroup.removeClass('d-none');
+        if (numericFlood !== null && !isNaN(numericFlood)) {
+            rawInput.val(numericFlood);
+            $('#override-value').val(categorizeFloodDepthFromNumber(numericFlood));
+        } else {
+            rawInput.val('');
+        }
+        rawInput.prop('readonly', false);
+        $('#override-value').prop('readonly', true);
+
+        // Keep override value in sync with numeric flood depth
+        rawInput.off('input').on('input', function() {
+            const bucket = categorizeFloodDepthFromNumber($(this).val());
+            if (bucket) {
+                $('#override-value').val(bucket);
+            }
+        });
+    } else {
+        rawGroup.addClass('d-none');
+        rawInput.val('');
+        $('#override-value').prop('readonly', false);
+    }
 
     if (!overrideModalInstance) {
         overrideModalInstance = new bootstrap.Modal(document.getElementById('overrideModal'));
@@ -1532,7 +1581,8 @@ $(document).on('submit', '#override-form', function(e) {
     e.preventDefault();
     if (!currentEditCell) return;
 
-    const newValue = $('#override-value').val().trim();
+    let newValue = $('#override-value').val().trim();
+    const rawFloodVal = $('#override-flood-raw').val().trim();
     const reason = $('#override-reason').val().trim();
     const columnName = currentEditCell.attr('data-column');
     const rowIndex = parseInt(currentEditCell.attr('data-row'), 10);
@@ -1543,7 +1593,7 @@ $(document).on('submit', '#override-form', function(e) {
     $submitButton.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
 
     // Save the cell with enhanced error handling
-    console.log('Submitting override:', { newValue, reason, columnName, rowIndex });
+    console.log('Submitting override:', { newValue, reason, columnName, rowIndex, rawFloodVal });
     const $tempInput = $('<input>').val(newValue);
     saveCellEnhanced(currentEditCell, $tempInput, rowIndex, columnName, reason)
         .then(() => {
@@ -1558,7 +1608,8 @@ $(document).on('submit', '#override-form', function(e) {
             currentEditCell.attr('data-original-value', newValue)
                 .attr('data-reason', reason)
                 .attr('title', reason || '')
-                .attr('data-bs-toggle', 'tooltip');
+                .attr('data-bs-toggle', 'tooltip')
+                .attr('data-flood-raw', columnName.startsWith('Flood Depth (meters)') ? rawFloodVal : currentEditCell.attr('data-flood-raw'));
 
             // Add visual indication that value was overridden
             currentEditCell.addClass('override-value');
@@ -1871,9 +1922,10 @@ function getInputType(columnName, currentValue) {
     if (columnName.startsWith('Water Stress Exposure')) {
         return 'number';
     }
-    const numberColumns = [
-        'Flood Depth (meters)', 'Days over 30° Celsius', 'Days over 33° Celsius',
-        'Days over 35° Celsius', 'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
+const numberColumns = [
+        'Flood Depth (meters)',
+        'Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius',
+        'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
         '2030 Sea Level Rise (meters) - Moderate Case', '2040 Sea Level Rise (meters) - Moderate Case', '2050 Sea Level Rise (meters) - Moderate Case', '2030 Sea Level Rise (meters) - Worst Case', '2040 Sea Level Rise (meters) - Worst Case', '2050 Sea Level Rise (meters) - Worst Case',
         'Extreme Windspeed 10 year Return Period (km/h)',
         'Extreme Windspeed 20 year Return Period (km/h)',
@@ -2048,10 +2100,12 @@ function saveCell($cell, $input, rowIndex, columnName) {
 
     let displayHTML = newValue;
 
-    if (columnName === 'Flood Depth (meters)' && newValue !== 'N/A') {
-        const fd = categorizeFloodDepth(newValue);
-        displayHTML = `<span style="color: ${fd.color}; font-weight: bold;">${fd.text}</span>`;
-        newValue = fd.text;
+    if (columnName === 'Flood Depth (meters)') {
+        const numericFlood = parseFloat(rawFloodVal || newValue);
+        const fd = categorizeFloodDepthFromNumber(numericFlood);
+        const displayBucket = fd || newValue;
+        displayHTML = `<span style="color: ${categorizeFloodDepth(displayBucket).color}; font-weight: bold;">${displayBucket}</span>`;
+        newValue = displayBucket;
     }
 
     if (columnName.includes('Storm Surge Flood Depth (meters)') && newValue !== 'N/A') {
@@ -2120,11 +2174,11 @@ function validateCellValue(value, columnName) {
         return !isNaN(numValue) && isFinite(numValue);
     }
     
-    const numberColumns = [
+const numberColumns = [
         'Flood Depth (meters)',
         'Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius',
         'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
-        'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
+        'Water Stress Exposure (%)', 'Water Stress Exposure 2030 (%) - Moderate Case', 'Water Stress Exposure 2050 (%) - Moderate Case', 'Water Stress Exposure 2030 (%) - Worst Case', 'Water Stress Exposure 2050 (%) - Worst Case',
         '2030 Sea Level Rise (meters) - Moderate Case', '2040 Sea Level Rise (meters) - Moderate Case', '2050 Sea Level Rise (meters) - Moderate Case', '2030 Sea Level Rise (meters) - Worst Case', '2040 Sea Level Rise (meters) - Worst Case', '2050 Sea Level Rise (meters) - Worst Case',
         'Extreme Windspeed 10 year Return Period (km/h)',
         'Extreme Windspeed 20 year Return Period (km/h)',

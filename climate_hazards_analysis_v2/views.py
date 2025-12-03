@@ -1752,7 +1752,11 @@ def show_results(request):
         
         # Create a mapping for each hazard type and its columns
         hazard_columns = {
-            'Flood': ['Flood Depth (meters)'],
+            'Flood': [
+                'Flood Depth (meters)',
+                'Flood Depth (meters) - Moderate Case',
+                'Flood Depth (meters) - Worst Case'
+            ],
             'Water Stress': [
                 'Water Stress Exposure (%)',
                 'Water Stress Exposure 2030 (%) - Moderate Case',

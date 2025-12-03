@@ -163,7 +163,7 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None):
                 for stat in stats
             ]
 
-            # Classify exposure based on flood depth
+            # Classify exposure based on flood depth (for logging)
             exposure_values = [determine_exposure(p) for p in percentile_values]
 
             # Log exposure distribution for this scenario
@@ -175,8 +175,8 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None):
             for exp_level, count in exposure_counts.items():
                 print(f"    {exp_level}: {count} facilities")
 
-            # Add scenario data to combined results
-            combined_gdf[column_name] = exposure_values
+            # Add numeric scenario data to combined results
+            combined_gdf[column_name] = percentile_values
             result_columns.append(column_name)
 
             print(f"  > Scenario '{scenario}' completed successfully")
