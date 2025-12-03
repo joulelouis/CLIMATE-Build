@@ -479,12 +479,12 @@ View Sensitivity Results
                                                                         <span class="risk-low">{{ value }}</span>
                                                                     {% elif value == "0.5 to 1.5" %}
                                                                         <span class="risk-medium">{{ value }}</span>
-                                                                    {% elif value == "Greater than 1.5" %}
-                                                                        <span class="risk-high">{{ value }}</span>
+                                                                    {% elif value == "Greater than 1.5" or value == ">= 1.5" or value == "≥ 1.5" %}
+                                                                        <span class="risk-high">≥ 1.5</span>
                                                                     {% elif value == "Unknown" %}
                                                                         <span class="risk-unknown">{{ value }}</span>
                                                                     {% else %}
-                                                                        {{ value }}
+                                                                        <span class="risk-medium">{{ value }}</span>
                                                                     {% endif %}
 
                                                                 {# Heat exposure styling with archetype-specific thresholds #}
