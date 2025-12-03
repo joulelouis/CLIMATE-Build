@@ -479,7 +479,7 @@ View Sensitivity Results
                                                                         <span class="risk-low">{{ value }}</span>
                                                                     {% elif value == "0.5 to 1.5" %}
                                                                         <span class="risk-medium">{{ value }}</span>
-                                                                    {% elif value == "Greater than 1.5" or value == ">= 1.5" or value == "≥ 1.5" %}
+                                                                    {% elif value == "Greater than 1.5" or value == ">= 1.5" or value == ">1.5" or value == "> 1.5" or value == "≥ 1.5" %}
                                                                         <span class="risk-high">≥ 1.5</span>
                                                                     {% elif value == "Unknown" %}
                                                                         <span class="risk-unknown">{{ value }}</span>
@@ -638,7 +638,7 @@ let tableState = {
     allRows: [],
     filteredRows: [],
     currentPage: 1,
-    rowsPerPage: 25,
+    rowsPerPage: 10,
     sortColumn: null,
     sortDirection: 'asc',
     searchTerm: ''
@@ -1035,7 +1035,8 @@ function renderTable() {
 }
 
 function updateColumnVisibilityOnRows() {
-    const visibleColumns = new Set(['Facility', 'Asset Archetype']);
+    // Always keep asset identity columns visible
+    const visibleColumns = new Set(['Asset', 'Facility', 'Asset Archetype']);
 
     $('.hazard-column').each(function() {
         const columnName = $(this).data('column');
@@ -1059,11 +1060,7 @@ function setupPagination() {
                 <div class="d-flex align-items-center">
                     <label for="rows-per-page" class="me-2">Rows per page:</label>
                     <select id="rows-per-page" class="form-select" style="width: auto;">
-                        <option value="10">10</option>
-                        <option value="25" selected>25</option>
-                        <option value="50">50</option>
-                        <option value="100">100</option>
-                        <option value="-1">All</option>
+                        <option value="10" selected>10</option>
                     </select>
                     <span id="table-info" class="ms-3 text-muted"></span>
                 </div>
