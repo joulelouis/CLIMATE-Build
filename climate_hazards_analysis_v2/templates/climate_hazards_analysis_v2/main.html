@@ -496,19 +496,19 @@
                     <div class="card-body upload-card-body">
                         <div class="file-input-wrapper">
                             <!-- File Input Container -->
-                            <div class="file-upload-box" onclick="document.getElementById('facilityCsv').click()">
+                            <label class="file-upload-box" for="facilityCsv" style="cursor: pointer;">
                                 <!-- Upload Icon -->
                                 <i class="fas fa-upload upload-icon"></i>
                                 
                                 <!-- Choose File Text -->
-                                <label for="facilityCsv" class="upload-label">
+                                <span class="upload-label">
                                     Choose File
-                                </label>
+                                </span>
                                 
                                 <!-- File Name Display -->
-                                <p id="file-name" class="file-name-display">{{ uploaded_file_name|default:"No file chosen" }}</p>
-                            </div>
-                            <input id="facilityCsv" name="facility_csv" type="file" class="d-none" multiple onchange="updateFileName()" />
+                                <p id="file-name" class="file-name-display mb-0">{{ uploaded_file_name|default:"No file chosen" }}</p>
+                            </label>
+                            <input id="facilityCsv" name="facility_csv" type="file" class="d-none" multiple accept=".csv,.xlsx,.xls,.zip,.gpkg,.shp" onchange="updateFileName()" />
                         </div>
 
                         <div class="alert alert-info mt-3" role="alert" style="margin-right: 40px;">
@@ -573,8 +573,6 @@
                         </div>
                     </div>
                 </div>
-                <!-- Hidden File Input -->
-                <input type="file" name="facility_csv" id="facilityCsv" accept=".csv,.xlsx,.xls,.zip,.gpkg,.shp" class="d-none" multiple onchange="updateFileName()">
             </form>
         </div>
         
@@ -816,26 +814,10 @@
     let polygonAssetsQuery = '';
     let regularFacilitiesPage = 1;
     let polygonAssetsPage = 1;
+    let uploadInProgress = false;
 
     // Debug console output
     console.log("Main script loaded");
-
-    // Show loading overlay when form is submitted
-    document.getElementById('upload-form').addEventListener('submit', function() {
-        document.getElementById('loading-overlay').style.display = 'flex';
-    });
-    
-    function updateFileName() {
-        var input = document.getElementById("facilityCsv");
-        var fileNameDisplay = document.getElementById("file-name");
-  
-        if (input.files.length > 0) {
-            fileNameDisplay.textContent = input.files[0].name;
-            document.getElementById('upload-form').submit();
-        } else {
-            fileNameDisplay.textContent = "No file chosen";
-        }
-    }
 
     // Function to read the uploaded file and populate the preview table in the modal
     function previewFile() {
@@ -1823,6 +1805,10 @@
         const fileNameDisplay = document.getElementById("file-name");
 
         if (input.files.length > 0) {
+            if (uploadInProgress) {
+                return; // prevent double submission / double dialog
+            }
+            uploadInProgress = true;
             const names = Array.from(input.files).map(f => f.name).join(', ');
             fileNameDisplay.textContent = names;
             document.getElementById('upload-form').submit();
@@ -1831,9 +1817,14 @@
             setTimeout(() => {
                 loadUploadedFiles();
             }, 2000); // Wait 2 seconds for upload to complete
+            // Safety reset in case navigation/submit is blocked
+            setTimeout(() => {
+                uploadInProgress = false;
+            }, 8000);
 
         } else {
             fileNameDisplay.textContent = "No file chosen";
+            uploadInProgress = false;
         }
     }
 
