@@ -1523,7 +1523,8 @@ let overrideModalInstance;
 
 function openOverrideModal($cell) {
     currentEditCell = $cell;
-    const facilityName = $cell.closest('tr').find('td').first().text().trim();
+    const $row = $cell.closest('tr');
+    const facilityName = $row.data('facility-name') || $row.data('parent-facility') || $row.find('td').first().text().trim();
     $('#override-facility').val(facilityName);
     const columnName = $cell.attr('data-column') || '';
     $('#override-field').val(columnName);
@@ -1662,7 +1663,8 @@ function validateAnalysisContext() {
 function saveCellEnhanced($cell, $input, rowIndex, columnName, reason) {
     return new Promise((resolve, reject) => {
         const oldValue = $cell.attr('data-original-value') || $cell.text().trim();
-        const facilityName = $cell.closest('tr').find('td').first().text().trim();
+        const $row = $cell.closest('tr');
+        const facilityName = $row.data('facility-name') || $row.data('parent-facility') || $row.find('td').first().text().trim();
         const newValue = $input.val().trim();
 
         // Input validation
@@ -1685,29 +1687,23 @@ function saveCellEnhanced($cell, $input, rowIndex, columnName, reason) {
             reason: reason || ''
         };
 
-        // Pre-flight validation
-        validateAnalysisContext()
-            .then(contextResponse => {
-                console.log('Analysis context validated:', contextResponse);
+        // Show loading state
+        showToast('Saving override...', 'info');
 
-                // Show loading state
-                showToast('Saving override...', 'info');
+        const changesData = {
+            changes: [change],
+            csrf_token: $('[name=csrfmiddlewaretoken]').val()
+        };
 
-                const changesData = {
-                    changes: [change],
-                    csrf_token: $('[name=csrfmiddlewaretoken]').val()
-                };
-
-                return $.ajax({
-                    url: '/climate-hazards-analysis-v2/save-table-changes/',
-                    method: 'POST',
-                    data: JSON.stringify(changesData),
-                    contentType: 'application/json',
-                    headers: {
-                        'X-CSRFToken': $('[name=csrfmiddlewaretoken]').val()
-                    }
-                });
-            })
+        $.ajax({
+            url: '/climate-hazards-analysis-v2/save-table-changes/',
+            method: 'POST',
+            data: JSON.stringify(changesData),
+            contentType: 'application/json',
+            headers: {
+                'X-CSRFToken': $('[name=csrfmiddlewaretoken]').val()
+            }
+        })
             .then(response => {
                 if (response.success) {
                     // Show success message with appropriate context
