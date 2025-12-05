@@ -1953,10 +1953,66 @@ def show_results(request):
         plot_path = result.get('plot_path')
         all_plots = result.get('all_plots', [])
 
+        # Standardize column ordering to match header mapping
+        HEADER_ORDER = [
+            'Facility', 'Asset Archetype',
+            # Flood
+            'Flood Depth (meters)',
+            'Flood Depth (meters) - Moderate Case',
+            'Flood Depth (meters) - Worst Case',
+            # Water Stress
+            'Water Stress Exposure (%)',
+            'Water Stress Exposure 2030 (%) - Moderate Case',
+            'Water Stress Exposure 2050 (%) - Moderate Case',
+            'Water Stress Exposure 2030 (%) - Worst Case',
+            'Water Stress Exposure 2050 (%) - Worst Case',
+            # Sea Level Rise
+            '2030 Sea Level Rise (meters) - Moderate Case',
+            '2040 Sea Level Rise (meters) - Moderate Case',
+            '2050 Sea Level Rise (meters) - Moderate Case',
+            '2030 Sea Level Rise (meters) - Worst Case',
+            '2040 Sea Level Rise (meters) - Worst Case',
+            '2050 Sea Level Rise (meters) - Worst Case',
+            # Tropical Cyclone
+            'Extreme Windspeed 10 year Return Period (km/h)',
+            'Extreme Windspeed 20 year Return Period (km/h)',
+            'Extreme Windspeed 50 year Return Period (km/h)',
+            'Extreme Windspeed 100 year Return Period (km/h)',
+            'Extreme Windspeed 10 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 20 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 50 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 100 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 10 year Return Period (km/h) - Worst Case',
+            'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
+            'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
+            'Extreme Windspeed 100 year Return Period (km/h) - Worst Case',
+            # Heat
+            'Days over 30° Celsius',
+            'Days over 33° Celsius',
+            'Days over 35° Celsius',
+            'Days over 35° Celsius (2026 - 2030) - Moderate Case',
+            'Days over 35° Celsius (2031 - 2040) - Moderate Case',
+            'Days over 35° Celsius (2041 - 2050) - Moderate Case',
+            'Days over 35° Celsius (2026 - 2030) - Worst Case',
+            'Days over 35° Celsius (2031 - 2040) - Worst Case',
+            'Days over 35° Celsius (2041 - 2050) - Worst Case',
+            # Storm Surge
+            'Storm Surge Flood Depth (meters)',
+            'Storm Surge Flood Depth (meters) - Worst Case',
+            # Rainfall-Induced Landslide
+            'Rainfall-Induced Landslide (factor of safety)',
+            'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
+            'Rainfall-Induced Landslide (factor of safety) - Worst Case',
+        ]
+        ordered_cols = [c for c in HEADER_ORDER if c in df.columns]
+        tail_cols = [c for c in df.columns if c not in ordered_cols]
+        df = df.reindex(columns=ordered_cols + tail_cols)
+        columns = df.columns.tolist()
+
         # Store analysis results in session for potential reuse
         request.session['climate_hazards_v2_results'] = {
             'data': df.to_dict(orient="records"),
-            'columns': df.columns.tolist(),
+            'columns': columns,
             'plot_path': plot_path if plot_path else None,
             'all_plots': all_plots
         }
