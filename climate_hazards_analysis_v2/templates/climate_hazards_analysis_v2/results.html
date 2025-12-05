@@ -2693,6 +2693,164 @@ function updateGroupAndScenarioHeaders() {
     console.log('Group and scenario headers updated dynamically');
 }
 
+// === GROUP AND SCENARIO HEADER MANAGEMENT (mapping-driven override) ===
+const HEADER_SCENARIO_MAPPING = {
+    'Asset Information': {
+        '': ['Facility', 'Asset Archetype']
+    },
+    'Flood': {
+        'Current': ['Flood Depth (meters)'],
+        'Future (Moderate Case)': ['Flood Depth (meters) - Moderate Case'],
+        'Future (Worst Case)': ['Flood Depth (meters) - Worst Case']
+    },
+    'Water Stress': {
+        'Current': ['Water Stress Exposure (%)'],
+        'Future (Moderate Case)': [
+            'Water Stress Exposure 2030 (%) - Moderate Case',
+            'Water Stress Exposure 2050 (%) - Moderate Case'
+        ],
+        'Future (Worst Case)': [
+            'Water Stress Exposure 2030 (%) - Worst Case',
+            'Water Stress Exposure 2050 (%) - Worst Case'
+        ]
+    },
+    'Sea Level Rise': {
+        'Future (Moderate Case)': [
+            '2030 Sea Level Rise (meters) - Moderate Case',
+            '2040 Sea Level Rise (meters) - Moderate Case',
+            '2050 Sea Level Rise (meters) - Moderate Case'
+        ],
+        'Future (Worst Case)': [
+            '2030 Sea Level Rise (meters) - Worst Case',
+            '2040 Sea Level Rise (meters) - Worst Case',
+            '2050 Sea Level Rise (meters) - Worst Case'
+        ]
+    },
+    'Tropical Cyclones': {
+        'Current': [
+            'Extreme Windspeed 10 year Return Period (km/h)',
+            'Extreme Windspeed 20 year Return Period (km/h)',
+            'Extreme Windspeed 50 year Return Period (km/h)',
+            'Extreme Windspeed 100 year Return Period (km/h)'
+        ],
+        'Future (Moderate Case)': [
+            'Extreme Windspeed 10 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 20 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 50 year Return Period (km/h) - Moderate Case',
+            'Extreme Windspeed 100 year Return Period (km/h) - Moderate Case'
+        ],
+        'Future (Worst Case)': [
+            'Extreme Windspeed 10 year Return Period (km/h) - Worst Case',
+            'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
+            'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
+            'Extreme Windspeed 100 year Return Period (km/h) - Worst Case'
+        ]
+    },
+    'Heat': {
+        'Current': [
+            'Days over 30° Celsius',
+            'Days over 33° Celsius',
+            'Days over 35° Celsius'
+        ],
+        'Future (Moderate Case)': [
+            'Days over 35° Celsius (2026 - 2030) - Moderate Case',
+            'Days over 35° Celsius (2031 - 2040) - Moderate Case',
+            'Days over 35° Celsius (2041 - 2050) - Moderate Case'
+        ],
+        'Future (Worst Case)': [
+            'Days over 35° Celsius (2026 - 2030) - Worst Case',
+            'Days over 35° Celsius (2031 - 2040) - Worst Case',
+            'Days over 35° Celsius (2041 - 2050) - Worst Case'
+        ]
+    },
+    'Storm Surge': {
+        'Current': [
+            'Storm Surge Flood Depth (meters)'
+        ],
+        'Future (Worst Case)': [
+            'Storm Surge Flood Depth (meters) - Worst Case'
+        ]
+    },
+    'Rainfall-Induced Landslide': {
+        'Current': [
+            'Rainfall-Induced Landslide (factor of safety)'
+        ],
+        'Future (Moderate Case)': [
+            'Rainfall-Induced Landslide (factor of safety) - Moderate Case'
+        ],
+        'Future (Worst Case)': [
+            'Rainfall-Induced Landslide (factor of safety) - Worst Case'
+        ]
+    }
+};
+
+function getVisibleColumnsSet() {
+    const visibleColumns = new Set(['Facility']);
+    $('.base-column').each(function() {
+        const columnName = $(this).data('column');
+        if ($(this).prop('checked')) {
+            visibleColumns.add(columnName);
+        }
+    });
+    $('.hazard-column').each(function() {
+        const columnName = $(this).data('column');
+        if ($(this).prop('checked')) {
+            visibleColumns.add(columnName);
+        }
+    });
+    return visibleColumns;
+}
+
+function updateGroupAndScenarioHeaders() {
+    console.log('Updating group and scenario headers (mapping-driven)...');
+
+    const visibleColumns = getVisibleColumnsSet();
+    const headerNames = Array.from($('#hazard-data-table thead tr.custom-table-header th')).map(th =>
+        $(th).attr('data-column-name') || $(th).text().trim()
+    );
+
+    let groupHeaderHtml = '';
+    let scenarioHeaderHtml = '';
+    const mappedColumns = new Set();
+
+    const appendScenarioHeader = (scenarioName, count) => {
+        if (count <= 0) return;
+        const cls = scenarioName.includes('Moderate') ? 'moderate-header'
+            : scenarioName.includes('Worst') ? 'worstcase-header'
+            : 'baseline-header';
+        scenarioHeaderHtml += `<th colspan="${count}" class="${cls}">${scenarioName}</th>`;
+    };
+
+    Object.entries(HEADER_SCENARIO_MAPPING).forEach(([groupName, scenarios]) => {
+        let groupVisibleCount = 0;
+
+        Object.entries(scenarios).forEach(([scenarioName, cols]) => {
+            const scenarioColsVisible = cols.filter(col => visibleColumns.has(col));
+            scenarioColsVisible.forEach(col => mappedColumns.add(col));
+            if (scenarioColsVisible.length > 0) {
+                appendScenarioHeader(scenarioName, scenarioColsVisible.length);
+                groupVisibleCount += scenarioColsVisible.length;
+            }
+        });
+
+        if (groupVisibleCount > 0) {
+            const label = groupName === 'Facility Information' ? 'Asset Information' : groupName;
+            groupHeaderHtml += `<th colspan="${groupVisibleCount}" class="text-center">${label}</th>`;
+        }
+    });
+
+    const otherVisible = headerNames.filter(col => visibleColumns.has(col) && !mappedColumns.has(col));
+    if (otherVisible.length > 0) {
+        groupHeaderHtml += `<th colspan="${otherVisible.length}" class="text-center">Other</th>`;
+        scenarioHeaderHtml += `<th colspan="${otherVisible.length}" class="baseline-header"></th>`;
+    }
+
+    $('#hazard-data-table thead tr.group-header').html(groupHeaderHtml);
+    $('#hazard-data-table thead tr.sub-group-header').html(scenarioHeaderHtml);
+
+    console.log('Group and scenario headers updated (mapping-driven)');
+}
+
 // === MANUAL TABLE STATE MANAGEMENT ===
 let tableState = {
     columnHeaderMap: {},
