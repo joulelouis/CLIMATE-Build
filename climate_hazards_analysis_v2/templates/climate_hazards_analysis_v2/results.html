@@ -2451,14 +2451,31 @@ function ensureSeaLevelHeaders() {
         existingNames.add(name);
     });
 
+    // Find insertion point: after the last Water Stress column, otherwise after Facility/Archetype
+    const headerNames = $headerRow.find('th').map(function() {
+        return $(this).attr('data-column-name') || $(this).text().trim();
+    }).get();
+    let insertIndex = headerNames.length; // default to append
+    const waterStressLastIdx = Math.max(
+        headerNames.indexOf('Water Stress Exposure (%)'),
+        headerNames.indexOf('Water Stress Exposure 2050 (%) - Worst Case'),
+        headerNames.indexOf('Water Stress Exposure 2050 (%) - Moderate Case')
+    );
+    if (waterStressLastIdx >= 0) {
+        insertIndex = waterStressLastIdx + 1;
+    }
+
     let addedCount = 0;
 
     SEA_LEVEL_COLUMNS.forEach(function(columnName) {
         if (!existingNames.has(columnName)) {
             // Add header cell
-            $headerRow.append(
-                $('<th>').attr('data-column-name', columnName).text(columnName)
-            );
+            const $th = $('<th>').attr('data-column-name', columnName).text(columnName);
+            if (insertIndex >= $headerRow.find('th').length) {
+                $headerRow.append($th);
+            } else {
+                $headerRow.find('th').eq(insertIndex + addedCount).before($th);
+            }
 
             // Add placeholder cell to each row to keep alignment
             $('#hazard-data-table tbody tr').each(function() {
@@ -2473,7 +2490,12 @@ function ensureSeaLevelHeaders() {
                 } else {
                     cell.addClass('editable-cell');
                 }
-                $row.append(cell);
+                const $cells = $row.find('td');
+                if (insertIndex >= $cells.length) {
+                    $row.append(cell);
+                } else {
+                    $cells.eq(insertIndex + addedCount).before(cell);
+                }
             });
 
             addedCount++;
