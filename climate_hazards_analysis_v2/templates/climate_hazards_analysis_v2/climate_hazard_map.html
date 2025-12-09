@@ -206,6 +206,78 @@
     box-shadow: 0 0 10px rgba(0,0,0,0.1);
     display: none;
   }
+
+  /* Custom modal shell (Bootstrap-free fallback) */
+  .custom-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: none;
+    overflow: auto;
+    z-index: 1050;
+    padding: 30px 12px;
+  }
+  .custom-modal.show {
+    display: block;
+  }
+  .custom-modal .modal-dialog {
+    margin: auto;
+    max-width: 720px;
+    width: 100%;
+  }
+  .custom-modal .modal-content {
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    overflow: hidden;
+    background: #ffffff;
+  }
+  .custom-modal .modal-header {
+    background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+    color: #fff;
+    border: none;
+    padding: 16px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .custom-modal .modal-title {
+    font-weight: 600;
+    font-size: 18px;
+  }
+  .custom-modal .btn-close {
+    filter: invert(1);
+    opacity: 0.9;
+  }
+  .custom-modal .modal-body {
+    padding: 18px;
+    background: #f8fafc;
+  }
+  .custom-modal .modal-footer {
+    border-top: 1px solid #e9ecef;
+    background: #fff;
+    padding: 12px 18px;
+  }
+  .custom-modal label.form-label {
+    font-weight: 600;
+    color: #0f172a;
+  }
+  .custom-modal .form-control, .custom-modal .form-select {
+    border-radius: 10px;
+    border: 1px solid #d7dee7;
+    box-shadow: inset 0 1px 2px rgba(15,23,42,0.08);
+  }
+
+  /* Modal entrance animation */
+  .custom-modal-animate .modal-dialog {
+    transform: translateY(-10px);
+    opacity: 0;
+    transition: transform 250ms ease, opacity 250ms ease;
+  }
+  .custom-modal-animate.show .modal-dialog {
+    transform: translateY(0);
+    opacity: 1;
+  }
   /* Custom styling for the hover popup */
   .facility-hover-popup {
     font-family: 'Arial', sans-serif;
@@ -458,13 +530,13 @@
   </div>
 </div>
 
-<!-- Polygon Asset Modal -->
-<div class="modal fade" id="polygonAssetModal" tabindex="-1" aria-labelledby="polygonAssetModalLabel" aria-hidden="true">
+<!-- Polygon Asset Modal (Bootstrap JS-free) -->
+<div class="custom-modal custom-modal-animate" id="polygonAssetModal" aria-labelledby="polygonAssetModalLabel" aria-hidden="true" style="display: none;">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="polygonAssetModalLabel">Add Polygon Asset</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close" aria-label="Close" onclick="cancelPolygonAsset()"></button>
       </div>
       <div class="modal-body">
         <form id="polygon-asset-form">
@@ -502,15 +574,15 @@
   </div>
 </div>
 
-<!-- Grid Spacing Modal -->
-<div class="modal fade" id="gridSpacingModal" tabindex="-1" aria-labelledby="gridSpacingModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+<!-- Grid Spacing Modal (Bootstrap JS-free) -->
+<div class="custom-modal custom-modal-animate" id="gridSpacingModal" aria-labelledby="gridSpacingModalLabel" aria-hidden="true" style="display: none;">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header bg-gradient-primary text-white">
         <h5 class="modal-title" id="gridSpacingModalLabel">
           <i class="fas fa-th me-2"></i>Configure Granular Analysis
         </h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close btn-close-white" aria-label="Close" onclick="hideGridSpacingModal()"></button>
       </div>
       <div class="modal-body">
         <!-- Success Alert -->
@@ -645,8 +717,8 @@
   </div>
 </div>
 
-<!-- Polygon Asset Progress Modal -->
-<div class="modal fade" id="polygonProgressModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+<!-- Polygon Asset Progress Modal (Bootstrap JS-free) -->
+<div class="custom-modal custom-modal-animate" id="polygonProgressModal" aria-hidden="true" style="display: none;">
   <div class="modal-dialog modal-sm">
     <div class="modal-content">
       <div class="modal-body text-center py-4">
@@ -791,30 +863,30 @@
       // Expose map variables to global scope
       exposeMapVariables();
 
-      // Add the Philippines GeoJSON source
-      multiHazardMap.addSource('hazards-source', {
-        type: 'geojson',
-        data: 'https://raw.githubusercontent.com/macoymejia/geojsonph/master/Country/Country.minimal.json'
-      });
-
-      // Draw filled polygons
-      multiHazardMap.addLayer({
-        id: 'hazards-layer',
-        type: 'fill',
-        source: 'hazards-source',
-        paint: {
-          'fill-color': '#888',
-          'fill-opacity': 0.5
+    // Add the Philippines GeoJSON source (inline to avoid CORS)
+    const phBoundaryGeoJson = {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "properties": { "name": "Philippines (approx)" },
+          "geometry": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [116.0, 4.5],
+                [126.5, 4.5],
+                [126.5, 21.5],
+                [116.0, 21.5],
+                [116.0, 4.5]
+              ]
+            ]
+          }
         }
-      });
+      ]
+    };
 
-      // Change cursor on hover
-      multiHazardMap.on('mouseenter', 'hazards-layer', () => {
-        multiHazardMap.getCanvas().style.cursor = 'pointer';
-      });
-      multiHazardMap.on('mouseleave', 'hazards-layer', () => {
-        multiHazardMap.getCanvas().style.cursor = '';
-      });
+    // Boundary overlay removed to avoid rendering a large rectangle
 
       // Try to load facility data if it exists in session
       loadFacilityData();
@@ -1185,6 +1257,28 @@
     });
   }
 
+  // Lightweight helpers for custom (Bootstrap-free) modals
+  function showCustomModal(modalElement) {
+    if (!modalElement) return;
+    cleanupModalBackdrops();
+    modalElement.classList.add('show');
+    modalElement.style.display = 'block';
+    modalElement.removeAttribute('aria-hidden');
+    document.body.classList.add('modal-open');
+  }
+
+  function hideCustomModal(modalElement) {
+    if (!modalElement) return;
+    modalElement.classList.remove('show');
+    modalElement.style.display = 'none';
+    modalElement.setAttribute('aria-hidden', 'true');
+
+    const anyOpenModal = document.querySelector('.custom-modal.show, .modal.show');
+    if (!anyOpenModal) {
+      document.body.classList.remove('modal-open');
+    }
+  }
+
   // Show polygon asset modal
   function showPolygonAssetModal(lat, lng) {
     try {
@@ -1223,14 +1317,7 @@
       // Show modal
       const modalElement = document.getElementById('polygonAssetModal');
       if (modalElement) {
-        // Ensure any existing modal instance is disposed
-        const existingModal = bootstrap.Modal.getInstance(modalElement);
-        if (existingModal) {
-          existingModal.dispose();
-        }
-
-        const modal = new bootstrap.Modal(modalElement);
-        modal.show();
+        showCustomModal(modalElement);
         console.log('Modal should be shown now');
       } else {
         console.error('Modal element not found');
@@ -1313,8 +1400,8 @@
     currentPolygonSource = null;
 
     // Hide modal
-    const modal = bootstrap.Modal.getInstance(document.getElementById('polygonAssetModal'));
-    if (modal) modal.hide();
+    hideCustomModal(document.getElementById('polygonAssetModal'));
+    cleanupModalBackdrops();
   }
 
   // Confirm polygon asset
@@ -1342,8 +1429,7 @@
     }
 
     // Hide asset modal and show progress modal
-    const assetModal = bootstrap.Modal.getInstance(document.getElementById('polygonAssetModal'));
-    if (assetModal) assetModal.hide();
+    hideCustomModal(document.getElementById('polygonAssetModal'));
 
     // Show progress modal
     showProgressModal();
@@ -1970,25 +2056,9 @@
 
   function showProgressModal() {
     try {
-      console.log('Showing progress modal...');
       const modalElement = document.getElementById('polygonProgressModal');
-      if (modalElement) {
-        // Remove any existing modal instance
-        const existingModal = bootstrap.Modal.getInstance(modalElement);
-        if (existingModal) {
-          existingModal.dispose();
-        }
-
-        // Create new modal instance
-        const modal = new bootstrap.Modal(modalElement, {
-          backdrop: 'static',
-          keyboard: false
-        });
-        modal.show();
-        console.log('Progress modal shown successfully');
-      } else {
-        console.error('Progress modal element not found');
-      }
+      console.log('Showing progress modal...');
+      showCustomModal(modalElement);
     } catch (error) {
       console.error('Error showing progress modal:', error);
     }
@@ -1998,24 +2068,8 @@
     try {
       console.log('Hiding progress modal...');
       const modalElement = document.getElementById('polygonProgressModal');
-      if (modalElement) {
-        const modal = bootstrap.Modal.getInstance(modalElement);
-        if (modal) {
-          modal.hide();
-
-          // Remove any backdrop that might be stuck
-          setTimeout(() => {
-            cleanupModalBackdrops();
-            console.log('Progress modal hidden and cleanup completed');
-          }, 300);
-        } else {
-          console.warn('No progress modal instance found');
-          cleanupModalBackdrops();
-        }
-      } else {
-        console.error('Progress modal element not found');
-        cleanupModalBackdrops();
-      }
+      hideCustomModal(modalElement);
+      cleanupModalBackdrops();
     } catch (error) {
       console.error('Error hiding progress modal:', error);
       cleanupModalBackdrops();
@@ -2026,7 +2080,7 @@
   function cleanupModalBackdrops() {
     try {
       // Remove all modal backdrops
-      const backdrops = document.querySelectorAll('.modal-backdrop');
+      const backdrops = document.querySelectorAll('.modal-backdrop, .custom-modal-backdrop');
       backdrops.forEach(backdrop => backdrop.remove());
 
       // Remove modal-open class from body
@@ -2035,10 +2089,11 @@
       document.body.style.paddingRight = '';
 
       // Hide any visible modals
-      const openModals = document.querySelectorAll('.modal.show');
+      const openModals = document.querySelectorAll('.custom-modal.show, .modal.show');
       openModals.forEach(modal => {
         modal.classList.remove('show');
         modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
       });
 
       console.log('Modal cleanup completed');
@@ -2109,6 +2164,10 @@
   let currentAssetNameForGrid = null;
   let currentPolygonAreaKm2 = 0;
   let currentPolygonSource = null; // 'draw' or 'city'
+  function hideGridSpacingModal() {
+    hideCustomModal(document.getElementById('gridSpacingModal'));
+    cleanupModalBackdrops();
+  }
 
   // Clear drawn polygon visuals and related state
   function clearDrawnPolygonOverlay() {
@@ -2166,8 +2225,7 @@
     updateEstimatedPoints();
 
     // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('gridSpacingModal'));
-    modal.show();
+    showCustomModal(document.getElementById('gridSpacingModal'));
   }
 
   function updateEstimatedPoints() {
@@ -2392,41 +2450,25 @@
     // Remove focus from the button to avoid aria-hidden warning
     document.activeElement.blur();
 
-    // Hide grid spacing modal and wait for it to fully hide
-    const gridModal = bootstrap.Modal.getInstance(document.getElementById('gridSpacingModal'));
-    if (gridModal) {
-      // Listen for the modal hidden event
-      const modalElement = document.getElementById('gridSpacingModal');
-      modalElement.addEventListener('hidden.bs.modal', function onHidden() {
-        // Remove the event listener to avoid duplicate calls
-        modalElement.removeEventListener('hidden.bs.modal', onHidden);
+    hideGridSpacingModal();
 
-        console.log('Grid modal fully hidden, showing asset modal...');
+    // Show notification
+    showNotification('Grid spacing configured: ' + gridSpacing + 'm. Complete the asset details.', 'success');
 
-        // Show notification
-        showNotification('Grid spacing configured: ' + gridSpacing + 'm. Complete the asset details.', 'success');
+    // Show polygon asset modal to continue with naming the asset
+    let centroid = null;
+    if (currentPolygonSource === 'city' && window.cityPolygonData) {
+      centroid = window.cityPolygonData.centroid;
+    } else if (currentPolygonSource === 'draw' && drawnPolygonData) {
+      centroid = drawnPolygonData.centroid;
+    }
 
-        // Show polygon asset modal to continue with naming the asset
-        let centroid = null;
-        if (currentPolygonSource === 'city' && window.cityPolygonData) {
-          centroid = window.cityPolygonData.centroid;
-        } else if (currentPolygonSource === 'draw' && drawnPolygonData) {
-          centroid = drawnPolygonData.centroid;
-        }
-
-        if (centroid) {
-          console.log('Showing polygon asset modal with centroid:', centroid);
-          showPolygonAssetModal(centroid.lat, centroid.lng);
-        } else {
-          console.error('No centroid found');
-          alert('Error: Could not find polygon centroid. Please try again.');
-        }
-      }, { once: true });
-
-      // Now hide the modal
-      gridModal.hide();
+    if (centroid) {
+      console.log('Showing polygon asset modal with centroid:', centroid);
+      showPolygonAssetModal(centroid.lat, centroid.lng);
     } else {
-      console.error('Could not get grid modal instance');
+      console.error('No centroid found');
+      alert('Error: Could not find polygon centroid. Please try again.');
     }
   }
 
@@ -2461,41 +2503,25 @@
       return;
     }
 
-    // Hide grid spacing modal and wait for it to fully hide
-    const gridModal = bootstrap.Modal.getInstance(document.getElementById('gridSpacingModal'));
-    if (gridModal) {
-      // Listen for the modal hidden event
-      const modalElement = document.getElementById('gridSpacingModal');
-      modalElement.addEventListener('hidden.bs.modal', function onHidden() {
-        // Remove the event listener to avoid duplicate calls
-        modalElement.removeEventListener('hidden.bs.modal', onHidden);
+    hideGridSpacingModal();
 
-        console.log('Grid modal fully hidden (skipped), showing asset modal...');
+    // Show message
+    showNotification('Granular analysis skipped. Centroid value will be used.', 'info');
 
-        // Show message
-        showNotification('Granular analysis skipped. Centroid value will be used.', 'info');
+    // Show polygon asset modal to continue with naming the asset
+    let centroid = null;
+    if (currentPolygonSource === 'city' && window.cityPolygonData) {
+      centroid = window.cityPolygonData.centroid;
+    } else if (currentPolygonSource === 'draw' && drawnPolygonData) {
+      centroid = drawnPolygonData.centroid;
+    }
 
-        // Show polygon asset modal to continue with naming the asset
-        let centroid = null;
-        if (currentPolygonSource === 'city' && window.cityPolygonData) {
-          centroid = window.cityPolygonData.centroid;
-        } else if (currentPolygonSource === 'draw' && drawnPolygonData) {
-          centroid = drawnPolygonData.centroid;
-        }
-
-        if (centroid) {
-          console.log('Showing polygon asset modal with centroid:', centroid);
-          showPolygonAssetModal(centroid.lat, centroid.lng);
-        } else {
-          console.error('No centroid found');
-          alert('Error: Could not find polygon centroid. Please try again.');
-        }
-      }, { once: true });
-
-      // Now hide the modal
-      gridModal.hide();
+    if (centroid) {
+      console.log('Showing polygon asset modal with centroid:', centroid);
+      showPolygonAssetModal(centroid.lat, centroid.lng);
     } else {
-      console.error('Could not get grid modal instance');
+      console.error('No centroid found');
+      alert('Error: Could not find polygon centroid. Please try again.');
     }
   }
 
@@ -3457,52 +3483,8 @@ function loadFacilityData() {
     return cookieValue;
   }
 
-// Load Mapbox Geocoder plugin with multiple fallbacks
-console.log('Loading Mapbox Geocoder plugin...');
-const geocoderScript = document.createElement('script');
-
-// Try primary CDN first
-geocoderScript.src = 'https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.1/mapbox-gl-geocoder.min.js';
-
-let geocoderLoaded = false;
-
-geocoderScript.onload = function() {
-  console.log('Mapbox Geocoder loaded successfully from primary CDN');
-  geocoderLoaded = true;
-  initializeMapWhenReady();
-};
-
-geocoderScript.onerror = function() {
-  console.warn('Failed to load Mapbox Geocoder from primary CDN, trying fallback...');
-
-  // Try fallback CDN (jsDelivr)
-  const fallbackScript = document.createElement('script');
-  fallbackScript.src = 'https://cdn.jsdelivr.net/npm/@mapbox/mapbox-gl-geocoder@5.0.1/mapbox-gl-geocoder.min.js';
-
-  fallbackScript.onload = function() {
-    console.log('Mapbox Geocoder loaded successfully from fallback CDN');
-    geocoderLoaded = true;
-    initializeMapWhenReady();
-  };
-
-  fallbackScript.onerror = function() {
-    console.error('Failed to load Mapbox Geocoder from all sources - will work without geocoder');
-    // Still initialize the map even if geocoder fails completely
-    initializeMapWhenReady();
-  };
-
-  document.head.appendChild(fallbackScript);
-};
-
-document.head.appendChild(geocoderScript);
-
-// Set a timeout to initialize map if geocoder takes too long
-setTimeout(() => {
-  if (!geocoderLoaded) {
-    console.warn('Geocoder loading timeout, proceeding without geocoder');
-    initializeMapWhenReady();
-  }
-}, 5000); // 5 second timeout
+// Geocoder loading removed for offline/low-network mode
+initializeMapWhenReady();
 
 // TEMPORARILY DISABLED: Fallback city search using Nominatim API
 // This function is kept for future use but currently disabled
