@@ -751,11 +751,13 @@ def add_facility(request):
                 'Lat': lat,
                 'Long': lng,
                 'Archetype': archetype,
-                'source': 'drawn_polygon'  # treat as user-created to persist through rebuilds
+                'source': 'drawn_polygon',  # treat as user-created to persist through rebuilds
+                'AssetId': asset.id if 'asset' in locals() else f"manual_{uuid.uuid4().hex[:8]}"
             }
 
             # Add polygon geometry if provided
             if geometry:
+                new_facility['AssetType'] = 'polygon'
                 new_facility['geometry'] = geometry
 
                 # Calculate area if not provided
@@ -770,6 +772,9 @@ def add_facility(request):
 
                 logger.info(f"Polygon asset '{name}' created with area {area_km2:.2f} km². "
                           f"Hazard analysis will be performed in step 6 of the workflow.")
+
+            else:
+                new_facility['AssetType'] = 'point'
 
             facility_data.append(new_facility)
 
@@ -5276,6 +5281,252 @@ def clear_site_data(request):
         return JsonResponse({
             'success': False,
             'error': f'Failed to clear site data: {str(e)}'
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+def clear_drawn_polygon_assets(request):
+    """
+    Remove polygon assets created via the draw-polygon workflow from the session.
+    """
+    try:
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+
+        if not facility_data:
+            return JsonResponse({
+                'success': True,
+                'removed': 0,
+                'message': 'No polygon assets found to remove.'
+            })
+
+        retained_facilities = []
+        removed_count = 0
+
+        for facility in facility_data:
+            asset_type = (facility.get('AssetType') or '').lower()
+            is_polygon = asset_type.startswith('polygon') or bool(facility.get('geometry'))
+
+            # Only remove polygon-type assets (drawn polygons)
+            if is_polygon:
+                removed_count += 1
+                continue
+
+            retained_facilities.append(facility)
+
+        request.session['climate_hazards_v2_facility_data'] = retained_facilities
+        if 'polygon_asset_ids' in request.session:
+            del request.session['polygon_asset_ids']
+        request.session.save()
+
+        return JsonResponse({
+            'success': True,
+            'removed': removed_count,
+            'message': f'Removed {removed_count} drawn polygon asset(s).'
+        })
+
+    except Exception as e:
+        logger.exception(f"Error clearing drawn polygon assets: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to remove drawn polygon assets.'
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+def clear_manual_point_assets(request):
+    """
+    Remove point assets added via map clicks (i.e., not tied to an uploaded file or polygon).
+    """
+    try:
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+
+        if not facility_data:
+            return JsonResponse({
+                'success': True,
+                'removed': 0,
+                'message': 'No manually added point assets found to remove.'
+            })
+
+        retained_facilities = []
+        removed_count = 0
+
+        for facility in facility_data:
+            asset_type = (facility.get('AssetType') or '').lower()
+            has_file = facility.get('_file_id') or facility.get('file_id')
+            is_polygon_like = asset_type.startswith('polygon') or bool(facility.get('geometry'))
+
+            # Treat assets without a backing file and not polygon-based as map-added points
+            if not has_file and not is_polygon_like:
+                removed_count += 1
+                continue
+
+            retained_facilities.append(facility)
+
+        request.session['climate_hazards_v2_facility_data'] = retained_facilities
+        request.session.save()
+
+        return JsonResponse({
+            'success': True,
+            'removed': removed_count,
+            'message': f'Removed {removed_count} manually added point asset(s).'
+        })
+
+    except Exception as e:
+        logger.exception(f"Error clearing manual point assets: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to remove map-click point assets.'
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+def clear_all_manual_assets(request):
+    """
+    Remove all manual assets (map-click points and drawn polygons) from session.
+    """
+    try:
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+
+        if not facility_data:
+            return JsonResponse({
+                'success': True,
+                'removed': 0,
+                'message': 'No manual assets found to remove.'
+            })
+
+        retained_facilities = []
+        removed_count = 0
+
+        for facility in facility_data:
+            asset_type = (facility.get('AssetType') or '').lower()
+            has_file = facility.get('_file_id') or facility.get('file_id')
+            is_polygon_like = asset_type.startswith('polygon') or bool(facility.get('geometry'))
+
+            # Manual if no backing file or polygon geometry
+            if not has_file or is_polygon_like:
+                removed_count += 1
+                continue
+
+            retained_facilities.append(facility)
+
+        request.session['climate_hazards_v2_facility_data'] = retained_facilities
+        if 'polygon_asset_ids' in request.session:
+            del request.session['polygon_asset_ids']
+        request.session.save()
+
+        return JsonResponse({
+            'success': True,
+            'removed': removed_count,
+            'message': f'Removed {removed_count} manual asset(s).'
+        })
+
+    except Exception as e:
+        logger.exception(f"Error clearing all manual assets: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to remove manual assets.'
+        }, status=500)
+
+
+@require_http_methods(["GET"])
+def get_manual_assets(request):
+    """
+    Return manually added assets (map-click points and drawn polygons) from session.
+    """
+    facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+    assets = []
+
+    for facility in facility_data:
+        asset_type = (facility.get('AssetType') or '').lower()
+        has_file = facility.get('_file_id') or facility.get('file_id')
+        is_polygon_like = asset_type.startswith('polygon') or bool(facility.get('geometry'))
+        is_drawn = facility.get('source') == 'drawn_polygon'
+        manual_id = str(facility.get('AssetId') or facility.get('id') or facility.get('Facility') or '')
+
+        # Map-click points: no file, not polygon
+        if not has_file and not is_polygon_like:
+            assets.append({
+                'id': manual_id,
+                'name': facility.get('Facility') or facility.get('Name') or 'Unnamed asset',
+                'type': 'point',
+            })
+        # Drawn polygons
+        elif is_polygon_like or is_drawn:
+            assets.append({
+                'id': manual_id,
+                'name': facility.get('Facility') or facility.get('Name') or 'Polygon asset',
+                'type': 'polygon',
+            })
+
+    return JsonResponse({'success': True, 'assets': assets})
+
+
+@require_http_methods(["POST"])
+def delete_manual_asset(request):
+    """
+    Delete a single manual asset (map-click point or drawn polygon) by ID from session.
+    """
+    try:
+        asset_id = request.POST.get('asset_id') or request.GET.get('asset_id')
+        asset_type = (request.POST.get('asset_type') or request.GET.get('asset_type') or '').lower()
+        if not asset_id:
+            return JsonResponse({
+                'success': False,
+                'error': 'Asset ID is required'
+            }, status=400)
+
+        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+        removed = 0
+        retained = []
+
+        for facility in facility_data:
+            current_id = str(facility.get('AssetId') or facility.get('id') or '')
+            facility_type = (facility.get('AssetType') or '').lower()
+            has_file = facility.get('_file_id') or facility.get('file_id')
+            is_polygon_like = facility_type.startswith('polygon') or bool(facility.get('geometry'))
+            is_drawn = facility.get('source') == 'drawn_polygon'
+            is_manual = (not has_file) or is_polygon_like or is_drawn
+
+            # Match by id; if missing, allow fallback by Facility name for legacy manual assets
+            id_matches = current_id and current_id == str(asset_id)
+            name_matches = not current_id and str(asset_id) and (facility.get('Facility') == asset_id)
+
+            if is_manual and (id_matches or name_matches):
+                # Respect asset_type filter when provided
+                if asset_type:
+                    if asset_type == 'polygon' and not is_polygon_like:
+                        retained.append(facility)
+                        continue
+                    if asset_type == 'point' and is_polygon_like:
+                        retained.append(facility)
+                        continue
+                removed += 1
+                continue
+
+            retained.append(facility)
+
+        if removed == 0:
+            return JsonResponse({
+                'success': False,
+                'error': 'Manual asset not found'
+            }, status=404)
+
+        request.session['climate_hazards_v2_facility_data'] = retained
+        if 'polygon_asset_ids' in request.session and removed:
+            del request.session['polygon_asset_ids']
+        request.session.save()
+
+        return JsonResponse({
+            'success': True,
+            'removed': removed,
+            'message': f'Removed {removed} manual asset(s).'
+        })
+
+    except Exception as e:
+        logger.exception(f"Error deleting manual asset: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': 'Failed to delete manual asset.'
         }, status=500)
 
 

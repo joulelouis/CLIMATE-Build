@@ -462,7 +462,7 @@ View Sensitivity Results
                                                                     <span class="badge bg-warning text-dark">{{ value }}</span>
 
                                                                 {# Water Stress Exposure with CUSTOM coloring based on archetype thresholds #}
-                                                                {% elif key == "Water Stress Exposure (%)" and value != "N/A" %}
+                                                                {% elif "Water Stress Exposure" in key and value != "N/A" %}
                                                                     {% with val=value|to_float low_threshold=row|get_item:"WS_Low_Threshold"|default:10 high_threshold=row|get_item:"WS_High_Threshold"|default:31 %}
                                                                         {% if val < low_threshold %}
                                                                             <span class="risk-low" title="Low Risk: {{ val }}% < {{ low_threshold }}%">{{ value }}</span>
@@ -474,7 +474,7 @@ View Sensitivity Results
                                                                     {% endwith %}
 
                                                                 {# Flood Depth styling #}
-                                                                {% elif key == "Flood Depth (meters)" %}
+                                                                {% elif "Flood Depth (meters)" in key %}
                                                                     {% if value == "0.1 to 0.5" %}
                                                                         <span class="risk-low">{{ value }}</span>
                                                                     {% elif value == "0.5 to 1.5" %}
@@ -518,7 +518,7 @@ View Sensitivity Results
                                                                     {% endif %}
 
                                                                 {# Storm Surge styling #}
-                                                                {% elif key == "Storm Surge Flood Depth (meters)" %}
+                                                                {% elif "Storm Surge Flood Depth (meters)" in key %}
                                                                     {% if value == "Data not available" %}
                                                                         <span class="risk-none">{{ value }}</span>
                                                                     {% elif value != "N/A" %}
@@ -538,7 +538,7 @@ View Sensitivity Results
                                                                     {% endif %}
 
                                                                 {# Rainfall-Induced Landslide styling #}
-                                                                {% elif key == "Rainfall-Induced Landslide (factor of safety)" %}
+                                                                {% elif "Rainfall-Induced Landslide (factor of safety)" in key %}
                                                                     {% if value == "Data not available" %}
                                                                         <span class="risk-none">{{ value }}</span>
                                                                     {% elif value != "N/A" %}
@@ -558,6 +558,14 @@ View Sensitivity Results
                                                                     {% endif %}
 
                                                                 {# Fallback: output the value normally #}
+                                                                {% elif "Sea Level Rise" in key and value != "N/A" %}
+                                                                    {% with num=value|to_float %}
+                                                                        {% if num > 0 %}
+                                                                            <span class="risk-high">{{ value }}</span>
+                                                                        {% else %}
+                                                                            <span class="risk-none">{{ value }}</span>
+                                                                        {% endif %}
+                                                                    {% endwith %}
                                                                 {% else %}
                                                                     {{ value }}
                                                                 {% endif %}

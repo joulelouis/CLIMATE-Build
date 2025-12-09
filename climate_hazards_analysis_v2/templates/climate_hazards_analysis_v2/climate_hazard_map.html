@@ -732,9 +732,6 @@
             style: 'mapbox://styles/mapbox/satellite-v9'
         });
         console.log('Map created successfully:', multiHazardMap);
-
-        // Load stored polygon assets after map is ready
-        loadStoredPolygonAssets();
     } catch (error) {
         console.error('Error creating map:', error);
         return;
@@ -777,6 +774,15 @@
       displayControlsDefault: false,
       controls: {},
       defaultMode: 'simple_select'
+    });
+
+    // Load stored polygon assets only after style is ready
+    multiHazardMap.on('load', () => {
+      try {
+        loadStoredPolygonAssets();
+      } catch (err) {
+        console.error('Error loading stored polygons on map load:', err);
+      }
     });
     multiHazardMap.addControl(draw);
 
@@ -2098,11 +2104,53 @@
     }
   }
 
-  // Grid Spacing Modal Functions
+// Grid Spacing Modal Functions
   let currentPolygonForGrid = null;
   let currentAssetNameForGrid = null;
   let currentPolygonAreaKm2 = 0;
   let currentPolygonSource = null; // 'draw' or 'city'
+
+  // Clear drawn polygon visuals and related state
+  function clearDrawnPolygonOverlay() {
+    try {
+      // Remove any drawn shapes
+      if (draw && typeof draw.deleteAll === 'function') {
+        draw.deleteAll();
+      }
+      // Remove any Mapbox Draw layers/sources that may linger
+      if (multiHazardMap && typeof multiHazardMap.getStyle === 'function') {
+        const style = multiHazardMap.getStyle();
+        const layers = (style && style.layers) ? [...style.layers] : [];
+        layers.forEach(l => {
+          if (l.id && l.id.indexOf('gl-draw') !== -1 && multiHazardMap.getLayer(l.id)) {
+            multiHazardMap.removeLayer(l.id);
+          }
+        });
+        const sources = style && style.sources ? { ...style.sources } : {};
+        Object.keys(sources).forEach(srcId => {
+          if (srcId.indexOf('mapbox-gl-draw') !== -1 && multiHazardMap.getSource(srcId)) {
+            multiHazardMap.removeSource(srcId);
+          }
+        });
+      }
+      // Clear any facility/polygon layers and markers already rendered
+      if (typeof clearFacilityMarkers === 'function') {
+        clearFacilityMarkers();
+      }
+
+      drawnPolygonData = null;
+      window.drawnPolygon = false;
+      currentPolygonSource = null;
+
+    // Remove any centroid markers (helps clear red centroid from drawn assets)
+    if (Array.isArray(centroidMarkers)) {
+      centroidMarkers.forEach(marker => marker.remove());
+      centroidMarkers = [];
+      }
+    } catch (err) {
+      console.warn('Failed to clear drawn polygon overlay:', err);
+    }
+  }
 
   function showGridSpacingModal(assetName, polygonGeometry, polygonAreaKm2, source = 'draw') {
     currentAssetNameForGrid = assetName;
@@ -2934,6 +2982,34 @@ function hideHeatmapLegend() {
 
 // Clear all facility markers
 function clearFacilityMarkers() {
+  // Also clear drawn polygons and reset related flags
+  try {
+    if (draw && typeof draw.deleteAll === 'function') {
+      draw.deleteAll();
+    }
+    // Also remove any lingering Mapbox Draw layers/sources
+    if (multiHazardMap && typeof multiHazardMap.getStyle === 'function') {
+      const style = multiHazardMap.getStyle();
+      const layers = (style && style.layers) ? [...style.layers] : [];
+      layers.forEach(l => {
+        if (l.id && l.id.indexOf('gl-draw') !== -1 && multiHazardMap.getLayer(l.id)) {
+          multiHazardMap.removeLayer(l.id);
+        }
+      });
+      const sources = style && style.sources ? { ...style.sources } : {};
+      Object.keys(sources).forEach(srcId => {
+        if (srcId.indexOf('mapbox-gl-draw') !== -1 && multiHazardMap.getSource(srcId)) {
+          multiHazardMap.removeSource(srcId);
+        }
+      });
+    }
+    drawnPolygonData = null;
+    window.drawnPolygon = false;
+    currentPolygonSource = null;
+  } catch (err) {
+    console.warn('Failed to clear draw features:', err);
+  }
+
   window.facilityMarkers.forEach(marker => marker.remove());
   window.facilityMarkers = [];
 
@@ -3872,6 +3948,7 @@ function exposeMapVariables() {
   window.drawnPolygonData = drawnPolygonData;
   window.toggleDrawMode = toggleDrawMode;
   window.showPolygonAssetModal = showPolygonAssetModal;
+  window.clearDrawnPolygonOverlay = clearDrawnPolygonOverlay;
   window.turf = turf;
   window.processGranularAnalysis = processGranularAnalysis;
   window.exportGranularData = exportGranularData;
