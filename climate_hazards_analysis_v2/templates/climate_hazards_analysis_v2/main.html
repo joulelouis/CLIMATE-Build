@@ -520,7 +520,7 @@
                         <div class="uploaded-files-section" id="uploaded-files-section">
                             <div class="uploaded-files-header">
                                 <h6 class="uploaded-files-title">
-                                    <i class="fas fa-files-o me-2"></i>Uploaded Files
+                                    Uploaded Files
                                 </h6>
                                 <button type="button" class="clear-all-btn" id="clear-all-btn" onclick="clearAllFiles()" disabled>
                                     <i class="fas fa-trash me-1"></i>Clear All
@@ -528,6 +528,28 @@
                             </div>
                             <div class="files-list" id="files-list">
                                 <!-- Files will be populated here by JavaScript -->
+                            </div>
+                            <div class="mt-3" id="manual-assets-controls">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                                    <h6 class="uploaded-files-title mb-0">
+                                        Manual Assets
+                                    </h6>
+                                    <div class="d-flex flex-wrap gap-2 w-100">
+                                        <button type="button" class="btn btn-outline-danger btn-sm flex-fill text-nowrap" id="clear-polygons-btn" onclick="clearDrawnPolygonAssets()">
+                                            Remove Drawn Polygon Assets
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm flex-fill text-nowrap" id="clear-map-points-btn" onclick="clearManualPointAssets()">
+                                            Remove Map-Click Assets
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm flex-fill text-nowrap" id="clear-all-manual-btn" onclick="clearAllManualAssets()">
+                                            Remove All Manual Assets
+                                        </button>
+                                    </div>
+                                </div>
+                            
+                                <div class="files-list mt-2" id="manual-assets-list">
+                                    <!-- Manual assets will be populated here -->
+                                </div>
                             </div>
                         </div>
 
@@ -1581,10 +1603,18 @@
     let uploadedFiles = [];
     let isProcessingRequest = false;
 
+    let manualAssetsLoading = false;
+
     // Load uploaded files when page loads
     document.addEventListener('DOMContentLoaded', function() {
         // Load files after a short delay to ensure everything is initialized
         setTimeout(loadUploadedFiles, 500);
+        setTimeout(loadManualAssets, 700);
+        setInterval(() => {
+            if (!manualAssetsLoading) {
+                loadManualAssets();
+            }
+        }, 4000);
 
         // Also load files after form submission
         const uploadForm = document.getElementById('upload-form');
@@ -1633,7 +1663,7 @@
                 // Show/hide uploaded files section based on content
                 const section = document.getElementById('uploaded-files-section');
                 if (section) {
-                    section.style.display = uploadedFiles.length === 0 ? 'none' : 'block';
+                    section.style.display = 'block';
                 }
             } else {
                 throw new Error(data.error || 'Failed to load files');
@@ -1797,6 +1827,270 @@
         // Submit form
         document.body.appendChild(form);
         form.submit();
+    }
+
+    // =============== MANUAL ASSETS (POINTS & POLYGONS) ===============
+    async function loadManualAssets() {
+        const list = document.getElementById('manual-assets-list');
+        if (!list) return;
+
+        if (manualAssetsLoading) return;
+        manualAssetsLoading = true;
+
+        list.innerHTML = `
+            <div class="files-loading">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <div>Loading manual assets...</div>
+            </div>
+        `;
+
+        try {
+            const resp = await fetch('/climate-hazards-analysis-v2/api/assets/manual/');
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                throw new Error(data.error || 'Failed to load manual assets');
+            }
+            renderManualAssets(data.assets || []);
+            manualAssetsLoading = false;
+        } catch (err) {
+            console.error('Error loading manual assets:', err);
+            list.innerHTML = `
+                <div class="files-error">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Failed to load manual assets: ${err.message}
+                    <button class="files-retry-btn" onclick="loadManualAssets()">
+                        <i class="fas fa-redo me-1"></i>Retry
+                    </button>
+                </div>
+            `;
+            manualAssetsLoading = false;
+        }
+    }
+
+    function renderManualAssets(assets) {
+        const list = document.getElementById('manual-assets-list');
+        if (!list) return;
+        if (!assets || assets.length === 0) {
+            list.innerHTML = '<div class="text-center text-muted py-3">No manual assets found</div>';
+            return;
+        }
+
+        const html = assets.map(asset => {
+            const icon = asset.type === 'polygon' ? 'fas fa-draw-polygon' : 'fas fa-map-pin';
+            const badge = asset.type === 'polygon' ? '<span class="badge bg-info text-dark ms-2">Polygon</span>' : '<span class="badge bg-secondary ms-2">Point</span>';
+            return `
+                <div class="file-item" data-asset-id="${asset.id || ''}">
+                    <div class="file-info">
+                        <i class="${icon} file-icon"></i>
+                        <span class="file-name" title="${asset.name || 'Manual asset'}">${asset.name || 'Manual asset'}</span>
+                        ${badge}
+                    </div>
+                    <div class="file-actions">
+                        <button type="button"
+                                class="remove-file-btn"
+                                onclick="removeManualAsset('${asset.id || ''}', '${asset.type || ''}')"
+                                title="Remove this asset"
+                                ${isProcessingRequest ? 'disabled' : ''}>
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        list.innerHTML = html;
+    }
+
+    function removeManualAsset(assetId, assetType) {
+        if (isProcessingRequest || !assetId) return;
+
+        const confirmed = confirm(`Remove this ${assetType || 'asset'}? This cannot be undone.`);
+        if (!confirmed) return;
+
+        isProcessingRequest = true;
+
+        const iframeName = ensureManualAssetsIframe();
+
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/climate-hazards-analysis-v2/api/assets/manual/delete/';
+        form.style.display = 'none';
+        form.target = iframeName;
+
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrfmiddlewaretoken';
+        csrfInput.value = getCookie('csrftoken');
+        form.appendChild(csrfInput);
+
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'asset_id';
+        idInput.value = assetId;
+        form.appendChild(idInput);
+
+        const typeInput = document.createElement('input');
+        typeInput.type = 'hidden';
+        typeInput.name = 'asset_type';
+        typeInput.value = assetType || '';
+        form.appendChild(typeInput);
+
+        document.body.appendChild(form);
+        form.submit();
+
+        // If polygon, clear cached localStorage and map overlays
+        if ((assetType || '').toLowerCase() === 'polygon') {
+            try { localStorage.removeItem('polygonAssets'); } catch (e) { console.warn(e); }
+            if (typeof window.clearDrawnPolygonOverlay === 'function') {
+                window.clearDrawnPolygonOverlay();
+            }
+        } else {
+            if (typeof window.clearFacilityMarkers === 'function') {
+                window.clearFacilityMarkers();
+            }
+        }
+
+        setTimeout(() => {
+            isProcessingRequest = false;
+            window.location.reload();
+        }, 600);
+    }
+
+    function ensureManualAssetsIframe() {
+        const iframeName = 'manual-assets-target';
+        let iframe = document.querySelector(`iframe[name="${iframeName}"]`);
+        if (!iframe) {
+            iframe = document.createElement('iframe');
+            iframe.name = iframeName;
+            iframe.style.display = 'none';
+            document.body.appendChild(iframe);
+        }
+        return iframeName;
+    }
+
+    // Clear drawn polygon assets or map-click point assets via simple form POST (avoids CSRF manager loops)
+    function clearManualAssets(url, label, buttonId, cleanupTarget = '') {
+        if (isProcessingRequest) return;
+
+        const button = buttonId ? document.getElementById(buttonId) : null;
+        const originalText = button ? button.innerHTML : '';
+
+        const confirmed = confirm(`Are you sure you want to remove all ${label}? This action cannot be undone.`);
+        if (!confirmed) return;
+
+        isProcessingRequest = true;
+        if (button) {
+            button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Removing...';
+            button.disabled = true;
+        }
+
+        try {
+            // Submit via hidden iframe to avoid navigating to JSON response
+            const iframeName = 'manual-assets-target';
+            let iframe = document.querySelector(`iframe[name="${iframeName}"]`);
+            if (!iframe) {
+                iframe = document.createElement('iframe');
+                iframe.name = iframeName;
+                iframe.style.display = 'none';
+                document.body.appendChild(iframe);
+            }
+
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = url;
+            form.target = iframeName;
+            form.style.display = 'none';
+
+            // CSRF token
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrfmiddlewaretoken';
+            csrfInput.value = getCookie('csrftoken');
+            form.appendChild(csrfInput);
+
+            document.body.appendChild(form);
+            form.submit();
+
+            // Clear stored polygon cache when removing drawn polygons
+            if (cleanupTarget.toLowerCase() === 'polygon' || cleanupTarget.toLowerCase() === 'all' || label.toLowerCase().includes('polygon')) {
+                try { localStorage.removeItem('polygonAssets'); } catch (e) { console.warn('Failed to clear polygonAssets cache', e); }
+            }
+
+            // Immediately clear map visuals if handlers exist
+            try {
+                if (cleanupTarget.toLowerCase() === 'polygon') {
+                    if (typeof window.clearDrawnPolygonOverlay === 'function') {
+                        window.clearDrawnPolygonOverlay();
+                    }
+                } else if (cleanupTarget.toLowerCase() === 'point') {
+                    if (typeof window.clearFacilityMarkers === 'function') {
+                        window.clearFacilityMarkers();
+                    }
+                } else if (cleanupTarget.toLowerCase() === 'all') {
+                    window.clearDrawnPolygonOverlay();
+                    if (typeof window.clearFacilityMarkers === 'function') {
+                        window.clearFacilityMarkers();
+                    }
+                    if (Array.isArray(window.polygonAssets)) {
+                        window.polygonAssets = [];
+                    }
+                } else {
+                    if (typeof window.clearDrawnPolygonOverlay === 'function') {
+                        window.clearDrawnPolygonOverlay();
+                    }
+                    if (typeof window.clearFacilityMarkers === 'function') {
+                        window.clearFacilityMarkers();
+                    }
+                    if (Array.isArray(window.polygonAssets)) {
+                        window.polygonAssets = [];
+                    }
+                }
+            } catch (mapError) {
+                console.warn('Map cleanup after manual asset removal failed:', mapError);
+            }
+
+            // Refresh page shortly after submission to reflect changes
+            setTimeout(() => {
+                window.location.reload();
+            }, 600);
+        } catch (error) {
+            console.error(`Error clearing ${label}:`, error);
+            alert(error.message || `Failed to remove ${label}. Please try again.`);
+            isProcessingRequest = false;
+            if (button) {
+                button.innerHTML = originalText || button.innerHTML;
+                button.disabled = false;
+            }
+        }
+    }
+
+    function clearDrawnPolygonAssets() {
+        return clearManualAssets(
+            '/climate-hazards-analysis-v2/api/assets/clear-drawn-polygons/',
+            'drawn polygon assets',
+            'clear-polygons-btn',
+            'polygon'
+        );
+    }
+
+    function clearManualPointAssets() {
+        return clearManualAssets(
+            '/climate-hazards-analysis-v2/api/assets/clear-manual-points/',
+            'map-click point assets',
+            'clear-map-points-btn',
+            'point'
+        );
+    }
+
+    function clearAllManualAssets() {
+        return clearManualAssets(
+            '/climate-hazards-analysis-v2/api/assets/clear-manual-all/',
+            'manual assets',
+            'clear-all-manual-btn',
+            'all'
+        );
     }
 
     // Enhanced updateFileName function to also refresh files list
