@@ -12,6 +12,7 @@ __pycache__/
 *staticfiles/input_files/
 tropical_cyclone_analysis/static/input_files/
 sea_level_rise_analysis/static/input_files/
+sea_level_rise_analysis/static/output/
 climate_hazards_analysis/static/input_files/
 flood_exposure_analysis/static/input_files/
 water_stress/static/input_files/

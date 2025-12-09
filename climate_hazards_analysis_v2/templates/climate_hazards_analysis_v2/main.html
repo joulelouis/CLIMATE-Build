@@ -103,7 +103,8 @@
     .custom-modal {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.45);
+        background: radial-gradient(circle at 20% 20%, rgba(13,110,253,0.08), transparent 30%), rgba(0, 0, 0, 0.45);
+        backdrop-filter: blur(2px);
         display: none;
         overflow: auto;
         z-index: 1050;
@@ -120,6 +121,7 @@
         max-width: 96%;
         width: 100%;
         max-width: 1200px;
+        animation: modal-pop 220ms ease;
     }
     /* Make the enhanced preview modal a bit wider for dense tables */
     #enhancedPreviewModal .modal-dialog {
@@ -133,7 +135,8 @@
     .custom-modal .modal-content {
         border: none;
         border-radius: 12px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        box-shadow: 0 12px 32px rgba(0,0,0,0.22);
+        border-top: 5px solid #0d6efd;
         overflow: hidden;
     }
     .custom-modal .modal-header {
@@ -170,6 +173,11 @@
         border-radius: 10px;
         border: 1px solid #d7dee7;
         box-shadow: inset 0 1px 2px rgba(15,23,42,0.08);
+    }
+
+    @keyframes modal-pop {
+        0% { transform: translateY(10px) scale(0.98); opacity: 0; }
+        100% { transform: translateY(0) scale(1); opacity: 1; }
     }
 
     /* Enhanced preview table sizing */
@@ -626,18 +634,26 @@
                             </div>
                         </div>
 
-        <!-- Instructions Panel - MOVED HERE -->
+        <!-- Instructions Panel as Accordion -->
         <div class="mt-4">
-            <div class="card-header no-border">
-                <strong>Instructions</strong>
-            </div>
-            <div class="card-body p-3 bg-light rounded">
-                <ol class="mb-0 ps-3">
-                    <li>Upload a CSV, Excel (.xlsx), zipped Shapefile (.zip), or GeoPackage (.gpkg) file with facility locations (geospatial files may contain point, multipoint, polygon, or multipolygon geometries and must include a facility name field). ZIP files must contain .shp, .shx, and .dbf files.</li>
-                    <li>The map will be generated automatically after the file is uploaded.</li>
-                    <li>Hover over markers to see facility names.</li>
-                    <li>Click "Proceed to Select Hazards and Scenarios" button to select hazards and scenarios.</li>
-                </ol>
+            <div class="accordion" id="instructionsAccordion">
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="instructionsHeading">
+                        <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#instructionsCollapse" aria-expanded="true" aria-controls="instructionsCollapse">
+                            <strong>Instructions</strong>
+                        </button>
+                    </h2>
+                    <div id="instructionsCollapse" class="accordion-collapse collapse" aria-labelledby="instructionsHeading" data-bs-parent="#instructionsAccordion">
+                        <div class="accordion-body bg-light">
+                            <ol class="mb-0 ps-3">
+                                <li>Upload a CSV, Excel (.xlsx), zipped Shapefile (.zip), or GeoPackage (.gpkg) file with facility locations (geospatial files may contain point, multipoint, polygon, or multipolygon geometries and must include a facility name field). ZIP files must contain .shp, .shx, and .dbf files.</li>
+                                <li>The map will be generated automatically after the file is uploaded.</li>
+                                <li>Hover over markers to see facility names.</li>
+                                <li>Click "Proceed to Select Hazards and Scenarios" button to select hazards and scenarios.</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
                     </div>

@@ -211,7 +211,8 @@
   .custom-modal {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.45);
+    background: radial-gradient(circle at 20% 20%, rgba(13,110,253,0.08), transparent 30%), rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(2px);
     display: none;
     overflow: auto;
     z-index: 1050;
@@ -224,11 +225,13 @@
     margin: auto;
     max-width: 720px;
     width: 100%;
+    animation: modal-pop 220ms ease;
   }
   .custom-modal .modal-content {
     border: none;
     border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.22);
+    border-top: 5px solid #0d6efd;
     overflow: hidden;
     background: #ffffff;
   }
@@ -266,6 +269,11 @@
     border-radius: 10px;
     border: 1px solid #d7dee7;
     box-shadow: inset 0 1px 2px rgba(15,23,42,0.08);
+  }
+
+  @keyframes modal-pop {
+    0% { transform: translateY(10px) scale(0.98); opacity: 0; }
+    100% { transform: translateY(0) scale(1); opacity: 1; }
   }
 
   /* Modal entrance animation */
