@@ -99,6 +99,79 @@
         z-index: 1;
     }
 
+    /* Custom modal styling/animation (Bootstrap-free) */
+    .custom-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.45);
+        display: none;
+        overflow: auto;
+        z-index: 1050;
+        padding: 30px 12px;
+    }
+    .custom-modal.show {
+        display: block;
+    }
+    .custom-modal .modal-dialog {
+        transform: translateY(-10px);
+        opacity: 0;
+        transition: transform 250ms ease, opacity 250ms ease;
+        margin: auto;
+        max-width: 96%;
+        width: 100%;
+        max-width: 1200px;
+    }
+    /* Make the enhanced preview modal a bit wider for dense tables */
+    #enhancedPreviewModal .modal-dialog {
+        max-width: 1300px;
+        width: 98%;
+    }
+    .custom-modal.show .modal-dialog {
+        transform: translateY(0);
+        opacity: 1;
+    }
+    .custom-modal .modal-content {
+        border: none;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        overflow: hidden;
+    }
+    .custom-modal .modal-header {
+        background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+        color: #fff;
+        border: none;
+        padding: 16px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .custom-modal .modal-title {
+        font-weight: 600;
+        font-size: 18px;
+    }
+    .custom-modal .btn-close {
+        filter: invert(1);
+        opacity: 0.9;
+    }
+    .custom-modal .modal-body {
+        padding: 18px;
+        background: #f8fafc;
+    }
+    .custom-modal .modal-footer {
+        border-top: 1px solid #e9ecef;
+        background: #fff;
+        padding: 12px 18px;
+    }
+    .custom-modal label.form-label {
+        font-weight: 600;
+        color: #0f172a;
+    }
+    .custom-modal .form-control, .custom-modal .form-select {
+        border-radius: 10px;
+        border: 1px solid #d7dee7;
+        box-shadow: inset 0 1px 2px rgba(15,23,42,0.08);
+    }
+
     /* Enhanced preview table sizing */
     #regular-facilities-section .table-responsive {
         width: 100%;
@@ -574,7 +647,7 @@
                             <!-- Preview Buttons -->
                             <div class="d-flex gap-2">
                                 <button type="button" class="btn btn-warning preview-button flex-fill"
-                                        data-bs-toggle="modal" data-bs-target="#filePreviewModal" onclick="previewFile()">
+                                        onclick="openFilePreviewModal()">
                                     <strong>Preview File Upload</strong>
                                 </button>
                                 <button type="button" class="btn btn-info enhanced-preview-button flex-fill"
@@ -635,13 +708,13 @@
     <div class="loading-text">Processing Data...</div>
 </div>
 
-<!-- Modal for File Preview -->
-<div class="modal fade" id="filePreviewModal" tabindex="-1" aria-labelledby="filePreviewModalLabel" aria-hidden="true">
+<!-- Modal for File Preview (Bootstrap JS-free) -->
+<div class="custom-modal custom-modal-animate" id="filePreviewModal" aria-labelledby="filePreviewModalLabel" aria-hidden="true" style="display: none;">
   <div class="modal-dialog modal-xl">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="filePreviewModalLabel">Data Preview</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close" aria-label="Close" onclick="hideFilePreviewModal()"></button>
       </div>
       <div class="modal-body">
         <!-- Loading indicator for preview -->
@@ -667,21 +740,21 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-secondary" onclick="hideFilePreviewModal()">Close</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Enhanced Preview Modal for Polygon Assets and Granular Points -->
-<div class="modal fade" id="enhancedPreviewModal" tabindex="-1" aria-labelledby="enhancedPreviewModalLabel" aria-hidden="true">
+<!-- Enhanced Preview Modal for Polygon Assets and Granular Points (Bootstrap JS-free) -->
+<div class="custom-modal custom-modal-animate" id="enhancedPreviewModal" aria-labelledby="enhancedPreviewModalLabel" aria-hidden="true" style="display: none;">
   <div class="modal-dialog modal-xl">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="enhancedPreviewModalLabel">
           <i class="fas fa-layer-group me-2"></i>Enhanced Data Preview
         </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close" aria-label="Close" onclick="hideEnhancedPreviewModal()"></button>
       </div>
       <div class="modal-body">
         <!-- Loading indicator for enhanced preview -->
@@ -817,14 +890,14 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-secondary" onclick="hideEnhancedPreviewModal()">Close</button>
       </div>
     </div>
   </div>
 </div>
 
 <!-- jQuery (if needed for other libraries, loaded after base.html scripts) -->
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="{% static 'js/jquery-3.6.0.min.js' %}"></script>
 <script>window.jQuery || document.write('<script src="{% static "js/jquery-3.6.0.min.js" %}"><\\/script>')</script>
 <script>
     // Enhanced preview pagination settings
@@ -840,6 +913,37 @@
 
     // Debug console output
     console.log("Main script loaded");
+
+    // Ensure custom modal helpers exist (Bootstrap JS-free)
+    if (typeof showCustomModal !== 'function') {
+        function showCustomModal(modalElement) {
+            if (!modalElement) return;
+            cleanupModalBackdrops();
+            modalElement.classList.add('show');
+            modalElement.style.display = 'block';
+            modalElement.removeAttribute('aria-hidden');
+            document.body.classList.add('modal-open');
+        }
+    }
+
+    if (typeof hideCustomModal !== 'function') {
+        function hideCustomModal(modalElement) {
+            if (!modalElement) return;
+            modalElement.classList.remove('show');
+            modalElement.style.display = 'none';
+            modalElement.setAttribute('aria-hidden', 'true');
+            const anyOpenModal = document.querySelector('.custom-modal.show, .modal.show');
+            if (!anyOpenModal) {
+                document.body.classList.remove('modal-open');
+            }
+        }
+    }
+
+    function openFilePreviewModal() {
+        const modalElement = document.getElementById('filePreviewModal');
+        showCustomModal(modalElement);
+        previewFile();
+    }
 
     // Function to read the uploaded file and populate the preview table in the modal
     function previewFile() {
@@ -1270,17 +1374,48 @@
     function showEnhancedPreview() {
         console.log('Opening enhanced preview modal...');
 
+        showCustomModal(document.getElementById('enhancedPreviewModal'));
+
         // Show loading indicator
         document.getElementById('enhanced-preview-loading').style.display = 'block';
         document.getElementById('enhanced-preview-content').style.display = 'none';
         document.getElementById('enhanced-preview-error').style.display = 'none';
 
-        // Show the modal
-        const modal = new bootstrap.Modal(document.getElementById('enhancedPreviewModal'));
-        modal.show();
-
         // Fetch enhanced data
         fetchEnhancedPreviewData();
+    }
+
+    function hideEnhancedPreviewModal() {
+        const modalElement = document.getElementById('enhancedPreviewModal');
+        if (!modalElement) return;
+
+        hideCustomModal(modalElement);
+        cleanupModalBackdrops();
+    }
+
+    function hideFilePreviewModal() {
+        hideCustomModal(document.getElementById('filePreviewModal'));
+        cleanupModalBackdrops();
+    }
+
+    function cleanupModalBackdrops() {
+        try {
+            const backdrops = document.querySelectorAll('.modal-backdrop, .custom-modal-backdrop');
+            backdrops.forEach(backdrop => backdrop.remove());
+
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            document.body.style.paddingRight = '';
+
+            const openModals = document.querySelectorAll('.custom-modal.show, .modal.show');
+            openModals.forEach(modal => {
+                modal.classList.remove('show');
+                modal.style.display = 'none';
+                modal.setAttribute('aria-hidden', 'true');
+            });
+        } catch (error) {
+            console.error('Modal cleanup error:', error);
+        }
     }
 
     async function fetchEnhancedPreviewData() {
