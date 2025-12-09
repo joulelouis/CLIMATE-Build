@@ -1437,6 +1437,7 @@ if (typeof window.jQuery === 'undefined') {
             console.log('Initializing enhanced manual table...');
 
             // Initialize manual table setup
+            ensureSeaLevelHeaders();
             buildColumnHeaderMap();
             storeTableRows();
             setupColumnSelector();
@@ -2424,6 +2425,70 @@ function updateSearchMatchCount(matchCount, searchTerm) {
         `);
 
         $('#column-search').closest('.mb-3').after(indicator);
+    }
+}
+
+// Ensure Sea Level Rise columns exist even if backend omitted them (keeps selector + headers in sync)
+const SEA_LEVEL_COLUMNS = [
+    '2030 Sea Level Rise (meters) - Moderate Case',
+    '2040 Sea Level Rise (meters) - Moderate Case',
+    '2050 Sea Level Rise (meters) - Moderate Case',
+    '2030 Sea Level Rise (meters) - Worst Case',
+    '2040 Sea Level Rise (meters) - Worst Case',
+    '2050 Sea Level Rise (meters) - Worst Case'
+];
+
+function ensureSeaLevelHeaders() {
+    const $headerRow = $('#hazard-data-table thead tr.custom-table-header');
+    const $groupHeaderRow = $('#hazard-data-table thead tr.group-header');
+    if ($headerRow.length === 0 || $groupHeaderRow.length === 0) {
+        return;
+    }
+
+    const existingNames = new Set();
+    $headerRow.find('th').each(function() {
+        const name = $(this).attr('data-column-name') || $(this).text().trim();
+        existingNames.add(name);
+    });
+
+    let addedCount = 0;
+
+    SEA_LEVEL_COLUMNS.forEach(function(columnName) {
+        if (!existingNames.has(columnName)) {
+            // Add header cell
+            $headerRow.append(
+                $('<th>').attr('data-column-name', columnName).text(columnName)
+            );
+
+            // Add placeholder cell to each row to keep alignment
+            $('#hazard-data-table tbody tr').each(function() {
+                const $row = $(this);
+                const isSamplePoint = $row.hasClass('sample-point-row');
+                const cell = $('<td>')
+                    .attr('data-column', columnName)
+                    .attr('data-original-value', 'N/A')
+                    .text('N/A');
+                if (isSamplePoint) {
+                    cell.addClass('sample-point-cell');
+                } else {
+                    cell.addClass('editable-cell');
+                }
+                $row.append(cell);
+            });
+
+            addedCount++;
+        }
+    });
+
+    if (addedCount > 0) {
+        // Ensure group header includes Sea Level Rise
+        const hasGroupHeader = $groupHeaderRow.find('th').filter(function() {
+            return $(this).text().trim() === 'Sea Level Rise';
+        }).length > 0;
+
+        if (!hasGroupHeader) {
+            $groupHeaderRow.append($('<th class="text-center">').text('Sea Level Rise'));
+        }
     }
 }
 
