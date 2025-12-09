@@ -6,14 +6,10 @@ CRAproject/.env
 __pycache__/
 *.pyc
 
-# Django static files
-staticfiles/
-static/admin/
-media/
-*/static/
+# Input files (static uploads/resources not tracked)
 
-# Climate Risk Assessment app specific static files
 */static/input_files/
+*staticfiles/input_files/
 tropical_cyclone_analysis/static/input_files/
 sea_level_rise_analysis/static/input_files/
 climate_hazards_analysis/static/input_files/
