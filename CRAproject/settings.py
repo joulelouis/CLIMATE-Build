@@ -28,13 +28,14 @@ load_dotenv(BASE_DIR / 'CRAproject' / '.env')
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-h1shzw0tz%2+5z19^hdht($702)dfkj757d!q0x6sryny3-3_j'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-h1shzw0tz%2+5z19^hdht($702)dfkj757d!q0x6sryny3-3_j')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# DEBUG = False
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [host.strip() for host in os.getenv('DJANGO_ALLOWED_HOSTS', '*').split(',') if host.strip()]
+if not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ['*']
 
 
 # Application definition
