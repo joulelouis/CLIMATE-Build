@@ -13,24 +13,27 @@ logger = logging.getLogger(__name__)
 
 
 def _load_tiff_files(tiff_dir: Path) -> list[Path]:
-    pattern = "PH_DaysOver35degC_ANN_*_20[2-4][16]-20[2-5][05].tif"
+    pattern = "PH_DaysOver35degC_ANN_*.tif"
     files = sorted(tiff_dir.glob(pattern))
     if not files:
         logger.warning("No future heat GeoTIFFs found in %s", tiff_dir)
     return files
 
 
-def _build_columns(files: Iterable[Path]) -> list[str]:
-    timeframes = sorted({fp.stem[-9:] for fp in files})
-    cols: list[str] = []
-    for tf in timeframes:
-        short_tf = tf[2:4] + tf[-2:]
-        if short_tf == "2125":
-            cols.append(f"DaysOver35C_base_{short_tf}")
-        else:
-            cols.append(f"DaysOver35C_ssp245_{short_tf}")
-            cols.append(f"DaysOver35C_ssp585_{short_tf}")
-    return cols
+def _column_for_file(fp: Path) -> str | None:
+    name = fp.stem.upper()
+    # Extract timeframe from the last chunk (e.g., 2026-2030)
+    parts = fp.stem.split("_")
+    timeframe = parts[-1]
+    short_tf = timeframe[2:4] + timeframe[-2:]
+
+    if "BASELINE" in name or "2021-2025" in name:
+        return f"DaysOver35C_base_{short_tf}"
+    if "SSP245" in name:
+        return f"DaysOver35C_ssp245_{short_tf}"
+    if "SSP585" in name:
+        return f"DaysOver35C_ssp585_{short_tf}"
+    return None
 
 
 def generate_heat_future_analysis(df: pd.DataFrame, tiff_dir: str | Path | None = None) -> pd.DataFrame:
@@ -58,14 +61,29 @@ def generate_heat_future_analysis(df: pd.DataFrame, tiff_dir: str | Path | None 
     if not files:
         return df
 
-    cols = _build_columns(files)
+    # Map files to target columns (baseline + SSPs) to avoid misalignment
+    col_map: dict[Path, str] = {}
+    for fp in files:
+        col = _column_for_file(fp)
+        if col:
+            col_map[fp] = col
+    cols = list(col_map.values())
+
+    df_in = df.reset_index(drop=True).copy()
+    lot_area_series = df_in['lot_area'] if 'lot_area' in df_in.columns else pd.Series(1000**2, index=df_in.index)
+    df_in['lot_area'] = pd.to_numeric(lot_area_series, errors='coerce').fillna(1000**2)
     gdf = gpd.GeoDataFrame(
-        df.copy(),
-        geometry=[Point(xy) for xy in zip(df["Long"], df["Lat"])],
+        df_in,
+        geometry=[Point(xy) for xy in zip(df_in["Long"], df_in["Lat"])],
         crs="EPSG:4326",
     ).to_crs(epsg=32651)
+    # Initialize output columns so they persist even if stats are missing
+    for col in cols:
+        gdf[col] = np.nan
+    gdf['geometry'] = gdf.geometry.buffer(np.sqrt(gdf['lot_area'])/2, cap_style='square', join_style='mitre')
 
-    for col, fp in zip(cols, files):
+    # Primary extraction using percentile_75 (matching heat_updated baseline logic)
+    for fp, col in col_map.items():
         try:
             stats = rstat.zonal_stats(
                 gdf.to_crs(epsg=4326),
@@ -83,25 +101,39 @@ def generate_heat_future_analysis(df: pd.DataFrame, tiff_dir: str | Path | None 
     mask = gdf[cols].isna().any(axis=1)
     if mask.any():
         buf = gdf.loc[mask, "geometry"].buffer(1000, cap_style=3).to_crs(epsg=4326)
-        for col, fp in zip(cols, files):
+        for fp, col in col_map.items():
             try:
                 stats = rstat.zonal_stats(
                     buf,
                     str(fp),
-                    stats="percentile_75",
+                    stats="max",  # fallback uses max similar to standalone script
                     all_touched=True,
                     geojson_out=True,
                 )
                 ids = [int(f["id"]) for f in stats]
-                vals = [f["properties"]["percentile_75"] for f in stats]
+                vals = [f["properties"]["max"] for f in stats]
                 gdf.loc[mask, col] = vals
             except Exception as exc:
                 logger.warning("Buffered zonal stats failed for %s: %s", fp, exc)
 
-    for col in cols:
-        gdf[col] = np.ceil(gdf[col].astype(float)).astype(int)
+    # Clamp future values so they are not lower than baseline if available
+    base_col = next((c for c in cols if 'base_' in c), None)
+    if base_col:
+        for col in cols:
+            if col == base_col:
+                continue
+            gdf[col] = gdf[[col, base_col]].max(axis=1)
 
-    return gdf.drop(columns="geometry")
+    for col in cols:
+        gdf[col] = pd.to_numeric(gdf[col], errors='coerce')
+        gdf[col] = np.ceil(gdf[col]).astype('Int64')
+
+    # Drop base column from output (baseline already provided elsewhere)
+    drop_cols = ['geometry']
+    if base_col:
+        drop_cols.append(base_col)
+
+    return gdf.drop(columns=drop_cols)
 
 
 def apply_heat_future_analysis_to_csv(input_csv: str, tiff_dir: str | Path | None = None, output_csv: str | None = None) -> str:

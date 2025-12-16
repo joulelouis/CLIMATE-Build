@@ -545,8 +545,6 @@ def process_heat_exposure_analysis(facility_csv_path, selected_fields):
         
         # Handle original format from heat_exposure_analysis.py
         temp_mapping = {
-            'n>30degC_2125': 'Days over 30° Celsius',
-            'n>33degC_2125': 'Days over 33° Celsius',
             'n>35degC_2125': 'Days over 35° Celsius'
         }
         
@@ -904,10 +902,12 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
                 'DaysOver35C_ssp585_4150': 'Days over 35° Celsius (2041 - 2050) - Worst Case'
             }
             combined_df.rename(columns=rename_map, inplace=True)
+            # Ensure expected future heat columns exist even if zonal stats returned nothing
+            for col in rename_map.values():
+                if col not in combined_df.columns:
+                    combined_df[col] = np.nan
 
             heat_order = [
-                'Days over 30° Celsius',
-                'Days over 33° Celsius',
                 'Days over 35° Celsius',
                 'Days over 35° Celsius (2026 - 2030) - Moderate Case',
                 'Days over 35° Celsius (2031 - 2040) - Moderate Case',
@@ -1023,8 +1023,6 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
             'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
             'Extreme Windspeed 100 year Return Period (km/h) - Worst Case',
-            'Days over 30° Celsius',
-            'Days over 33° Celsius',
             'Days over 35° Celsius',
             'Days over 35° Celsius (2026 - 2030) - Moderate Case',
             'Days over 35° Celsius (2031 - 2040) - Moderate Case',
