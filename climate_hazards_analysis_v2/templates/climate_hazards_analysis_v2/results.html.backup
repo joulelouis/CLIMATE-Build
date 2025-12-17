@@ -1424,10 +1424,13 @@ function getInputType(columnName, currentValue) {
         'Flood Depth (meters)', 'Days over 30° Celsius', 'Days over 33° Celsius',
         'Days over 35° Celsius', 'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
         '2030 Sea Level Rise (meters) - Moderate Case', '2040 Sea Level Rise (meters) - Moderate Case', '2050 Sea Level Rise (meters) - Moderate Case', '2030 Sea Level Rise (meters) - Worst Case', '2040 Sea Level Rise (meters) - Worst Case', '2050 Sea Level Rise (meters) - Worst Case',
-        'Extreme Windspeed 10 year Return Period (km/h)',
-        'Extreme Windspeed 20 year Return Period (km/h)',
-        'Extreme Windspeed 50 year Return Period (km/h)',
         'Extreme Windspeed 100 year Return Period (km/h)',
+        '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+        '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+        '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
         'Storm Surge Flood Depth (meters)',
         'Storm Surge Flood Depth (meters) - Worst Case',
         'Rainfall-Induced Landslide (factor of safety)',
@@ -1679,10 +1682,13 @@ function validateCellValue(value, columnName) {
         'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
         'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
         '2030 Sea Level Rise (meters) - Moderate Case', '2040 Sea Level Rise (meters) - Moderate Case', '2050 Sea Level Rise (meters) - Moderate Case', '2030 Sea Level Rise (meters) - Worst Case', '2040 Sea Level Rise (meters) - Worst Case', '2050 Sea Level Rise (meters) - Worst Case',
-        'Extreme Windspeed 10 year Return Period (km/h)',
-        'Extreme Windspeed 20 year Return Period (km/h)',
-        'Extreme Windspeed 50 year Return Period (km/h)',
         'Extreme Windspeed 100 year Return Period (km/h)',
+        '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+        '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+        '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
         'Storm Surge Flood Depth (meters)',
         'Storm Surge Flood Depth (meters) - Worst Case',
         'Rainfall-Induced Landslide (factor of safety)',
@@ -2022,22 +2028,23 @@ function updateGroupAndScenarioHeaders() {
         },
         'Tropical Cyclones': {
             'Current': [
-                'Extreme Windspeed 10 year Return Period (km/h)',
-                'Extreme Windspeed 20 year Return Period (km/h)',
-                'Extreme Windspeed 50 year Return Period (km/h)',
-                'Extreme Windspeed 100 year Return Period (km/h)'
+                'Extreme Windspeed 100 year Return Period (km/h)',
+                '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+                '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+                '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
             ],
             'Future (Moderate Case)': [
-                'Extreme Windspeed 10 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 20 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 50 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 100 year Return Period (km/h) - Moderate Case'
+                '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2050 - Extreme Windspeed 100 year Return Period (km/h)'
             ],
             'Future (Worst Case)': [
-                'Extreme Windspeed 10 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 100 year Return Period (km/h) - Worst Case'
+                '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+                '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+                '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
             ]
         },
         'Heat': {

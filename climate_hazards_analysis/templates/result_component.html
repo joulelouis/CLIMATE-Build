@@ -172,64 +172,7 @@
                                 {% endif %}
                               {% endwith %}
   
-                            {% elif key == "1-min Maximum Sustain Windspeed 10 year Return Period (km/h)" %}
-                              {% if value == "Data not available" %}
-                                <span style="color: black;">{{ value }}</span>
-                              {% elif value != "N/A" %}
-                                {% with ws=value|to_float %}
-                                  {% if ws < 119 %}
-                                    <span style="color: green;">{{ value }}</span>
-                                  {% elif ws >= 119 and ws < 178 %}
-                                    <span style="color: orange;">{{ value }}</span>
-                                  {% elif ws >= 178 %}
-                                    <span style="color: red;">{{ value }}</span>
-                                  {% else %}
-                                    {{ value }}
-                                  {% endif %}
-                                {% endwith %}
-                              {% else %}
-                                {{ value }}
-                              {% endif %}
-  
-                            {% elif key == "1-min Maximum Sustain Windspeed 20 year Return Period (km/h)" %}
-                              {% if value == "Data not available" %}
-                                <span style="color: black;">{{ value }}</span>
-                              {% elif value != "N/A" %}
-                                {% with ws=value|to_float %}
-                                  {% if ws < 119 %}
-                                    <span style="color: green;">{{ value }}</span>
-                                  {% elif ws >= 119 and ws < 178 %}
-                                    <span style="color: orange;">{{ value }}</span>
-                                  {% elif ws >= 178 %}
-                                    <span style="color: red;">{{ value }}</span>
-                                  {% else %}
-                                    {{ value }}
-                                  {% endif %}
-                                {% endwith %}
-                              {% else %}
-                                {{ value }}
-                              {% endif %}
-  
-                            {% elif key == "1-min Maximum Sustain Windspeed 50 year Return Period (km/h)" %}
-                              {% if value == "Data not available" %}
-                                <span style="color: black;">{{ value }}</span>
-                              {% elif value != "N/A" %}
-                                {% with ws=value|to_float %}
-                                  {% if ws < 119 %}
-                                    <span style="color: green;">{{ value }}</span>
-                                  {% elif ws >= 119 and ws < 178 %}
-                                    <span style="color: orange;">{{ value }}</span>
-                                  {% elif ws >= 178 %}
-                                    <span style="color: red;">{{ value }}</span>
-                                  {% else %}
-                                    {{ value }}
-                                  {% endif %}
-                                {% endwith %}
-                              {% else %}
-                                {{ value }}
-                              {% endif %}
-  
-                            {% elif key == "1-min Maximum Sustain Windspeed 100 year Return Period (km/h)" %}
+                            {% elif key == "Extreme Windspeed 100 year Return Period (km/h)" %}
                               {% if value == "Data not available" %}
                                 <span style="color: black;">{{ value }}</span>
                               {% elif value != "N/A" %}

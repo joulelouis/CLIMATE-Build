@@ -27,7 +27,6 @@ from water_stress.utils.water_stress_analysis import generate_water_stress_analy
 from water_stress.utils.water_stress_future_analysis import generate_future_water_stress_from_baseline
 from heat_exposure_analysis.utils.heat_exposure_analysis import generate_heat_exposure_analysis
 from heat_exposure_analysis.utils.heat_future_analysis import generate_heat_future_analysis
-from tropical_cyclone_analysis.utils.tropical_cyclone_future_analysis import generate_tropical_cyclone_future_analysis
 from climate_hazards_analysis.utils.storm_surge_future_analysis import generate_storm_surge_future_analysis
 from climate_hazards_analysis.utils.rainfall_induced_landslide_future_analysis import generate_rainfall_induced_landslide_future_analysis
 from flood_exposure_analysis.utils.flood_exposure_analysis import generate_flood_exposure_analysis
@@ -465,22 +464,20 @@ def process_tropical_cyclone_analysis(facility_csv_path, selected_fields):
             if old in df_tc.columns and new not in df_tc.columns:
                 df_tc.rename(columns={old: new}, inplace=True)
         
-        # Standardize TC column names - EXCLUDE 200 and 500-year periods
+        # Standardize TC column names - focus on 100-year RP current + future horizons
         tc_rename = {
-            '1-min MSW 10 yr RP': 'Extreme Windspeed 10 year Return Period (km/h)',
-            '1-min MSW 20 yr RP': 'Extreme Windspeed 20 year Return Period (km/h)',
-            '1-min MSW 50 yr RP': 'Extreme Windspeed 50 year Return Period (km/h)',
             '1-min MSW 100 yr RP': 'Extreme Windspeed 100 year Return Period (km/h)',
-            # 200 and 500-year periods are removed
         }
         df_tc.rename(columns=tc_rename, inplace=True)
         
-        # Identify TC columns - ONLY include the desired return periods
         tc_cols = [
-            'Extreme Windspeed 10 year Return Period (km/h)',
-            'Extreme Windspeed 20 year Return Period (km/h)',
-            'Extreme Windspeed 50 year Return Period (km/h)',
-            'Extreme Windspeed 100 year Return Period (km/h)'
+            'Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
         ]
         
         # Filter columns that exist in the DataFrame
@@ -853,36 +850,6 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
                 logger.info(f"=== END {name.upper()} MERGE ===")
             else:
                 logger.info(f"Skipping {name} - dataframe is None")
-
-        # Add future tropical cyclone values if TC analysis was performed
-        if 'Tropical Cyclones' in selected_fields:
-            try:
-                combined_df = generate_tropical_cyclone_future_analysis(combined_df)
-
-                future_cols = [
-                    c
-                    for c in combined_df.columns
-                    if c.startswith('Extreme Windspeed')
-                    and ('Moderate Case' in c or 'Worst Case' in c)
-                ]
-                if (
-                    'Extreme Windspeed 100 year Return Period (km/h)' in combined_df.columns
-                    and future_cols
-                ):
-                    cols = [c for c in combined_df.columns if c not in future_cols]
-                    insert_pos = (
-                        cols.index('Extreme Windspeed 100 year Return Period (km/h)')
-                        + 1
-                    )
-                    for col in future_cols:
-                        cols.insert(insert_pos, col)
-                        insert_pos += 1
-                    combined_df = combined_df[cols]
-
-                logger.info('Future tropical cyclone columns added')
-
-            except Exception as e:
-                logger.warning(f'Failed to add future tropical cyclone values: {e}')
 
         # Add future heat exposure values if heat analysis was performed.
         if 'Heat' in selected_fields:

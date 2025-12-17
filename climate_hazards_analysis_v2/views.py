@@ -1777,10 +1777,15 @@ def show_results(request):
                 '2040 Sea Level Rise (meters) - Worst Case',
                 '2050 Sea Level Rise (meters) - Worst Case'
             ],
-            'Tropical Cyclones': ['Extreme Windspeed 10 year Return Period (km/h)',
-                                'Extreme Windspeed 20 year Return Period (km/h)',
-                                'Extreme Windspeed 50 year Return Period (km/h)',
-                                'Extreme Windspeed 100 year Return Period (km/h)'],
+            'Tropical Cyclones': [
+                'Extreme Windspeed 100 year Return Period (km/h)',
+                '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+                '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+                '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
+            ],
             'Heat': [
                 'Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius',
                 'Days over 35° Celsius (2026 - 2030) - Moderate Case',
@@ -1858,21 +1863,19 @@ def show_results(request):
         if 'Flood' in groups:
             groups['Flood'] = flood_current_count + flood_moderate_count + flood_worst_count
 
-        # Tropical Cyclone column counts
-        tc_basecase_count = sum(
-            1 for c in columns
-            if c.endswith(' - Moderate Case') and 'Windspeed' in c
-        )
-        tc_worstcase_count = sum(
-            1 for c in columns
-            if c.endswith(' - Worst Case') and 'Windspeed' in c
-        )
-        tc_baseline_cols = [
-            'Extreme Windspeed 10 year Return Period (km/h)',
-            'Extreme Windspeed 20 year Return Period (km/h)',
-            'Extreme Windspeed 50 year Return Period (km/h)',
-            'Extreme Windspeed 100 year Return Period (km/h)'
+        # Tropical Cyclone column counts (new 100-year RP only)
+        tc_cols = [
+            'Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
         ]
+        tc_basecase_count = sum(1 for c in tc_cols if c in columns)
+        tc_worstcase_count = 0  # kept for compatibility with downstream logic
+        tc_baseline_cols = tc_cols
         tc_baseline_count = sum(1 for c in tc_baseline_cols if c in columns)
 
         if 'Tropical Cyclones' in groups:
@@ -1919,10 +1922,15 @@ def show_results(request):
         
         # Enhanced TC Debug
         if 'Tropical Cyclones' in selected_hazards:
-            tc_expected = ['Extreme Windspeed 10 year Return Period (km/h)',
-                          'Extreme Windspeed 20 year Return Period (km/h)',
-                          'Extreme Windspeed 50 year Return Period (km/h)',
-                          'Extreme Windspeed 100 year Return Period (km/h)']
+            tc_expected = [
+                'Extreme Windspeed 100 year Return Period (km/h)',
+                '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+                '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+                '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
+            ]
             tc_found = [col for col in tc_expected if col in columns]
             logger.info(f"'Tropical Cyclones' expected columns: {tc_expected}")
             logger.info(f"'Tropical Cyclones' found columns: {tc_found}")
@@ -1979,18 +1987,13 @@ def show_results(request):
             '2040 Sea Level Rise (meters) - Worst Case',
             '2050 Sea Level Rise (meters) - Worst Case',
             # Tropical Cyclone
-            'Extreme Windspeed 10 year Return Period (km/h)',
-            'Extreme Windspeed 20 year Return Period (km/h)',
-            'Extreme Windspeed 50 year Return Period (km/h)',
             'Extreme Windspeed 100 year Return Period (km/h)',
-            'Extreme Windspeed 10 year Return Period (km/h) - Moderate Case',
-            'Extreme Windspeed 20 year Return Period (km/h) - Moderate Case',
-            'Extreme Windspeed 50 year Return Period (km/h) - Moderate Case',
-            'Extreme Windspeed 100 year Return Period (km/h) - Moderate Case',
-            'Extreme Windspeed 10 year Return Period (km/h) - Worst Case',
-            'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
-            'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
-            'Extreme Windspeed 100 year Return Period (km/h) - Worst Case',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
             # Heat
             'Days over 30° Celsius',
             'Days over 33° Celsius',
@@ -3374,18 +3377,13 @@ def _build_column_groups(columns, selected_hazards):
             '2050 Sea Level Rise (meters) - Worst Case'
         ],
         'Tropical Cyclones': [
-            'Extreme Windspeed 10 year Return Period (km/h)',
-            'Extreme Windspeed 20 year Return Period (km/h)',
-            'Extreme Windspeed 50 year Return Period (km/h)',
             'Extreme Windspeed 100 year Return Period (km/h)',
-            'Extreme Windspeed 10 year Return Period (km/h) - Moderate Case',
-            'Extreme Windspeed 20 year Return Period (km/h) - Moderate Case',
-            'Extreme Windspeed 50 year Return Period (km/h) - Moderate Case',
-            'Extreme Windspeed 100 year Return Period (km/h) - Moderate Case',
-            'Extreme Windspeed 10 year Return Period (km/h) - Worst Case',
-            'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
-            'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
-            'Extreme Windspeed 100 year Return Period (km/h) - Worst Case'
+            '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
         ],
         'Storm Surge': [
             'Storm Surge Flood Depth (meters)',
@@ -4374,20 +4372,15 @@ def sensitivity_results(request):
                 'Days over 35° Celsius (2031 - 2040) - Worst Case',
                 'Days over 35° Celsius (2041 - 2050) - Worst Case',
             ],
-            'tropical_cyclone_not_material': [
-                'Extreme Windspeed 10 year Return Period (km/h)',
-                'Extreme Windspeed 20 year Return Period (km/h)',
-                'Extreme Windspeed 50 year Return Period (km/h)',
-                'Extreme Windspeed 100 year Return Period (km/h)',
-                'Extreme Windspeed 10 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 20 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 50 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 100 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 10 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 100 year Return Period (km/h) - Worst Case',
-            ],
+        'tropical_cyclone_not_material': [
+            'Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+        ],
             'storm_surge_not_material': [
                 'Storm Surge Flood Depth (meters)',
                 'Storm Surge Flood Depth (meters) - Worst Case',
@@ -4555,18 +4548,13 @@ def sensitivity_results(request):
                 '2050 Sea Level Rise (meters) - Worst Case'
             ],
             'Tropical Cyclones': [
-                'Extreme Windspeed 10 year Return Period (km/h)',
-                'Extreme Windspeed 20 year Return Period (km/h)',
-                'Extreme Windspeed 50 year Return Period (km/h)',
                 'Extreme Windspeed 100 year Return Period (km/h)',
-                'Extreme Windspeed 10 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 20 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 50 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 100 year Return Period (km/h) - Moderate Case',
-                'Extreme Windspeed 10 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 20 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 50 year Return Period (km/h) - Worst Case',
-                'Extreme Windspeed 100 year Return Period (km/h) - Worst Case'
+                '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+                '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+                '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+                '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
             ],
             'Heat': [
                 'Days over 30° Celsius',
@@ -4631,16 +4619,21 @@ def sensitivity_results(request):
             groups['Water Stress'] = ws_baseline_count + ws_moderatecase_count + ws_worstcase_count
 
         tc_basecase_count = sum(
-            1 for c in columns if c.endswith(' - Moderate Case') and 'Windspeed' in c
+            1 for c in columns if c.startswith('2030 - Extreme Windspeed 100 year Return Period')
+            or c.startswith('2040 - Extreme Windspeed 100 year Return Period')
+            or c.startswith('2050 - Extreme Windspeed 100 year Return Period')
         )
         tc_worstcase_count = sum(
-            1 for c in columns if c.endswith(' - Worst Case') and 'Windspeed' in c
+            1 for c in columns if 'RCP8.5' in c and 'Extreme Windspeed 100 year Return Period' in c
         )
         tc_baseline_cols = [
-            'Extreme Windspeed 10 year Return Period (km/h)',
-            'Extreme Windspeed 20 year Return Period (km/h)',
-            'Extreme Windspeed 50 year Return Period (km/h)',
-            'Extreme Windspeed 100 year Return Period (km/h)'
+            'Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
         ]
         tc_baseline_count = sum(1 for c in tc_baseline_cols if c in columns)
 
@@ -5028,10 +5021,13 @@ def convert_table_value(value, column_name):
         '2030 Sea Level Rise (meters) - Worst Case',
         '2040 Sea Level Rise (meters) - Worst Case',
         '2050 Sea Level Rise (meters) - Worst Case',
-        'Extreme Windspeed 10 year Return Period (km/h)',
-        'Extreme Windspeed 20 year Return Period (km/h)',
-        'Extreme Windspeed 50 year Return Period (km/h)',
         'Extreme Windspeed 100 year Return Period (km/h)',
+        '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+        '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+        '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
         'Storm Surge Flood Depth (meters)',
         'Storm Surge Flood Depth (meters) - Worst Case',
         'Rainfall-Induced Landslide (factor of safety)',

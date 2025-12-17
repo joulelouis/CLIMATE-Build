@@ -159,10 +159,13 @@ def climate_hazards_analysis(request):
             '2050 Sea Level Rise (meters) - Worst Case'
         ],
         'Tropical Cyclones': [
-            'Extreme Windspeed 10 year Return Period (km/h)',
-            'Extreme Windspeed 20 year Return Period (km/h)',
-            'Extreme Windspeed 50 year Return Period (km/h)',
-            'Extreme Windspeed 100 year Return Period (km/h)'
+            'Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
         ],
         'Heat': [
             'Days over 30° Celsius',
