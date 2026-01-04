@@ -180,7 +180,10 @@ def process_flood_exposure_analysis(facility_csv_path, selected_fields, scenario
         logger.info(f"Successfully found flood columns: {available_flood_columns}")
             
         # Clean any NaN values in all flood columns
-        valid_categories = {'0.1 to 0.5', '0.5 to 1.5', 'Greater than 1.5', 'Unknown'}
+        valid_categories = {
+            '0.1 to 0.5', '0.5 to 1.5', 'Greater than 1.5', 'Unknown',
+            '<0.1', '0.1-0.5', '0.5-1.5', '>1.5'
+        }
 
         for flood_col in available_flood_columns:
             # Handle NaN values

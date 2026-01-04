@@ -1787,7 +1787,7 @@ def show_results(request):
                 '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
             ],
             'Heat': [
-                'Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius',
+                'Days over 35° Celsius',
                 'Days over 35° Celsius (2026 - 2030) - Moderate Case',
                 'Days over 35° Celsius (2031 - 2040) - Moderate Case',
                 'Days over 35° Celsius (2041 - 2050) - Moderate Case',
@@ -1823,20 +1823,23 @@ def show_results(request):
         logger.info(f"Groups created: {groups}")
 
         # Only count heat-related future scenario columns that start with
-        # "Days over 35 Celsius" for Moderate and Worst Case scenarios
+        # "Days over 35° Celsius" for Moderate and Worst Case scenarios
         heat_basecase_count = sum(
             1
             for c in columns
-            if c.startswith('Days over 35° Celsius') and c.endswith(' - Moderate Case')
+            if _normalize_column_name(c).startswith('Days over 35 Celsius') and c.endswith(' - Moderate Case')
         )
         heat_worstcase_count = sum(
             1
             for c in columns
-            if c.startswith('Days over 35° Celsius') and c.endswith(' - Worst Case')
+            if _normalize_column_name(c).startswith('Days over 35 Celsius') and c.endswith(' - Worst Case')
         )
         
-        heat_baseline_cols = ['Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius']
-        heat_baseline_count = sum(1 for c in heat_baseline_cols if c in columns)
+        heat_baseline_cols = ['Days over 35° Celsius']
+        heat_baseline_count = sum(
+            1 for c in columns
+            if _normalize_column_name(c) in {_normalize_column_name(col) for col in heat_baseline_cols}
+        )
 
         if 'Heat' in groups:
             groups['Heat'] = heat_baseline_count + heat_basecase_count + heat_worstcase_count
@@ -1966,6 +1969,10 @@ def show_results(request):
         plot_path = result.get('plot_path')
         all_plots = result.get('all_plots', [])
 
+        # Remove baseline heat columns that should not be displayed in results
+        hidden_heat_columns = ['Days over 30° Celsius', 'Days over 33° Celsius']
+        df = df.drop(columns=[col for col in hidden_heat_columns if col in df.columns], errors='ignore')
+
         # Standardize column ordering to match header mapping
         HEADER_ORDER = [
             'Facility', 'Asset Archetype',
@@ -1995,8 +2002,6 @@ def show_results(request):
             '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
             '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
             # Heat
-            'Days over 30° Celsius',
-            'Days over 33° Celsius',
             'Days over 35° Celsius',
             'Days over 35° Celsius (2026 - 2030) - Moderate Case',
             'Days over 35° Celsius (2031 - 2040) - Moderate Case',
@@ -2012,7 +2017,15 @@ def show_results(request):
             'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
             'Rainfall-Induced Landslide (factor of safety) - Worst Case',
         ]
-        ordered_cols = [c for c in HEADER_ORDER if c in df.columns]
+        normalized_cols = {_normalize_column_name(c): c for c in df.columns}
+        ordered_cols = []
+        for col in HEADER_ORDER:
+            if col in df.columns:
+                ordered_cols.append(col)
+                continue
+            normalized = _normalize_column_name(col)
+            if normalized in normalized_cols:
+                ordered_cols.append(normalized_cols[normalized])
         tail_cols = [c for c in df.columns if c not in ordered_cols]
         df = df.reindex(columns=ordered_cols + tail_cols)
         columns = df.columns.tolist()
@@ -2115,6 +2128,10 @@ def _handle_unified_mixed_assets_results(request, asset_inventory, selected_haza
             display_columns = [col for col in columns if not col.startswith('_') and col not in ['row_type', 'parent_id', 'level', 'parent_facility', 'original_asset_name']]
         else:
             display_columns = ['Facility', 'Asset Archetype'] + selected_hazards
+        display_columns = [
+            col for col in display_columns
+            if col not in ['Days over 30° Celsius', 'Days over 33° Celsius']
+        ]
 
         # Prepare context for template
         context = {
@@ -3321,6 +3338,11 @@ def _get_granular_children_for_polygon(asset_name, selected_hazards):
         return []
 
 
+def _normalize_column_name(name: str) -> str:
+    """Normalize column labels to reduce symbol-specific mismatches."""
+    return name.replace('°', '')
+
+
 def _build_column_groups(columns, selected_hazards):
     """
     Build comprehensive column groups for the hazard exposure table.
@@ -3336,6 +3358,7 @@ def _build_column_groups(columns, selected_hazards):
     logger.info(f"Available columns: {columns}")
 
     groups = {}
+    normalized_columns = {_normalize_column_name(col) for col in columns}
 
     # Comprehensive column mappings for all hazard types
     column_mappings = {
@@ -3358,8 +3381,6 @@ def _build_column_groups(columns, selected_hazards):
             'Water Stress Exposure 2050 (%) - Worst Case'
         ],
         'Heat': [
-            'Days over 30° Celsius',
-            'Days over 33° Celsius',
             'Days over 35° Celsius',
             'Days over 35° Celsius (2026 - 2030) - Moderate Case',
             'Days over 35° Celsius (2031 - 2040) - Moderate Case',
@@ -3407,7 +3428,10 @@ def _build_column_groups(columns, selected_hazards):
     }
 
     # Always include Facility Information if we have basic columns
-    facility_cols = [col for col in column_mappings['Facility Information'] if col in columns]
+    facility_cols = [
+        col for col in column_mappings['Facility Information']
+        if _normalize_column_name(col) in normalized_columns
+    ]
     if facility_cols:
         groups['Facility Information'] = len(facility_cols)
         logger.info(f"Added Facility Information group with {len(facility_cols)} columns: {facility_cols}")
@@ -3433,7 +3457,10 @@ def _build_column_groups(columns, selected_hazards):
 
         if normalized_hazard in column_mappings:
             # Count actual columns present for this hazard
-            hazard_columns = [col for col in column_mappings[normalized_hazard] if col in columns]
+            hazard_columns = [
+                col for col in column_mappings[normalized_hazard]
+                if _normalize_column_name(col) in normalized_columns
+            ]
 
             if hazard_columns:
                 groups[normalized_hazard] = len(hazard_columns)

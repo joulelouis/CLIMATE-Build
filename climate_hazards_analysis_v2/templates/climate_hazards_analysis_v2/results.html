@@ -1480,6 +1480,7 @@ if (typeof window.jQuery === 'undefined') {
 
             // Initialize manual table setup
             ensureSeaLevelHeaders();
+            reorderTableColumns();
             buildColumnHeaderMap();
             storeTableRows();
             setupColumnSelector();
@@ -1993,9 +1994,9 @@ function getInputType(columnName, currentValue) {
     if (columnName.startsWith('Water Stress Exposure')) {
         return 'number';
     }
-const numberColumns = [
+    const numberColumns = [
         'Flood Depth (meters)',
-        'Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius',
+        'Days over 35° Celsius',
         'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
         '2030 Sea Level Rise (meters) - Moderate Case', '2040 Sea Level Rise (meters) - Moderate Case', '2050 Sea Level Rise (meters) - Moderate Case', '2030 Sea Level Rise (meters) - Worst Case', '2040 Sea Level Rise (meters) - Worst Case', '2050 Sea Level Rise (meters) - Worst Case',
         'Extreme Windspeed 100 year Return Period (km/h)',
@@ -2248,9 +2249,9 @@ function validateCellValue(value, columnName) {
         return !isNaN(numValue) && isFinite(numValue);
     }
     
-const numberColumns = [
+    const numberColumns = [
         'Flood Depth (meters)',
-        'Days over 30° Celsius', 'Days over 33° Celsius', 'Days over 35° Celsius',
+        'Days over 35° Celsius',
         'Days over 35° Celsius (2026 - 2030)', 'Days over 35° Celsius (2031 - 2040)', 'Days over 35° Celsius (2041 - 2050)',
         'Water Stress Exposure (%)', 'Water Stress Exposure 2030 (%) - Moderate Case', 'Water Stress Exposure 2050 (%) - Moderate Case', 'Water Stress Exposure 2030 (%) - Worst Case', 'Water Stress Exposure 2050 (%) - Worst Case',
         '2030 Sea Level Rise (meters) - Moderate Case', '2040 Sea Level Rise (meters) - Moderate Case', '2050 Sea Level Rise (meters) - Moderate Case', '2030 Sea Level Rise (meters) - Worst Case', '2040 Sea Level Rise (meters) - Worst Case', '2050 Sea Level Rise (meters) - Worst Case',
@@ -2633,23 +2634,32 @@ function updateColumnVisibility() {
 function updateGroupAndScenarioHeaders() {
     console.log('Updating group and scenario headers...');
 
-    // Get all visible columns
-    const visibleColumns = new Set(['Facility']);
+    // Get all visible columns from the actual table header
+    const visibleColumns = new Set();
+    const normalizeColumnName = (name) => name.replace('°', '');
 
-    // Add Asset Archetype if checked
-    $('.base-column').each(function() {
-        const columnName = $(this).data('column');
-        if ($(this).prop('checked')) {
+    $('#hazard-data-table thead tr.custom-table-header th').each(function() {
+        const $th = $(this);
+        if ($th.is(':visible')) {
+            const columnName = $th.attr('data-column-name') || $th.text().trim();
             visibleColumns.add(columnName);
         }
     });
 
-    $('.hazard-column').each(function() {
-        const columnName = $(this).data('column');
-        if ($(this).prop('checked')) {
-            visibleColumns.add(columnName);
-        }
-    });
+    const normalizedVisibleColumns = new Set(
+        Array.from(visibleColumns).map(normalizeColumnName)
+    );
+
+    const groupOrder = [
+        'Asset Information',
+        'Flood',
+        'Water Stress',
+        'Sea Level Rise',
+        'Tropical Cyclones',
+        'Heat',
+        'Storm Surge',
+        'Rainfall-Induced Landslide'
+    ];
 
     // Define scenario mapping for climate hazards
     const scenarioMapping = {
@@ -2686,13 +2696,7 @@ function updateGroupAndScenarioHeaders() {
         },
         'Tropical Cyclones': {
             'Current': [
-                'Extreme Windspeed 100 year Return Period (km/h)',
-                '2030 - Extreme Windspeed 100 year Return Period (km/h)',
-                '2040 - Extreme Windspeed 100 year Return Period (km/h)',
-                '2050 - Extreme Windspeed 100 year Return Period (km/h)',
-                '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
-                '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
-                '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5'
+                'Extreme Windspeed 100 year Return Period (km/h)'
             ],
             'Future (Moderate Case)': [
                 '2030 - Extreme Windspeed 100 year Return Period (km/h)',
@@ -2707,8 +2711,6 @@ function updateGroupAndScenarioHeaders() {
         },
         'Heat': {
             'Current': [
-                'Days over 30° Celsius',
-                'Days over 33° Celsius',
                 'Days over 35° Celsius'
             ],
             'Future (Moderate Case)': [
@@ -2743,52 +2745,68 @@ function updateGroupAndScenarioHeaders() {
         }
     };
 
-    // Build scenario headers
+    // Build group and scenario headers in the desired order
     let scenarioHeaderHtml = '';
+    let groupHeaderHtml = '';
     const groupCounts = {};
 
-    // Handle Asset Information first (no scenario sub-headers)
-    const assetColumns = ['Facility', 'Asset Archetype'];
-    let assetVisibleCount = 0;
-    assetColumns.forEach(function(columnName) {
-        if (visibleColumns.has(columnName)) {
-            assetVisibleCount++;
-        }
-    });
-
-    if (assetVisibleCount > 0) {
-        // Empty scenario header cells for Asset Information (spans directly to columns)
-        scenarioHeaderHtml += `<th colspan="${assetVisibleCount}"></th>`;
-        groupCounts['Asset Information'] = assetVisibleCount;
-    }
-
-    // Handle climate hazards (with scenario sub-headers)
-    Object.keys(scenarioMapping).forEach(function(groupName) {
-        if (groupName === 'Asset Information') return; // Already handled above
-
-        if (!groupCounts[groupName]) groupCounts[groupName] = 0;
+    groupOrder.forEach(function(groupName) {
         const scenarios = scenarioMapping[groupName];
+        if (!scenarios) {
+            return;
+        }
 
-        Object.keys(scenarios).forEach(function(scenarioName) {
-            const columns = scenarios[scenarioName];
-            let visibleCount = 0;
+        let groupVisibleCount = 0;
 
-            columns.forEach(function(columnName) {
-                if (visibleColumns.has(columnName)) {
-                    visibleCount++;
+        if (groupName === 'Asset Information') {
+            const assetColumns = scenarios[''] || [];
+            let assetVisibleCount = 0;
+            assetColumns.forEach(function(columnName) {
+                if (
+                    visibleColumns.has(columnName) ||
+                    normalizedVisibleColumns.has(normalizeColumnName(columnName))
+                ) {
+                    assetVisibleCount++;
                 }
             });
 
-            if (visibleCount > 0) {
-                const scenarioClass = scenarioName.includes('Current') ? 'baseline-header' :
-                                    scenarioName.includes('Moderate') ? 'moderate-header' :
-                                    scenarioName.includes('Worst') ? 'worstcase-header' : '';
-
-                scenarioHeaderHtml += `<th colspan="${visibleCount}" class="text-center ${scenarioClass}">${scenarioName}</th>`;
-                groupCounts[groupName] += visibleCount;
+            if (assetVisibleCount > 0) {
+                scenarioHeaderHtml += `<th colspan="${assetVisibleCount}"></th>`;
+                groupVisibleCount += assetVisibleCount;
             }
-        });
+        } else {
+            Object.keys(scenarios).forEach(function(scenarioName) {
+                const columns = scenarios[scenarioName];
+                let visibleCount = 0;
+
+                columns.forEach(function(columnName) {
+                    if (
+                        visibleColumns.has(columnName) ||
+                        normalizedVisibleColumns.has(normalizeColumnName(columnName))
+                    ) {
+                        visibleCount++;
+                    }
+                });
+
+                if (visibleCount > 0) {
+                    const scenarioClass = scenarioName.includes('Current') ? 'baseline-header' :
+                                        scenarioName.includes('Moderate') ? 'moderate-header' :
+                                        scenarioName.includes('Worst') ? 'worstcase-header' : '';
+
+                    scenarioHeaderHtml += `<th colspan="${visibleCount}" class="text-center ${scenarioClass}">${scenarioName}</th>`;
+                    groupVisibleCount += visibleCount;
+                }
+            });
+        }
+
+        groupCounts[groupName] = groupVisibleCount;
+        if (groupVisibleCount > 0) {
+            groupHeaderHtml += `<th colspan="${groupVisibleCount}" class="text-center">${groupName}</th>`;
+        }
     });
+
+    // Update group header row to match current visibility/order
+    $('#hazard-data-table thead tr.group-header').html(groupHeaderHtml);
 
     // Update scenario headers
     $('#hazard-data-table thead tr.sub-group-header').html(scenarioHeaderHtml);
@@ -2808,6 +2826,90 @@ function updateGroupAndScenarioHeaders() {
     });
 
     console.log('Group and scenario headers updated dynamically');
+}
+
+function reorderTableColumns() {
+    const desiredOrder = [
+        'Facility',
+        'Asset Archetype',
+        // Flood
+        'Flood Depth (meters)',
+        'Flood Depth (meters) - Moderate Case',
+        'Flood Depth (meters) - Worst Case',
+        // Water Stress
+        'Water Stress Exposure (%)',
+        'Water Stress Exposure 2030 (%) - Moderate Case',
+        'Water Stress Exposure 2050 (%) - Moderate Case',
+        'Water Stress Exposure 2030 (%) - Worst Case',
+        'Water Stress Exposure 2050 (%) - Worst Case',
+        // Sea Level Rise
+        '2030 Sea Level Rise (meters) - Moderate Case',
+        '2040 Sea Level Rise (meters) - Moderate Case',
+        '2050 Sea Level Rise (meters) - Moderate Case',
+        '2030 Sea Level Rise (meters) - Worst Case',
+        '2040 Sea Level Rise (meters) - Worst Case',
+        '2050 Sea Level Rise (meters) - Worst Case',
+        // Tropical Cyclones
+        'Extreme Windspeed 100 year Return Period (km/h)',
+        '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+        '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+        '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+        '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+        // Heat
+        'Days over 35° Celsius',
+        'Days over 35° Celsius (2026 - 2030) - Moderate Case',
+        'Days over 35° Celsius (2031 - 2040) - Moderate Case',
+        'Days over 35° Celsius (2041 - 2050) - Moderate Case',
+        'Days over 35° Celsius (2026 - 2030) - Worst Case',
+        'Days over 35° Celsius (2031 - 2040) - Worst Case',
+        'Days over 35° Celsius (2041 - 2050) - Worst Case',
+        // Storm Surge
+        'Storm Surge Flood Depth (meters)',
+        'Storm Surge Flood Depth (meters) - Worst Case',
+        // Rainfall-Induced Landslide
+        'Rainfall-Induced Landslide (factor of safety)',
+        'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
+        'Rainfall-Induced Landslide (factor of safety) - Worst Case'
+    ];
+
+    const normalize = (name) => name.replace('°', '').replace(/\s+/g, ' ').trim();
+    const $headerRow = $('#hazard-data-table thead tr.custom-table-header');
+    const $headers = $headerRow.find('th');
+    const headerNames = $headers.map(function() {
+        return $(this).attr('data-column-name') || $(this).text().trim();
+    }).get();
+
+    const usedIndices = new Set();
+    const orderedIndices = [];
+
+    desiredOrder.forEach(function(name) {
+        const normalizedTarget = normalize(name);
+        const idx = headerNames.findIndex(function(headerName) {
+            return normalize(headerName) === normalizedTarget;
+        });
+        if (idx !== -1 && !usedIndices.has(idx)) {
+            usedIndices.add(idx);
+            orderedIndices.push(idx);
+        }
+    });
+
+    headerNames.forEach(function(_name, idx) {
+        if (!usedIndices.has(idx)) {
+            orderedIndices.push(idx);
+        }
+    });
+
+    const orderedHeaders = orderedIndices.map(idx => $headers.eq(idx));
+    $headerRow.empty().append(orderedHeaders);
+
+    $('#hazard-data-table tbody tr').each(function() {
+        const $row = $(this);
+        const $cells = $row.find('td');
+        const orderedCells = orderedIndices.map(idx => $cells.eq(idx));
+        $row.empty().append(orderedCells);
+    });
 }
 
 // === MANUAL TABLE STATE MANAGEMENT ===

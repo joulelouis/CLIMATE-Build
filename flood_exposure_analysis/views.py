@@ -69,27 +69,30 @@ def flood_exposure_analysis(request):
 
     if not file_path or not os.path.exists(file_path):
         return render(request, 'flood_exposure_analysis/upload.html', {'error': 'No file uploaded or file not found.'})
-    
-    raster_path = os.path.join(UPLOAD_DIR, 'PH_Flood_100year_UTM_ProjectNOAH_Unmasked_COG.tif')
 
-    # Retrieve the list of fields selected by the user
-    selected_fields = request.session.get('selected_dynamic_fields', None)
-    print("Using selected fields for plotting:", selected_fields)
+    # Run all three scenarios (current, SSP245, SSP585) to populate expected columns
+    output = generate_flood_exposure_analysis(
+        file_path,
+        scenarios=['current', 'moderate', 'worst']
+    )
 
-    output_path = generate_flood_exposure_analysis(file_path, raster_path, dynamic_fields=selected_fields)
+    if output and 'error' not in output and output.get('combined_csv_paths'):
+        updated_csv_path = output['combined_csv_paths'][0]
+    else:
+        updated_csv_path = None
 
-    updated_csv_path = os.path.join(UPLOAD_DIR, 'output_with_exposure.csv')
-
-    if os.path.exists(updated_csv_path):
+    if updated_csv_path and os.path.exists(updated_csv_path):
         df = pd.read_csv(updated_csv_path)
         data = df.to_dict(orient="records")
         columns = df.columns.tolist()
     else:
         data, columns = [], []
+        if output and 'error' in output:
+            print(f"Flood analysis error: {output['error']}")
 
     return render(request, 'flood_exposure_analysis/flood_exposure_analysis.html', {
         'data': data,
         'columns': columns,
-        'output_path': output_path,
+        'output_path': updated_csv_path,
         'available_fields': available_fields
     })
