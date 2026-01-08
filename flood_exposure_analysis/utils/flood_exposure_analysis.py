@@ -1,15 +1,18 @@
+import json
 import os
+import tempfile
+import zipfile
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import Point
+from shapely.geometry import Point, shape
 import matplotlib.pyplot as plt
 from pyproj import CRS
 from rasterstats import zonal_stats
 from django.conf import settings
 
 
-def generate_flood_exposure_analysis(facility_csv_path, scenarios=None):
+def generate_flood_exposure_analysis(facility_csv_path, scenarios=None, facility_geofile_path=None, facility_geojson_records=None):
     """
     Performs flood exposure analysis for facility locations across multiple scenarios.
 
@@ -47,6 +50,10 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None):
                 'description': 'Future flood exposure - Worst Case (SSP5-8.5)'
             }
         }
+        FLOOD_MGB_FILES = [
+            'PH_FloodSusceptibility_MGB_UTM_Unmasked_COG.tif',
+            'PH_FloodSusceptibility_MGB_UTM_Unmasked.tif'
+        ]
 
         for scenario in scenarios:
             if scenario not in FLOOD_SCENARIOS:
@@ -76,8 +83,83 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None):
 
             raise FileNotFoundError(f"Flood raster files {filenames} not found in input directories")
 
+        def load_geofile(path):
+            if not path or not os.path.exists(path):
+                return None
+
+            ext = os.path.splitext(path)[1].lower()
+            if ext == '.zip':
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    with zipfile.ZipFile(path, 'r') as zip_ref:
+                        zip_ref.extractall(tmpdir)
+                    shp_files = [p for p in os.listdir(tmpdir) if p.lower().endswith('.shp')]
+                    if not shp_files:
+                        return None
+                    shp_path = os.path.join(tmpdir, shp_files[0])
+                    return gpd.read_file(shp_path)
+            if ext in ['.gpkg', '.shp']:
+                return gpd.read_file(path)
+
+            return None
+
+        gdf = None
+        if facility_geofile_path:
+            try:
+                gdf = load_geofile(facility_geofile_path)
+            except Exception:
+                gdf = None
+
+        if gdf is None and facility_geojson_records:
+            geo_rows = []
+            geometries = []
+            for record in facility_geojson_records:
+                geom = record.get('geometry')
+                if not geom:
+                    continue
+                try:
+                    shapely_geom = shape(geom)
+                except Exception:
+                    continue
+                geometries.append(shapely_geom)
+                geo_rows.append({
+                    'Facility': record.get('Facility') or record.get('Name') or record.get('Site'),
+                    'Lat': record.get('Lat'),
+                    'Long': record.get('Long'),
+                })
+
+            if geo_rows and geometries:
+                gdf = gpd.GeoDataFrame(geo_rows, geometry=geometries, crs='EPSG:4326')
+
         # Load facility locations
-        df_fac = pd.read_csv(facility_csv_path)
+        if gdf is None:
+            df_fac = pd.read_csv(facility_csv_path)
+        else:
+            gdf = gdf.to_crs('EPSG:4326')
+            if 'Facility' not in gdf.columns:
+                for name_col in ['Name', 'Site', 'Facility', 'Asset', 'asset', 'facility']:
+                    if name_col in gdf.columns:
+                        gdf['Facility'] = gdf[name_col].astype(str)
+                        break
+            if 'Facility' not in gdf.columns:
+                gdf['Facility'] = [f'Asset {i + 1}' for i in range(len(gdf))]
+
+            if 'Lat' not in gdf.columns or 'Long' not in gdf.columns:
+                gdf['Lat'] = gdf.geometry.centroid.y
+                gdf['Long'] = gdf.geometry.centroid.x
+            else:
+                gdf['Lat'] = pd.to_numeric(gdf['Lat'], errors='coerce')
+                gdf['Long'] = pd.to_numeric(gdf['Long'], errors='coerce')
+
+            df_fac = gdf.drop(columns='geometry')
+
+            try:
+                debug_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
+                os.makedirs(debug_dir, exist_ok=True)
+                debug_path = os.path.join(debug_dir, 'flood_polygon_input_debug.geojson')
+                with open(debug_path, 'w', encoding='utf-8') as debug_file:
+                    debug_file.write(gdf.to_json())
+            except Exception:
+                pass
 
         # Ensure Facility, Lat, Long columns exist
         rename_map = {}
@@ -99,17 +181,31 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None):
         if 'Facility' not in df_fac.columns:
             raise ValueError("Your facility CSV must include a 'Facility' column or equivalent header.")
 
-        # Build buffered geometries in raster CRS (EPSG:32651)
+        # Build geometries in raster CRS (EPSG:32651)
         raster_crs = CRS('epsg:32651')
-        points = gpd.GeoDataFrame(
-            df_fac.copy(),
-            geometry=gpd.points_from_xy(df_fac['Long'], df_fac['Lat']),
-            crs='EPSG:4326'
-        ).to_crs(raster_crs)
+        if gdf is None:
+            points = gpd.GeoDataFrame(
+                df_fac.copy(),
+                geometry=gpd.points_from_xy(df_fac['Long'], df_fac['Lat']),
+                crs='EPSG:4326'
+            ).to_crs(raster_crs)
 
-        # Use ~500m buffer (matches prior ~0.0045 deg buffer) for polygon stats
-        buffer_distance_m = 500
-        points['geometry'] = points.geometry.buffer(buffer_distance_m, cap_style=3)
+            # Use ~500m buffer (matches prior ~0.0045 deg buffer) for polygon stats
+            buffer_distance_m = 500
+            stats_geometries = [
+                geom.buffer(buffer_distance_m, cap_style=3) for geom in points.geometry
+            ]
+        else:
+            gdf_proj = gdf.to_crs(raster_crs)
+            stats_geometries = []
+            for geom in gdf_proj.geometry:
+                if geom is None or geom.is_empty:
+                    stats_geometries.append(geom)
+                    continue
+                if geom.geom_type in ['Polygon', 'MultiPolygon']:
+                    stats_geometries.append(geom)
+                else:
+                    stats_geometries.append(geom.buffer(500, cap_style=3))
 
         def classify_depth(value):
             """
@@ -155,14 +251,13 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None):
             print(f"  Raster Exists: {os.path.exists(raster_path)}")
 
             print(f"  Extracting flood depths using zonal statistics (percentile_90)...")
-            stats = zonal_stats(points.geometry, raster_path, stats='percentile_90', nodata=255)
+            stats = zonal_stats(stats_geometries, raster_path, stats='percentile_90', nodata=255)
             print(f"  Zonal stats completed: {len(stats)} results")
 
             percentile_values = [
                 stat.get('percentile_90') if stat.get('percentile_90') is not None else 0
                 for stat in stats
             ]
-
             exposure_values = [classify_depth(p) for p in percentile_values]
 
             exposure_counts = {}

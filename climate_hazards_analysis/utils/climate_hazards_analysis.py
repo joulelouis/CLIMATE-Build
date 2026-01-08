@@ -56,7 +56,7 @@ def standardize_facility_dataframe(df):
     return _standardize_facility_dataframe(df, strict_mode=True)
 
 
-def process_flood_exposure_analysis(facility_csv_path, selected_fields, scenarios=None):
+def process_flood_exposure_analysis(facility_csv_path, selected_fields, scenarios=None, facility_geofile_path=None, facility_geojson_records=None):
     """
     Process flood exposure analysis if selected.
     Enhanced version that supports multiple flood scenarios.
@@ -91,7 +91,12 @@ def process_flood_exposure_analysis(facility_csv_path, selected_fields, scenario
 
         logger.info("Calling multi-scenario flood exposure analysis function...")
         # Call with scenarios parameter
-        flood_res = generate_flood_exposure_analysis(facility_csv_path, scenarios=scenarios)
+        flood_res = generate_flood_exposure_analysis(
+            facility_csv_path,
+            scenarios=scenarios,
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records
+        )
         logger.info("Multi-scenario flood exposure analysis completed")
         
         if 'error' in flood_res:
@@ -683,7 +688,7 @@ def process_nan_values(df):
     return process_nan_values_in_dataframe(df, column_mappings)
 
 
-def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=None, buffer_size=0.0009, sensitivity_params=None, flood_scenarios=None):
+def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=None, buffer_size=0.0009, sensitivity_params=None, flood_scenarios=None, facility_geofile_path=None, facility_geojson_records=None):
     """
     Integrates multiple climate hazard analyses into a single output.
     Enhanced version with multi-scenario flood analysis support.
@@ -778,7 +783,11 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         # 1. Flood Exposure Analysis - Enhanced version with multi-scenario support
         logger.info("=== PROCESSING FLOOD EXPOSURE ANALYSIS ===")
         flood_values, flood_plots = process_flood_exposure_analysis(
-            facility_csv_path, selected_fields, scenarios=flood_scenarios
+            facility_csv_path,
+            selected_fields,
+            scenarios=flood_scenarios,
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records
         )
         all_plot_paths.extend(flood_plots)
         
@@ -786,8 +795,20 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             logger.info(f"Flood values shape: {flood_values.shape}")
             logger.info(f"Flood values columns: {flood_values.columns.tolist()}")
             logger.info("Merging flood values...")
+            flood_merge_df = flood_values.copy()
+            if 'Facility' in flood_merge_df.columns:
+                if flood_merge_df['Facility'].duplicated().any():
+                    dupes = flood_merge_df[flood_merge_df['Facility'].duplicated()]['Facility'].unique()
+                    logger.warning(f"Duplicate Facility values in flood results: {dupes}")
+                    flood_merge_df = flood_merge_df.drop_duplicates(subset=['Facility'], keep='first')
+
+            # Avoid float precision mismatches by merging on Facility only.
+            for coord_col in ['Lat', 'Long']:
+                if coord_col in flood_merge_df.columns:
+                    flood_merge_df.drop(columns=[coord_col], inplace=True)
+
             combined_df = combined_df.merge(
-                flood_values, on=['Facility', 'Lat', 'Long'], how='left'
+                flood_merge_df, on=['Facility'], how='left'
             )
             logger.info(f"Combined DF after flood merge - shape: {combined_df.shape}, columns: {combined_df.columns.tolist()}")
         else:

@@ -225,6 +225,14 @@ def view_map(request):
                     logger.info(f"Geospatial file attribute columns: {attribute_columns}")
 
                     gdf = gdf.to_crs('EPSG:4326')
+                    try:
+                        debug_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
+                        os.makedirs(debug_dir, exist_ok=True)
+                        debug_path = os.path.join(debug_dir, 'upload_polygon_input_debug.geojson')
+                        with open(debug_path, 'w', encoding='utf-8') as debug_file:
+                            debug_file.write(gdf.to_json())
+                    except Exception:
+                        pass
 
                     # Enhanced centroid calculation with robust error handling
                     try:
@@ -1491,7 +1499,7 @@ def show_results(request):
             )
   
         # Execute climate analysis
-        result = _execute_climate_analysis(validated_csv_path, selected_hazards)
+        result = _execute_climate_analysis(validated_csv_path, selected_hazards, request=request)
         if not result:
             return _render_error_page(
                 request,
@@ -2069,7 +2077,9 @@ def show_results(request):
             'success_message': f"Successfully analyzed {len(df)} facilities for {len(selected_hazards)} hazard types."
         }
 
+        context = _override_results_with_combined_output(context, selected_hazards)
         logger.info("Rendering results template...")
+        context = _override_results_with_combined_output(context, selected_hazards)
         return render(request, 'climate_hazards_analysis_v2/results.html', context)
 
     except Exception as e:
@@ -2149,6 +2159,7 @@ def _handle_unified_mixed_assets_results(request, asset_inventory, selected_haza
 
         logger.info(f"Successfully processed mixed assets via unified CSV: {len(hierarchical_data)} total rows")
 
+        context = _override_results_with_combined_output(context, selected_hazards)
         return render(request, 'climate_hazards_analysis_v2/results.html', context)
 
     except Exception as e:
@@ -2189,7 +2200,7 @@ def _process_regular_facilities_unified(facility_data, selected_hazards, facilit
             return {'success': False, 'error': 'Failed to create temporary CSV for regular facilities'}
 
         # Execute climate analysis using existing function
-        result = _execute_climate_analysis(regular_csv_path, selected_hazards)
+        result = _execute_climate_analysis(regular_csv_path, selected_hazards, request=request)
         if not result:
             return {'success': False, 'error': 'Climate analysis failed for regular facilities'}
 
@@ -2417,7 +2428,7 @@ def _create_unified_mixed_assets_csv(asset_inventory, selected_hazards):
         return None
 
 
-def _execute_climate_analysis_unified_csv(unified_csv_path, selected_hazards):
+def _execute_climate_analysis_unified_csv(unified_csv_path, selected_hazards, request=None):
     """
     Execute climate analysis on unified CSV with non-strict mode for polygon centroids.
 
@@ -2432,155 +2443,25 @@ def _execute_climate_analysis_unified_csv(unified_csv_path, selected_hazards):
         dict: Analysis result or None if failed
     """
     try:
-        logger.info("Executing climate analysis on unified CSV with non-strict mode")
+        logger.info("Executing climate analysis on unified CSV via unified engine")
 
-        # Import the required modules
-        import pandas as pd
-        import os
-        from climate_hazards_analysis.utils.climate_hazards_analysis import (
-            process_flood_exposure_analysis,
-            process_sea_level_rise_analysis,
-            process_water_stress_analysis,
-            process_heat_exposure_analysis,
-            process_tropical_cyclone_analysis
+        facility_geofile_path = _get_latest_polygon_geofile_path(request)
+        facility_geojson_records = _get_polygon_geojson_records(request)
+
+        result = generate_climate_hazards_analysis(
+            facility_csv_path=unified_csv_path,
+            selected_fields=selected_hazards,
+            flood_scenarios=['current', 'moderate', 'worst'],
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records
         )
-        from climate_hazards_analysis.utils.common_utils import (
-            standardize_facility_dataframe,
-            merge_dataframes_safely
-        )
-        from django.conf import settings
 
-        # Load and standardize facility dataframe with non-strict mode
-        try:
-            df_fac = pd.read_csv(unified_csv_path, encoding='utf-8')
-        except UnicodeDecodeError:
-            try:
-                df_fac = pd.read_csv(unified_csv_path, encoding='latin-1')
-                logger.warning(f"Unified CSV read with latin-1 encoding")
-            except UnicodeDecodeError:
-                df_fac = pd.read_csv(unified_csv_path, encoding='cp1252')
-                logger.warning(f"Unified CSV read with cp1252 encoding")
-
-        logger.info(f"[UNIFIED_CSV_DEBUG] Before standardization:")
-        logger.info(f"[UNIFIED_CSV_DEBUG] Original DataFrame shape: {df_fac.shape}")
-        logger.info(f"[UNIFIED_CSV_DEBUG] Original columns: {df_fac.columns.tolist()}")
-
-        # Use non-strict mode for unified CSV to handle polygon centroids
-        df_fac = standardize_facility_dataframe(df_fac, strict_mode=False)
-        logger.info(f"Loaded unified CSV data with {len(df_fac)} facilities")
-
-        if df_fac.empty:
-            logger.error("Unified CSV resulted in empty DataFrame after standardization")
+        if result is None or 'error' in result:
+            error_message = result.get('error', 'Unknown error') if result else 'Analysis failed.'
+            logger.error(f"Unified CSV climate analysis error: {error_message}")
             return None
 
-        # Initialize combined DataFrame
-        base_columns = ['Facility', 'Lat', 'Long']
-        if 'Asset Archetype' in df_fac.columns:
-            base_columns.append('Asset Archetype')
-
-        # Add AssetType and Parent_Facility if they exist
-        if 'AssetType' in df_fac.columns:
-            base_columns.append('AssetType')
-        if 'Parent_Facility' in df_fac.columns:
-            base_columns.append('Parent_Facility')
-
-        combined_df = df_fac[base_columns].copy()
-
-        # Process each selected hazard with error handling for polygon-only scenarios
-        if 'Flood Exposure' in selected_hazards:
-            logger.info("Processing flood exposure analysis for unified CSV...")
-            try:
-                flood_result = process_flood_exposure_analysis(
-                    unified_csv_path,
-                    selected_fields=['Flood Exposure'],
-                    scenarios=['current', 'moderate', 'worst']
-                )
-                if flood_result and len(flood_result) > 0:
-                    flood_df = flood_result[0]  # First element is the DataFrame
-                    combined_df = merge_dataframes_safely(combined_df, flood_df, on=['Facility', 'Lat', 'Long'])
-                    logger.info(f"Successfully merged flood exposure data: {len(flood_df)} rows")
-                else:
-                    logger.warning("Flood exposure analysis returned no data")
-            except Exception as e:
-                logger.warning(f"Flood exposure analysis failed for unified CSV: {str(e)}")
-                # Add default flood exposure values
-                combined_df['Flood Depth (meters)'] = '0.1 to 0.5'  # Default to lowest risk
-
-        if 'Sea Level Rise' in selected_hazards:
-            logger.info("Processing sea level rise analysis for unified CSV...")
-            try:
-                slr_result = process_sea_level_rise_analysis(unified_csv_path, ['Sea Level Rise'])
-                if slr_result and 'combined_csv_path' in slr_result:
-                    slr_df = pd.read_csv(slr_result['combined_csv_path'])
-                    combined_df = merge_dataframes_safely(combined_df, slr_df, on=['Facility', 'Lat', 'Long'])
-                    logger.info(f"Successfully merged sea level rise data: {len(slr_df)} rows")
-                else:
-                    logger.warning("Sea level rise analysis returned no data")
-            except Exception as e:
-                logger.warning(f"Sea level rise analysis failed for unified CSV: {str(e)}")
-                # Add default sea level rise values
-                combined_df['Sea Level Rise (meters)'] = '0.0 to 0.5'  # Default to lowest risk
-
-        if 'Water Stress' in selected_hazards:
-            logger.info("Processing water stress analysis for unified CSV...")
-            try:
-                ws_result = process_water_stress_analysis(unified_csv_path, ['Water Stress'])
-                if ws_result and 'combined_csv_path' in ws_result:
-                    ws_df = pd.read_csv(ws_result['combined_csv_path'])
-                    combined_df = merge_dataframes_safely(combined_df, ws_df, on=['Facility', 'Lat', 'Long'])
-                    logger.info(f"Successfully merged water stress data: {len(ws_df)} rows")
-                else:
-                    logger.warning("Water stress analysis returned no data")
-            except Exception as e:
-                logger.warning(f"Water stress analysis failed for unified CSV: {str(e)}")
-                # Add default water stress values
-                combined_df['Water Stress'] = 'Low'  # Default to lowest risk
-
-        if 'Heat Exposure' in selected_hazards:
-            logger.info("Processing heat exposure analysis for unified CSV...")
-            try:
-                heat_result = process_heat_exposure_analysis(unified_csv_path, ['Heat Exposure'])
-                if heat_result and 'combined_csv_path' in heat_result:
-                    heat_df = pd.read_csv(heat_result['combined_csv_path'])
-                    combined_df = merge_dataframes_safely(combined_df, heat_df, on=['Facility', 'Lat', 'Long'])
-                    logger.info(f"Successfully merged heat exposure data: {len(heat_df)} rows")
-                else:
-                    logger.warning("Heat exposure analysis returned no data")
-            except Exception as e:
-                logger.warning(f"Heat exposure analysis failed for unified CSV: {str(e)}")
-                # Add default heat exposure values
-                combined_df['Heat Exposure'] = 'Low'  # Default to lowest risk
-
-        if 'Tropical Cyclones' in selected_hazards:
-            logger.info("Processing tropical cyclone analysis for unified CSV...")
-            try:
-                tc_result = process_tropical_cyclone_analysis(unified_csv_path, ['Tropical Cyclones'])
-                if tc_result and 'combined_csv_path' in tc_result:
-                    tc_df = pd.read_csv(tc_result['combined_csv_path'])
-                    combined_df = merge_dataframes_safely(combined_df, tc_df, on=['Facility', 'Lat', 'Long'])
-                    logger.info(f"Successfully merged tropical cyclone data: {len(tc_df)} rows")
-                else:
-                    logger.warning("Tropical cyclone analysis returned no data")
-            except Exception as e:
-                logger.warning(f"Tropical cyclone analysis failed for unified CSV: {str(e)}")
-                # Add default tropical cyclone values
-                combined_df['Tropical Cyclones'] = 'Low'  # Default to lowest risk
-
-        # Save combined result
-        import tempfile
-        from datetime import datetime
-        temp_dir = tempfile.mkdtemp()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        combined_csv_path = os.path.join(temp_dir, f'unified_analysis_result_{timestamp}.csv')
-
-        combined_df.to_csv(combined_csv_path, index=False)
-        logger.info(f"Unified analysis result saved to: {combined_csv_path}")
-
-        return {
-            'combined_csv_path': combined_csv_path,
-            'total_facilities': len(combined_df),
-            'analysis_type': 'unified_csv'
-        }
+        return result
 
     except Exception as e:
         logger.exception(f"Error in unified CSV climate analysis: {str(e)}")
@@ -2628,7 +2509,7 @@ def _process_mixed_assets_via_unified_csv(asset_inventory, selected_hazards, req
                 return {'success': False, 'error': f'Unified CSV file not found: {unified_csv_path}'}
 
             # Use the unified CSV climate analysis function with non-strict mode
-            result = _execute_climate_analysis_unified_csv(unified_csv_path, selected_hazards)
+            result = _execute_climate_analysis_unified_csv(unified_csv_path, selected_hazards, request=request)
 
             if result is None:
                 return {'success': False, 'error': 'Climate analysis returned None result'}
@@ -3343,6 +3224,40 @@ def _normalize_column_name(name: str) -> str:
     return name.replace('°', '')
 
 
+def _override_results_with_combined_output(context, selected_hazards):
+    combined_path = os.path.join(
+        settings.BASE_DIR,
+        'climate_hazards_analysis',
+        'static',
+        'input_files',
+        'combined_output.json'
+    )
+    if not os.path.exists(combined_path):
+        return context
+
+    try:
+        with open(combined_path, 'r', encoding='utf-8') as combined_file:
+            combined_data = json.load(combined_file)
+    except Exception as exc:
+        logger.warning(f"Failed to load combined_output.json: {exc}")
+        return context
+
+    if isinstance(combined_data, dict):
+        combined_data = combined_data.get('data', [])
+
+    if not isinstance(combined_data, list) or not combined_data:
+        logger.warning("combined_output.json is empty or not a list")
+        return context
+
+    columns = list(combined_data[0].keys())
+    groups = _build_column_groups(columns, selected_hazards)
+
+    context['data'] = combined_data
+    context['columns'] = columns
+    context['groups'] = groups
+    return context
+
+
 def _build_column_groups(columns, selected_hazards):
     """
     Build comprehensive column groups for the hazard exposure table.
@@ -3518,7 +3433,54 @@ def _build_column_groups(columns, selected_hazards):
     return groups
 
 
-def _execute_climate_analysis(facility_csv_path, selected_hazards):
+def _get_latest_polygon_geofile_path(request):
+    if request is None:
+        return None
+
+    uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
+    polygon_files = []
+
+    for meta in uploaded_files.values():
+        ext = meta.get('extension')
+        if ext not in ['.zip', '.gpkg', '.shp']:
+            continue
+        facility_data = meta.get('facility_data', [])
+        if any(f.get('AssetType') == 'polygon' for f in facility_data):
+            polygon_files.append(meta)
+
+    if not polygon_files:
+        return None
+
+    polygon_files.sort(key=lambda item: item.get('upload_time', ''))
+    candidate = polygon_files[-1].get('file_path')
+    if candidate and os.path.exists(candidate):
+        return candidate
+    return None
+
+
+def _get_polygon_geojson_records(request):
+    if request is None:
+        return []
+
+    facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+    records = []
+    for facility in facility_data:
+        geometry = facility.get('geometry')
+        if not geometry:
+            continue
+        if facility.get('AssetType') != 'polygon' and not geometry:
+            continue
+        records.append({
+            'Facility': facility.get('Facility'),
+            'Lat': facility.get('Lat'),
+            'Long': facility.get('Long'),
+            'geometry': geometry
+        })
+
+    return records
+
+
+def _execute_climate_analysis(facility_csv_path, selected_hazards, request=None):
     """
     Execute the climate hazards analysis.
 
@@ -3530,10 +3492,14 @@ def _execute_climate_analysis(facility_csv_path, selected_hazards):
         dict: Analysis result or None if failed
     """
     logger.info("Calling generate_climate_hazards_analysis...")
+    facility_geofile_path = _get_latest_polygon_geofile_path(request)
+    facility_geojson_records = _get_polygon_geojson_records(request)
     result = generate_climate_hazards_analysis(
         facility_csv_path=facility_csv_path,
         selected_fields=selected_hazards,
-        flood_scenarios=['current', 'moderate', 'worst']
+        flood_scenarios=['current', 'moderate', 'worst'],
+        facility_geofile_path=facility_geofile_path,
+        facility_geojson_records=facility_geojson_records
     )
 
     # Check for errors in the result
@@ -9480,10 +9446,14 @@ def _execute_climate_analysis_unified_json(request):
         # Execute analysis using existing engine
         from climate_hazards_analysis.utils.climate_hazards_analysis import generate_climate_hazards_analysis
 
+        facility_geofile_path = _get_latest_polygon_geofile_path(request)
+        facility_geojson_records = _get_polygon_geojson_records(request)
         result = generate_climate_hazards_analysis(
             facility_csv_path=temp_csv_path,
             selected_fields=selected_hazards,
-            flood_scenarios=['current', 'moderate', 'worst']
+            flood_scenarios=['current', 'moderate', 'worst'],
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records
         )
 
         # Clean up temporary file
