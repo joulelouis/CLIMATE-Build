@@ -28,7 +28,9 @@ from water_stress.utils.water_stress_future_analysis import generate_future_wate
 from heat_exposure_analysis.utils.heat_exposure_analysis import generate_heat_exposure_analysis
 from heat_exposure_analysis.utils.heat_future_analysis import generate_heat_future_analysis
 from climate_hazards_analysis.utils.storm_surge_updated import generate_storm_surge_analysis
-from climate_hazards_analysis.utils.rainfall_induced_landslide_future_analysis import generate_rainfall_induced_landslide_future_analysis
+from climate_hazards_analysis.utils.rainfall_induced_landslide_updated import (
+    generate_rainfall_induced_landslide_analysis,
+)
 from flood_exposure_analysis.utils.flood_exposure_analysis import generate_flood_exposure_analysis
 from climate_hazards_analysis.utils.common_utils import (
     standardize_facility_dataframe as _standardize_facility_dataframe,
@@ -632,7 +634,12 @@ def process_storm_surge_analysis(
         return None
 
 
-def process_landslide_analysis(df_fac, selected_fields):
+def process_landslide_analysis(
+    df_fac,
+    selected_fields,
+    facility_geofile_path=None,
+    facility_geojson_records=None,
+):
     """
     Process rainfall-induced landslide analysis if selected.
     """
@@ -642,18 +649,33 @@ def process_landslide_analysis(df_fac, selected_fields):
     try:
         idir = Path(settings.BASE_DIR) / 'climate_hazards_analysis' / 'static' / 'input_files'
         fp_ls = idir / 'PH_LandslideHazards_UTM_ProjectNOAH_Unmasked.tif'
+        fp_ls_mod = idir / 'PH_LandslideHazards_RCP26_UTM_ProjectNOAH-GIRI_Unmasked.tif'
+        fp_ls_worst = idir / 'PH_LandslideHazards_RCP85_UTM_ProjectNOAH-GIRI_Unmasked.tif'
 
+        missing = []
         if not os.path.exists(fp_ls):
-            logger.warning(f"Missing raster file for Rainfall Induced Landslide analysis: {fp_ls}")
+            missing.append(str(fp_ls))
+        if not os.path.exists(fp_ls_mod):
+            missing.append(str(fp_ls_mod))
+        if not os.path.exists(fp_ls_worst):
+            missing.append(str(fp_ls_worst))
+
+        if missing:
+            logger.warning(f"Missing raster files for Rainfall Induced Landslide analysis: {', '.join(missing)}")
             return None
 
-        gdf_a = _build_point_buffer_geometries(df_fac)
-        stats = rstat.zonal_stats(gdf_a, fp_ls, stats='percentile_75', nodata=255)
-        gdf_a['landslide_raster'] = pd.DataFrame(stats)['percentile_75'].fillna(0)
-        gdf_a.rename(columns={'latitude': 'Lat', 'longitude': 'Long'}, inplace=True)
-        gdf_a.rename(columns={'landslide_raster': 'Rainfall-Induced Landslide (factor of safety)'}, inplace=True)
-
-        return gdf_a[['Facility', 'Lat', 'Long', 'Rainfall-Induced Landslide (factor of safety)']].copy()
+        df_values = generate_rainfall_induced_landslide_analysis(
+            df_fac,
+            fp_ls,
+            fp_ls_mod,
+            fp_ls_worst,
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records,
+        )
+        return df_values[['Facility', 'Lat', 'Long',
+                          'Rainfall-Induced Landslide (factor of safety)',
+                          'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
+                          'Rainfall-Induced Landslide (factor of safety) - Worst Case']].copy()
 
     except Exception as e:
         logger.exception(f"Error in Rainfall Induced Landslide analysis: {e}")
@@ -853,7 +875,10 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             facility_geojson_records=facility_geojson_records,
         )
         landslide_values = process_landslide_analysis(
-            df_fac, selected_fields
+            df_fac,
+            selected_fields,
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records,
         )
 
         # Merge remaining hazard data to combined DataFrame
@@ -875,11 +900,28 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             combined_df = combined_df.merge(storm_merge, on=['Facility'], how='left')
             logger.info(f"  Combined DF after storm surge merge - shape: {combined_df.shape}")
 
+        if landslide_values is not None:
+            landslide_merge = landslide_values.copy()
+            if 'Facility' in landslide_merge.columns:
+                if landslide_merge['Facility'].duplicated().any():
+                    dupes = landslide_merge[landslide_merge['Facility'].duplicated()]['Facility'].unique()
+                    logger.warning(f"Duplicate Facility values in landslide results: {dupes}")
+                    landslide_merge = landslide_merge.drop_duplicates(subset=['Facility'], keep='first')
+
+            for coord_col in ['Lat', 'Long']:
+                if coord_col in landslide_merge.columns:
+                    landslide_merge.drop(columns=[coord_col], inplace=True)
+
+            logger.info("=== MERGING LANDSLIDE ===")
+            logger.info(f"  landslide dataframe shape: {landslide_merge.shape}")
+            logger.info(f"  landslide columns: {landslide_merge.columns.tolist()}")
+            combined_df = combined_df.merge(landslide_merge, on=['Facility'], how='left')
+            logger.info(f"  Combined DF after landslide merge - shape: {combined_df.shape}")
+
         data_frames = [
             (slr_values, "sea level rise"),
             (tc_values, "tropical cyclones"),
             (heat_values, "heat exposure"),
-            (landslide_values, "landslide")
         ]
         
         for df_values, name in data_frames:
@@ -943,22 +985,7 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
 
         # Future storm surge values now computed in process_storm_surge_analysis.
 
-        # Add future rainfall-induced landslide values if landslide analysis was performed
-        if 'Rainfall Induced Landslide' in selected_fields:
-            try:
-                idir = Path(settings.BASE_DIR) / 'climate_hazards_analysis' / 'static' / 'input_files'
-                mod_path = idir / 'PH_LandslideHazards_RCP26_UTM_ProjectNOAH-GIRI_Unmasked.tif'
-                worst_path = idir / 'PH_LandslideHazards_RCP85_UTM_ProjectNOAH-GIRI_Unmasked.tif'
-                combined_df = generate_rainfall_induced_landslide_future_analysis(
-                    combined_df,
-                    mod_path,
-                    worst_path,
-                )
-                logger.info('Future rainfall-induced landslide columns added')
-            except Exception as e:
-                logger.warning(
-                    f'Failed to add future rainfall-induced landslide values: {e}'
-                )
+        # Future rainfall-induced landslide values now computed in process_landslide_analysis.
 
 
         # VERIFICATION: Check if flood column exists

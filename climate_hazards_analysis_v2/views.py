@@ -3433,8 +3433,26 @@ def _build_column_groups(columns, selected_hazards):
     return groups
 
 
-def _get_latest_polygon_geofile_path(request):
+def _has_polygon_assets(request):
     if request is None:
+        return False
+
+    facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+    for facility in facility_data:
+        if facility.get('AssetType') == 'polygon' or facility.get('geometry'):
+            return True
+
+    unified_assets = request.session.get('unified_uploaded_assets_json')
+    if unified_assets:
+        for asset in unified_assets.get('assets', []):
+            if asset.get('polygon_geometry'):
+                return True
+
+    return False
+
+
+def _get_latest_polygon_geofile_path(request):
+    if request is None or not _has_polygon_assets(request):
         return None
 
     uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
@@ -3459,7 +3477,7 @@ def _get_latest_polygon_geofile_path(request):
 
 
 def _get_polygon_geojson_records(request):
-    if request is None:
+    if request is None or not _has_polygon_assets(request):
         return []
 
     facility_data = request.session.get('climate_hazards_v2_facility_data', [])
