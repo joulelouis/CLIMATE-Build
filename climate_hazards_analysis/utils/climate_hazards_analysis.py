@@ -27,7 +27,7 @@ from water_stress.utils.water_stress_analysis import generate_water_stress_analy
 from water_stress.utils.water_stress_future_analysis import generate_future_water_stress_from_baseline
 from heat_exposure_analysis.utils.heat_exposure_analysis import generate_heat_exposure_analysis
 from heat_exposure_analysis.utils.heat_future_analysis import generate_heat_future_analysis
-from climate_hazards_analysis.utils.storm_surge_future_analysis import generate_storm_surge_future_analysis
+from climate_hazards_analysis.utils.storm_surge_updated import generate_storm_surge_analysis
 from climate_hazards_analysis.utils.rainfall_induced_landslide_future_analysis import generate_rainfall_induced_landslide_future_analysis
 from flood_exposure_analysis.utils.flood_exposure_analysis import generate_flood_exposure_analysis
 from climate_hazards_analysis.utils.common_utils import (
@@ -578,87 +578,88 @@ def process_heat_exposure_analysis(facility_csv_path, selected_fields):
         return None, []
 
 
-def process_storm_surge_landslide_analysis(df_fac, selected_fields):
+def _build_point_buffer_geometries(df_fac):
+    df_a = df_fac[['Facility', 'Lat', 'Long']].copy()
+    df_a.rename(columns={'Lat': 'latitude', 'Long': 'longitude'}, inplace=True)
+    df_a[['latitude', 'longitude']] = df_a[['latitude', 'longitude']].astype(float)
+    df_a['lot_area'] = 250
+    gs_a = gpd.points_from_xy(df_a['longitude'], df_a['latitude'], crs='EPSG:4326').to_crs('EPSG:32651')
+    gdf_a = gpd.GeoDataFrame(df_a, geometry=gs_a, crs='EPSG:32651')
+    gdf_a['geometry'] = gdf_a.geometry.buffer(np.sqrt(gdf_a['lot_area'])/2, cap_style='square', join_style='mitre')
+    return gdf_a
+
+
+def process_storm_surge_analysis(
+    df_fac,
+    selected_fields,
+    facility_geofile_path=None,
+    facility_geojson_records=None,
+):
     """
-    Process storm surge and rainfall induced landslide analyses if selected.
-    
-    Args:
-        df_fac (DataFrame): Facility dataframe with standardized columns
-        selected_fields (list): List of selected hazard types
-        
-    Returns:
-        DataFrame: DataFrame with SS/RIL values or None if not applicable
+    Process storm surge analysis if selected.
     """
-    if not any(h in selected_fields for h in ['Storm Surge', 'Rainfall Induced Landslide']):
+    if 'Storm Surge' not in selected_fields:
         return None
-        
-    logger.info("Integrating Storm Surge & Rainfall Induced Landslide Analyses")
-    
+
     try:
-        # Paths to raster files
-        idir = Path(settings.BASE_DIR)/'climate_hazards_analysis'/'static'/'input_files'
-        fp_ls = idir/'PH_LandslideHazards_UTM_ProjectNOAH_Unmasked.tif'
-        fp_ss = idir/'PH_StormSurge_Advisory4_UTM_ProjectNOAH_Unmasked.tif'
-        
-        # Check if required raster files exist
-        missing_files = []
-        if 'Storm Surge' in selected_fields and not os.path.exists(fp_ss):
-            missing_files.append(str(fp_ss))
-        if 'Rainfall Induced Landslide' in selected_fields and not os.path.exists(fp_ls):
-            missing_files.append(str(fp_ls))
-            
-        if missing_files:
-            logger.warning(f"Missing raster files for SS/RIL analysis: {', '.join(missing_files)}")
+        idir = Path(settings.BASE_DIR) / 'climate_hazards_analysis' / 'static' / 'input_files'
+        fp_ss = idir / 'PH_StormSurge_Advisory4_UTM_ProjectNOAH_Unmasked.tif'
+        fp_ss_future = idir / 'PH_StormSurge_Advisory4_Future_UTM_ProjectNOAH-GIRI_Unmasked.tif'
+
+        missing = []
+        if not os.path.exists(fp_ss):
+            missing.append(str(fp_ss))
+        if not os.path.exists(fp_ss_future):
+            missing.append(str(fp_ss_future))
+
+        if missing:
+            logger.warning(f"Missing raster files for Storm Surge analysis: {', '.join(missing)}")
             return None
-        
-        # Create a copy of the facility dataframe with lat/long renamed for geopandas
-        df_a = df_fac[['Facility', 'Lat', 'Long']].copy()
-        df_a.rename(columns={'Lat': 'latitude', 'Long': 'longitude'}, inplace=True)
-        
-        # Convert coordinates to numeric
-        df_a[['latitude', 'longitude']] = df_a[['latitude', 'longitude']].astype(float)
-        
-        # Set buffer parameters
-        df_a['lot_area'] = 250
-        
-        # Create geometry from points
-        gs_a = gpd.points_from_xy(df_a['longitude'], df_a['latitude'], crs='EPSG:4326').to_crs('EPSG:32651')
-        gdf_a = gpd.GeoDataFrame(df_a, geometry=gs_a, crs='EPSG:32651')
-        gdf_a['geometry'] = gdf_a.geometry.buffer(np.sqrt(gdf_a['lot_area'])/2, cap_style='square', join_style='mitre')
-        
-        # Process each raster file if selected and present
-        for lbl, ras, hazard_type in [
-            ('stormsurge_raster', fp_ss, 'Storm Surge'),  # Storm Surge first
-            ('landslide_raster', fp_ls, 'Rainfall Induced Landslide')  # Rainfall Induced Landslide second
-        ]:
-            if hazard_type in selected_fields and os.path.exists(str(ras)):
-                stats = rstat.zonal_stats(gdf_a, ras, stats='percentile_75', nodata=255)
-                gdf_a[lbl] = pd.DataFrame(stats)['percentile_75'].fillna(0)
-            elif hazard_type in selected_fields:
-                logger.warning(f"Warning: {hazard_type} raster not found: {ras}")
-                gdf_a[lbl] = 0  # Default value
-        
-        # Rename columns back for merging
-        gdf_a.rename(columns={'latitude': 'Lat', 'longitude': 'Long'}, inplace=True)
-        
-        # Create final columns
-        hazard_cols = []
-        if 'Storm Surge' in selected_fields and 'stormsurge_raster' in gdf_a.columns:
-            gdf_a.rename(columns={'stormsurge_raster': 'Storm Surge Flood Depth (meters)'}, inplace=True)
-            hazard_cols.append('Storm Surge Flood Depth (meters)')
-        
-        if 'Rainfall Induced Landslide' in selected_fields and 'landslide_raster' in gdf_a.columns:
-            gdf_a.rename(columns={'landslide_raster': 'Rainfall-Induced Landslide (factor of safety)'}, inplace=True)
-            hazard_cols.append('Rainfall-Induced Landslide (factor of safety)')
-            
-        if not hazard_cols:
-            return None
-            
-        return gdf_a[['Facility', 'Lat', 'Long'] + hazard_cols].copy()
-        
+
+        df_values = generate_storm_surge_analysis(
+            df_fac,
+            fp_ss,
+            fp_ss_future,
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records,
+        )
+        return df_values[['Facility', 'Lat', 'Long',
+                          'Storm Surge Flood Depth (meters)',
+                          'Storm Surge Flood Depth (meters) - Worst Case']].copy()
+
     except Exception as e:
-        logger.exception(f"Error in Storm Surge/Landslide analysis: {e}")
+        logger.exception(f"Error in Storm Surge analysis: {e}")
         return None
+
+
+def process_landslide_analysis(df_fac, selected_fields):
+    """
+    Process rainfall-induced landslide analysis if selected.
+    """
+    if 'Rainfall Induced Landslide' not in selected_fields:
+        return None
+
+    try:
+        idir = Path(settings.BASE_DIR) / 'climate_hazards_analysis' / 'static' / 'input_files'
+        fp_ls = idir / 'PH_LandslideHazards_UTM_ProjectNOAH_Unmasked.tif'
+
+        if not os.path.exists(fp_ls):
+            logger.warning(f"Missing raster file for Rainfall Induced Landslide analysis: {fp_ls}")
+            return None
+
+        gdf_a = _build_point_buffer_geometries(df_fac)
+        stats = rstat.zonal_stats(gdf_a, fp_ls, stats='percentile_75', nodata=255)
+        gdf_a['landslide_raster'] = pd.DataFrame(stats)['percentile_75'].fillna(0)
+        gdf_a.rename(columns={'latitude': 'Lat', 'longitude': 'Long'}, inplace=True)
+        gdf_a.rename(columns={'landslide_raster': 'Rainfall-Induced Landslide (factor of safety)'}, inplace=True)
+
+        return gdf_a[['Facility', 'Lat', 'Long', 'Rainfall-Induced Landslide (factor of safety)']].copy()
+
+    except Exception as e:
+        logger.exception(f"Error in Rainfall Induced Landslide analysis: {e}")
+        return None
+
+
 
 
 def process_nan_values(df):
@@ -845,16 +846,40 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         )
         all_plot_paths.extend(heat_plots)
         
-        ss_ril_values = process_storm_surge_landslide_analysis(
+        storm_surge_values = process_storm_surge_analysis(
+            df_fac,
+            selected_fields,
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records,
+        )
+        landslide_values = process_landslide_analysis(
             df_fac, selected_fields
         )
 
         # Merge remaining hazard data to combined DataFrame
+        if storm_surge_values is not None:
+            storm_merge = storm_surge_values.copy()
+            if 'Facility' in storm_merge.columns:
+                if storm_merge['Facility'].duplicated().any():
+                    dupes = storm_merge[storm_merge['Facility'].duplicated()]['Facility'].unique()
+                    logger.warning(f"Duplicate Facility values in storm surge results: {dupes}")
+                    storm_merge = storm_merge.drop_duplicates(subset=['Facility'], keep='first')
+
+            for coord_col in ['Lat', 'Long']:
+                if coord_col in storm_merge.columns:
+                    storm_merge.drop(columns=[coord_col], inplace=True)
+
+            logger.info("=== MERGING STORM SURGE ===")
+            logger.info(f"  storm surge dataframe shape: {storm_merge.shape}")
+            logger.info(f"  storm surge columns: {storm_merge.columns.tolist()}")
+            combined_df = combined_df.merge(storm_merge, on=['Facility'], how='left')
+            logger.info(f"  Combined DF after storm surge merge - shape: {combined_df.shape}")
+
         data_frames = [
             (slr_values, "sea level rise"),
             (tc_values, "tropical cyclones"),
             (heat_values, "heat exposure"),
-            (ss_ril_values, "storm surge/landslide")
+            (landslide_values, "landslide")
         ]
         
         for df_values, name in data_frames:
@@ -916,20 +941,7 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
                 cols[first_idx:first_idx] = existing_heat
                 combined_df = combined_df[cols]
 
-        # Add future storm surge flood depth values if storm surge analysis was performed
-        if 'Storm Surge' in selected_fields:
-            try:
-                tif_path = (
-                    Path(settings.BASE_DIR)
-                    / 'climate_hazards_analysis'
-                    / 'static'
-                    / 'input_files'
-                    / 'PH_StormSurge_Advisory4_Future_UTM_ProjectNOAH-GIRI_Unmasked.tif'
-                )
-                combined_df = generate_storm_surge_future_analysis(combined_df, tif_path)
-                logger.info('Future storm surge column added')
-            except Exception as e:
-                logger.warning(f'Failed to add future storm surge values: {e}')
+        # Future storm surge values now computed in process_storm_surge_analysis.
 
         # Add future rainfall-induced landslide values if landslide analysis was performed
         if 'Rainfall Induced Landslide' in selected_fields:
