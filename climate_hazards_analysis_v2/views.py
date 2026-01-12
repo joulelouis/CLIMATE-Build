@@ -800,6 +800,23 @@ def add_facility(request):
             except Exception:
                 pass  # Continue even if CSV save fails
 
+            # Persist map-click assets in unified JSON workflow
+            try:
+                manual_file_id = f"manual_point_{uuid.uuid4().hex[:8]}"
+                created_asset_ids = _store_uploaded_assets_as_json(
+                    [new_facility],
+                    original_filename='manual_point.json',
+                    file_upload_id=manual_file_id,
+                    session_key=request.session.session_key,
+                    source='manual_point'
+                )
+                if created_asset_ids:
+                    existing_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+                    request.session['climate_hazards_v2_uploaded_asset_ids'] = list({*existing_asset_ids, *created_asset_ids})
+                    _create_unified_assets_json(request)
+            except Exception:
+                pass
+
             return JsonResponse({
                 'success': True,
                 'facility': new_facility,
@@ -1071,8 +1088,8 @@ def _prepare_unified_asset_inventory(facility_data, request):
                 'asset_type': 'polygon',
                 'granular_analysis_enabled': facility.get('granular_analysis_enabled', False),
                 'granular_points': facility.get('granular-points', []),
-                'centroid_lat': facility.get('Latitude'),
-                'centroid_lng': facility.get('Longitude'),
+                'centroid_lat': facility.get('Lat', facility.get('Latitude')),
+                'centroid_lng': facility.get('Long', facility.get('Longitude')),
                 'properties': facility
             }
             inventory['polygon_assets'].append(polygon_info)
@@ -1087,9 +1104,12 @@ def _prepare_unified_asset_inventory(facility_data, request):
             regular_info = {
                 'id': facility.get('id'),
                 'name': facility.get('Facility', facility.get('Name', 'Unknown Facility')),
+                'Facility': facility.get('Facility', facility.get('Name', 'Unknown Facility')),
                 'archetype': facility.get('Archetype', 'default archetype'),
-                'latitude': facility.get('Latitude'),
-                'longitude': facility.get('Longitude'),
+                'latitude': facility.get('Lat', facility.get('Latitude')),
+                'longitude': facility.get('Long', facility.get('Longitude')),
+                'Lat': facility.get('Lat', facility.get('Latitude')),
+                'Long': facility.get('Long', facility.get('Longitude')),
                 'asset_type': 'point',
                 'properties': facility
             }
@@ -2271,10 +2291,10 @@ def _create_unified_mixed_assets_csv(asset_inventory, selected_hazards):
 
         for facility in regular_facilities:
             row = {
-                'Facility': facility.get('Facility', ''),
-                'Lat': facility.get('Lat', ''),
-                'Long': facility.get('Long', ''),
-                'Asset Archetype': facility.get('Asset Archetype', 'default archetype'),
+                'Facility': facility.get('Facility') or facility.get('name', ''),
+                'Lat': facility.get('Lat', facility.get('latitude', '')),
+                'Long': facility.get('Long', facility.get('longitude', '')),
+                'Archetype': facility.get('Asset Archetype', facility.get('archetype', 'default archetype')),
                 'AssetType': 'regular',
                 'Asset_ID': facility.get('id', ''),
                 'Parent_Facility': '',  # Regular facilities have no parent
@@ -2340,10 +2360,10 @@ def _create_unified_mixed_assets_csv(asset_inventory, selected_hazards):
                         continue
 
                 centroid_row = {
-                    'Facility': f"🟢 {asset_name} (Centroid)",
+                    'Facility': asset_name,
                     'Lat': centroid_lat,
                     'Long': centroid_lng,
-                    'Asset Archetype': f"{asset_archetype} - Polygon Centroid",
+                    'Archetype': asset_archetype,
                     'AssetType': 'polygon_centroid',
                     'Asset_ID': polygon_id,
                     'Parent_Facility': '',
@@ -2371,10 +2391,10 @@ def _create_unified_mixed_assets_csv(asset_inventory, selected_hazards):
                         continue
 
                     child_row = {
-                        'Facility': f"└── Granular Point {i+1}",
+                        'Facility': f"Granular Point {i+1}",
                         'Lat': lat,
                         'Long': lon,
-                        'Asset Archetype': f"{asset_archetype} - Granular Point",
+                        'Archetype': asset_archetype,
                         'AssetType': 'polygon_granular',
                         'Asset_ID': f"{polygon_id}_point_{i}",
                         'Parent_Facility': asset_name,
@@ -2397,7 +2417,7 @@ def _create_unified_mixed_assets_csv(asset_inventory, selected_hazards):
             return None
 
         with open(unified_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['Facility', 'Lat', 'Long', 'Asset Archetype', 'AssetType', 'Asset_ID', 'Parent_Facility', 'Point_Type']
+            fieldnames = ['Facility', 'Lat', 'Long', 'Archetype', 'AssetType', 'Asset_ID', 'Parent_Facility', 'Point_Type']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(unified_rows)
@@ -2655,14 +2675,14 @@ def _process_unified_csv_with_assettype(df):
 
                 # Add hierarchical metadata with safe string operations
                 facility_name = centroid_data.get('Facility', '')
-                asset_name = centroid_data.get('Parent_Facility', facility_name.replace('🟢 ', '').replace(' (Centroid)', '') if facility_name else '')
+                asset_name = centroid_data.get('Parent_Facility', facility_name if facility_name else '')
                 centroid_data['original_asset_name'] = asset_name
 
                 hierarchical_data.append(centroid_data)
 
                 # Find and add child granular points with error handling
                 try:
-                    parent_facility = facility_name.replace('🟢 ', '').replace(' (Centroid)', '') if facility_name else ''
+                    parent_facility = facility_name if facility_name else ''
                     if 'Parent_Facility' in granular_points.columns and not granular_points.empty:
                         child_points = granular_points[granular_points['Parent_Facility'] == parent_facility]
 
@@ -2766,6 +2786,8 @@ def _process_combined_output_csv(df, asset_inventory=None, request=None):
         # Children will be processed and linked after synthetic parents are created
         logger.info(f"Deferring child row processing for {len(child_rows)} children until synthetic parents are created")
 
+        base_archetypes = {}
+
         # Add parent rows or create synthetic parents if none exist
         if not parent_rows:
             logger.info("No parent rows found in CSV, creating synthetic parent rows")
@@ -2784,7 +2806,6 @@ def _process_combined_output_csv(df, asset_inventory=None, request=None):
             logger.info(f"Available parent facility mappings from form: {parent_facilities}")
 
             # Group child rows by base archetype
-            base_archetypes = {}
             for child_row in child_rows:
                 child_archetype = child_row.get('Asset Archetype', '')
                 if ' - Granular Point' in child_archetype:
@@ -10143,3 +10164,5 @@ def get_uploaded_files(request):
             'success': False,
             'error': 'An unexpected error occurred while retrieving files'
         }, status=500)
+
+

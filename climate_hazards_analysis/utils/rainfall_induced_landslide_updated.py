@@ -137,6 +137,37 @@ def generate_rainfall_induced_landslide_analysis(
         df_out[
             "Rainfall-Induced Landslide (factor of safety) - Worst Case"
         ] = _zonal_percentile90_to_categories(polygon_gdf, worst_raster)
+
+        # Include point assets from df_fac that are not part of the polygon results.
+        polygon_facilities = set(df_out["Facility"].astype(str).tolist())
+        df_points = df_fac.copy()
+        df_points["Facility"] = df_points["Facility"].astype(str)
+        df_points = df_points[~df_points["Facility"].isin(polygon_facilities)]
+
+        if not df_points.empty:
+            df_points["Lat"] = pd.to_numeric(df_points["Lat"], errors="coerce")
+            df_points["Long"] = pd.to_numeric(df_points["Long"], errors="coerce")
+            df_points = df_points.dropna(subset=["Lat", "Long"])
+
+            if not df_points.empty:
+                gdf_points = gpd.GeoDataFrame(
+                    df_points,
+                    geometry=gpd.points_from_xy(df_points["Long"], df_points["Lat"]),
+                    crs="EPSG:4326",
+                )
+
+                df_points["Rainfall-Induced Landslide (factor of safety)"] = (
+                    _zonal_percentile90_to_categories(gdf_points, current_raster)
+                )
+                df_points["Rainfall-Induced Landslide (factor of safety) - Moderate Case"] = (
+                    _zonal_percentile90_to_categories(gdf_points, moderate_raster)
+                )
+                df_points["Rainfall-Induced Landslide (factor of safety) - Worst Case"] = (
+                    _zonal_percentile90_to_categories(gdf_points, worst_raster)
+                )
+
+                df_out = pd.concat([df_out, df_points.drop(columns=["geometry"], errors="ignore")], ignore_index=True)
+
         return df_out
 
     df = df_fac.copy()
