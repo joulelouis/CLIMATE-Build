@@ -2843,7 +2843,7 @@ def _process_combined_output_csv(df, asset_inventory=None, request=None):
 
                     parent_row = {
                         'Facility': actual_asset_name,  # Use actual asset name, no emoji or suffix
-                        'Asset Archetype': f"{base_archetype} - Polygon Centroid",
+                        'Asset Archetype': base_archetype,
                         'Lat': first_child.get('Lat', ''),
                         'Long': first_child.get('Long', ''),
                         'row_type': 'polygon_parent',
@@ -4265,22 +4265,33 @@ def sensitivity_results(request):
     facility_csv_path = request.session.get('climate_hazards_v2_facility_csv_path')
     archetype_params = request.session.get('climate_hazards_v2_archetype_params', {})
     
-    # Ensure we have analysis results; if not, try to build a fallback from uploaded assets
+    # Ensure we have analysis results; fall back to combined_output.json when missing
     original_results = request.session.get('climate_hazards_v2_results')
     if not original_results:
-        unified_assets = _get_all_uploaded_assets_json(request)
-        if unified_assets and unified_assets.get('data'):
-            fallback_data = unified_assets['data']
-            first_row = fallback_data[0] if fallback_data else {}
-            fallback_columns = list(first_row.keys()) if isinstance(first_row, dict) else []
-            original_results = {
-                'data': fallback_data,
-                'columns': fallback_columns
-            }
-            request.session['climate_hazards_v2_results'] = original_results
-            if 'climate_hazards_v2_baseline_results' not in request.session:
-                request.session['climate_hazards_v2_baseline_results'] = copy.deepcopy(original_results)
-            request.session.modified = True
+        combined_path = os.path.join(
+            settings.BASE_DIR,
+            'climate_hazards_analysis',
+            'static',
+            'input_files',
+            'combined_output.json'
+        )
+        try:
+            if os.path.exists(combined_path):
+                with open(combined_path, 'r', encoding='utf-8') as f:
+                    payload = json.load(f)
+                fallback_data = payload.get('data') if isinstance(payload, dict) else payload
+                first_row = fallback_data[0] if fallback_data else {}
+                fallback_columns = list(first_row.keys()) if isinstance(first_row, dict) else []
+                original_results = {
+                    'data': fallback_data,
+                    'columns': fallback_columns
+                }
+                request.session['climate_hazards_v2_results'] = original_results
+                if 'climate_hazards_v2_baseline_results' not in request.session:
+                    request.session['climate_hazards_v2_baseline_results'] = copy.deepcopy(original_results)
+                request.session.modified = True
+        except Exception as e:
+            logger.warning(f"Failed to load combined_output.json for sensitivity fallback: {e}")
 
     # Check if we have the necessary data
     if not facility_data or not selected_hazards:
@@ -8080,7 +8091,7 @@ def _handle_6step_workflow_results(request, analysis_results, selected_hazards):
             if asset_type == 'polygon_centroid':
                 # Create centroid row (parent)
                 row = {
-                    'Facility': f"🟢 {asset_result.get('asset_name', 'Unknown')} (Centroid)",
+                    'Facility': asset_name,
                     'Asset Archetype': f"{asset_result.get('asset_archetype', 'default archetype')} - Polygon Centroid",
                     'Area (km²)': f"{asset_result.get('area_km2', 0):.2f}",
                     'Sample Points': asset_result.get('sample_points_count', 0),
