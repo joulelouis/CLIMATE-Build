@@ -436,7 +436,7 @@ View Sensitivity Results
                                             <!-- Level 3: Column Headers -->
                                             <tr class="custom-table-header">
                                                 {% for column in columns %}
-                                                    <th>
+                                                    <th data-column-name="{{ column }}">
                                                         {% if column == "Facility" %}
                                                             Asset
                                                         {% else %}
@@ -670,7 +670,7 @@ function buildHeaderMap() {
     tableState.columnHeaderMap = {};
 
     $headers.each(function(index) {
-        const columnName = $(this).text().trim();
+        const columnName = $(this).attr('data-column-name') || $(this).text().trim();
         tableState.columnHeaderMap[columnName] = index;
         console.log(`Mapped column "${columnName}" to index ${index}`);
     });
@@ -711,7 +711,7 @@ function updateColumnVisibility() {
     }
 
     // Always show essential columns
-    const visibleColumns = new Set(['Asset', 'Asset Archetype']);
+    const visibleColumns = new Set(['Facility', 'Asset Archetype']);
 
     // Get checked hazard columns
     $('.hazard-column').each(function() {
@@ -850,19 +850,37 @@ function mapHeaderGroups() {
 function updateGroupAndScenarioHeaders() {
     console.log('Updating group and scenario headers...');
 
-    // Get all visible columns
-    const visibleColumns = new Set(['Facility', 'Asset Archetype']);
-    $('.hazard-column').each(function() {
-        const columnName = $(this).data('column');
-        if ($(this).prop('checked')) {
+    // Get all visible columns from the actual table header
+    const visibleColumns = new Set();
+    const normalizeColumnName = (name) => name.replace('°', '').replace('Aø', '').replace('Aų', '');
+
+    $('#sensitivity-data-table thead tr.custom-table-header th').each(function() {
+        const $th = $(this);
+        if ($th.is(':visible')) {
+            const columnName = $th.attr('data-column-name') || $th.text().trim();
             visibleColumns.add(columnName);
         }
     });
 
+    const normalizedVisibleColumns = new Set(
+        Array.from(visibleColumns).map(normalizeColumnName)
+    );
+
+    const groupOrder = [
+        'Asset Information',
+        'Flood',
+        'Water Stress',
+        'Sea Level Rise',
+        'Tropical Cyclones',
+        'Heat',
+        'Storm Surge',
+        'Rainfall-Induced Landslide'
+    ];
+
     // Define scenario mapping for Flood, Water Stress, and Sea Level Rise
     const scenarioMapping = {
         'Asset Information': {
-            '': ['Asset', 'Asset Archetype'] // No scenario header for asset info
+            '': ['Facility', 'Asset Archetype'] // No scenario header for asset info
         },
         'Flood': {
             'Current': ['Flood Depth (meters)'],
@@ -909,19 +927,17 @@ function updateGroupAndScenarioHeaders() {
         },
         'Heat': {
             'Current': [
-                'Days over 30° Celsius',
-                'Days over 33° Celsius',
-                'Days over 35° Celsius'
+                'Days over 35 Celsius'
             ],
             'Future (Moderate Case)': [
-                'Days over 35° Celsius (2026 - 2030) - Moderate Case',
-                'Days over 35° Celsius (2031 - 2040) - Moderate Case',
-                'Days over 35° Celsius (2041 - 2050) - Moderate Case'
+                'Days over 35 Celsius (2026 - 2030) - Moderate Case',
+                'Days over 35 Celsius (2031 - 2040) - Moderate Case',
+                'Days over 35 Celsius (2041 - 2050) - Moderate Case'
             ],
             'Future (Worst Case)': [
-                'Days over 35° Celsius (2026 - 2030) - Worst Case',
-                'Days over 35° Celsius (2031 - 2040) - Worst Case',
-                'Days over 35° Celsius (2041 - 2050) - Worst Case'
+                'Days over 35 Celsius (2026 - 2030) - Worst Case',
+                'Days over 35 Celsius (2031 - 2040) - Worst Case',
+                'Days over 35 Celsius (2041 - 2050) - Worst Case'
             ]
         },
         'Storm Surge': {
@@ -945,52 +961,68 @@ function updateGroupAndScenarioHeaders() {
         }
     };
 
-    // All climate hazard groups are now explicitly defined above
-
-    // Build scenario headers
+    // Build group and scenario headers in the desired order
     let scenarioHeaderHtml = '';
+    let groupHeaderHtml = '';
     const groupCounts = {};
 
-    // Handle Asset Information first (no scenario sub-headers)
-    const assetColumns = ['Asset', 'Asset Archetype'];
-    let assetVisibleCount = 0;
-    assetColumns.forEach(function(columnName) {
-        if (visibleColumns.has(columnName)) {
-            assetVisibleCount++;
-        }
-    });
-
-    if (assetVisibleCount > 0) {
-        // Empty scenario header cells for Asset Information (spans directly to columns)
-        scenarioHeaderHtml += `<th colspan="${assetVisibleCount}"></th>`;
-        groupCounts['Asset Information'] = assetVisibleCount;
-    }
-
-    // Handle climate hazards (with scenario sub-headers)
-    Object.keys(scenarioMapping).forEach(function(groupName) {
-        if (!groupCounts[groupName]) groupCounts[groupName] = 0;
+    groupOrder.forEach(function(groupName) {
         const scenarios = scenarioMapping[groupName];
+        if (!scenarios) {
+            return;
+        }
 
-        Object.keys(scenarios).forEach(function(scenarioName) {
-            const columns = scenarios[scenarioName];
-            let visibleCount = 0;
+        let groupVisibleCount = 0;
 
-            columns.forEach(function(columnName) {
-                if (visibleColumns.has(columnName)) {
-                    visibleCount++;
+        if (groupName === 'Asset Information') {
+            const assetColumns = scenarios[''] || [];
+            let assetVisibleCount = 0;
+            assetColumns.forEach(function(columnName) {
+                if (
+                    visibleColumns.has(columnName) ||
+                    normalizedVisibleColumns.has(normalizeColumnName(columnName))
+                ) {
+                    assetVisibleCount++;
                 }
             });
 
-            if (visibleCount > 0) {
-                const scenarioClass = scenarioName.includes('Current') ? 'baseline-header' :
-                                    scenarioName.includes('Moderate') ? 'moderate-header' :
-                                    scenarioName.includes('Worst') ? 'worstcase-header' : '';
-
-                scenarioHeaderHtml += `<th colspan="${visibleCount}" class="text-center ${scenarioClass}">${scenarioName}</th>`;
-                groupCounts[groupName] += visibleCount;
+            if (assetVisibleCount > 0) {
+                scenarioHeaderHtml += `<th colspan="${assetVisibleCount}"></th>`;
+                groupVisibleCount += assetVisibleCount;
             }
-        });
+        } else {
+            Object.keys(scenarios).forEach(function(scenarioName) {
+                const columns = scenarios[scenarioName];
+                let visibleCount = 0;
+
+                columns.forEach(function(columnName) {
+                    if (
+                        visibleColumns.has(columnName) ||
+                        normalizedVisibleColumns.has(normalizeColumnName(columnName))
+                    ) {
+                        visibleCount++;
+                    }
+                });
+
+                if (visibleCount > 0) {
+                    const scenarioClass = scenarioName.includes('Current') ? 'baseline-header' :
+                                        scenarioName.includes('Moderate') ? 'moderate-header' :
+                                        scenarioName.includes('Worst') ? 'worstcase-header' : '';
+
+                    scenarioHeaderHtml += `<th colspan="${visibleCount}" class="text-center ${scenarioClass}">${scenarioName}</th>`;
+                    groupVisibleCount += visibleCount;
+                }
+            });
+        }
+
+        groupCounts[groupName] = groupVisibleCount;
+        if (groupVisibleCount > 0) {
+            groupHeaderHtml += `<th colspan="${groupVisibleCount}" class="text-center">${groupName}</th>`;
+        }
     });
+
+    // Update group header row to match current visibility/order
+    $('#sensitivity-data-table thead tr.group-header').html(groupHeaderHtml);
 
     // Update scenario headers
     $('#sensitivity-data-table thead tr.sub-group-header').html(scenarioHeaderHtml);
@@ -1039,7 +1071,7 @@ function renderTable() {
 
 function updateColumnVisibilityOnRows() {
     // Always keep asset identity columns visible
-    const visibleColumns = new Set(['Asset', 'Facility', 'Asset Archetype']);
+    const visibleColumns = new Set(['Facility', 'Asset Archetype']);
 
     $('.hazard-column').each(function() {
         const columnName = $(this).data('column');
