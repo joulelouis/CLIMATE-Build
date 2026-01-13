@@ -17,6 +17,7 @@ climate_hazards_analysis/static/input_files/
 flood_exposure_analysis/static/input_files/
 water_stress/static/input_files/
 heat_exposure_analysis/static/input_files/
+media
 
 # Database files
 *.sqlite3
@@ -38,3 +39,6 @@ heat_exposure_analysis/static/input_files/
 
 #defect_screenshots
 defect_screenshots
+
+#input_data
+input_data

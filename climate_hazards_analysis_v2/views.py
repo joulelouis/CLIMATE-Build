@@ -1177,6 +1177,20 @@ def _ensure_facility_csv_exists(request, facility_data, facility_csv_path, selec
     Returns:
         str: Valid CSV file path or None if failed
     """
+    uploaded_files = request.session.get('climate_hazards_v2_uploaded_files', {})
+    if len(uploaded_files) > 1:
+        logger.info("Multiple uploaded files detected; rebuilding combined facility CSV")
+        if not facility_data:
+            logger.error("No facility data in session")
+            return None
+        new_csv_path = _save_facility_data_to_csv(request, facility_data)
+        if not new_csv_path or not os.path.exists(new_csv_path):
+            logger.error("Failed to create combined CSV from facility data")
+            return None
+        request.session['climate_hazards_v2_facility_csv_path'] = new_csv_path
+        request.session.modified = True
+        return new_csv_path
+
     if facility_csv_path and os.path.exists(facility_csv_path):
         return facility_csv_path
 
@@ -4331,7 +4345,64 @@ def sensitivity_results(request):
             for col_to_remove in columns_to_remove:
                 if col_to_remove in row:
                     del row[col_to_remove]
-        
+
+        desired_order = [
+            'Facility',
+            'Asset Archetype',
+            # Flood
+            'Flood Depth (meters)',
+            'Flood Depth (meters) - Moderate Case',
+            'Flood Depth (meters) - Worst Case',
+            # Water Stress
+            'Water Stress Exposure (%)',
+            'Water Stress Exposure 2030 (%) - Moderate Case',
+            'Water Stress Exposure 2050 (%) - Moderate Case',
+            'Water Stress Exposure 2030 (%) - Worst Case',
+            'Water Stress Exposure 2050 (%) - Worst Case',
+            # Sea Level Rise
+            '2030 Sea Level Rise (meters) - Moderate Case',
+            '2040 Sea Level Rise (meters) - Moderate Case',
+            '2050 Sea Level Rise (meters) - Moderate Case',
+            '2030 Sea Level Rise (meters) - Worst Case',
+            '2040 Sea Level Rise (meters) - Worst Case',
+            '2050 Sea Level Rise (meters) - Worst Case',
+            # Tropical Cyclone
+            'Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h)',
+            '2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            '2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5',
+            # Heat
+            'Days over 35 Celsius',
+            'Days over 35° Celsius',
+            'Days over 35 Celsius (2026 - 2030) - Moderate Case',
+            'Days over 35° Celsius (2026 - 2030) - Moderate Case',
+            'Days over 35 Celsius (2031 - 2040) - Moderate Case',
+            'Days over 35° Celsius (2031 - 2040) - Moderate Case',
+            'Days over 35 Celsius (2041 - 2050) - Moderate Case',
+            'Days over 35° Celsius (2041 - 2050) - Moderate Case',
+            'Days over 35 Celsius (2026 - 2030) - Worst Case',
+            'Days over 35° Celsius (2026 - 2030) - Worst Case',
+            'Days over 35 Celsius (2031 - 2040) - Worst Case',
+            'Days over 35° Celsius (2031 - 2040) - Worst Case',
+            'Days over 35 Celsius (2041 - 2050) - Worst Case',
+            'Days over 35° Celsius (2041 - 2050) - Worst Case',
+            # Storm Surge
+            'Storm Surge Flood Depth (meters)',
+            'Storm Surge Flood Depth (meters) - Worst Case',
+            # Rainfall-Induced Landslide
+            'Rainfall-Induced Landslide (factor of safety)',
+            'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
+            'Rainfall-Induced Landslide (factor of safety) - Worst Case'
+        ]
+
+        if columns:
+            ordered = [col for col in desired_order if col in columns]
+            remaining = [col for col in columns if col not in ordered]
+            columns = ordered + remaining
+
         logger.info(f"Removed Lat/Long columns. Remaining columns: {columns}")
         logger.info(f"Loaded original data with {len(sensitivity_data)} rows")
         
@@ -4478,19 +4549,26 @@ def sensitivity_results(request):
                     logger.info(f"Assigned archetype '{archetype}' to facility '{facility_name}'")
                 
                 # Get parameters for this archetype (or default)
-                params = archetype_params.get(archetype, archetype_params.get('_default', {
+                default_params = {
                     'water_stress_low': 10,
                     'water_stress_high': 31,
                     'storm_surge_low': 0.5,
                     'storm_surge_high': 1.5,
                     'landslide_low': 1,
                     'landslide_high': 1.5,
-                }))
+                    'tropical_cyclone_low': 119,
+                    'tropical_cyclone_high': 178,
+                    'heat_low': 10,
+                    'heat_high': 45,
+                }
+                base_params = archetype_params.get('_default', {})
+                archetype_specific = archetype_params.get(archetype, {})
+                params = {**default_params, **base_params, **archetype_specific}
                 
                 # Store the archetype and parameters used for this facility (for template access)
                 row['Asset Archetype'] = archetype
-                row['WS_Low_Threshold'] = params['water_stress_low']
-                row['WS_High_Threshold'] = params['water_stress_high']
+                row['WS_Low_Threshold'] = params.get('water_stress_low', 10)
+                row['WS_High_Threshold'] = params.get('water_stress_high', 31)
                 row['SS_Low_Threshold'] = params.get('storm_surge_low', 0.5)
                 row['SS_High_Threshold'] = params.get('storm_surge_high', 1.5)
                 row['TC_Low_Threshold'] = params.get('tropical_cyclone_low', 119)
@@ -4507,7 +4585,7 @@ def sensitivity_results(request):
 
                 logger.info(
                     f"Applied thresholds for '{facility_name}' ({archetype}): "
-                    f"Low<{params['water_stress_low']}%, High>{params['water_stress_high']}%"
+                    f"Low<{params.get('water_stress_low', 10)}%, High>{params.get('water_stress_high', 31)}%"
                 )
         
         # Add new columns to the columns list and reorder to put Asset Archetype as 2nd column

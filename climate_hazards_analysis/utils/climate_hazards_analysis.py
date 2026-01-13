@@ -902,6 +902,12 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
 
         if landslide_values is not None:
             landslide_merge = landslide_values.copy()
+            landslide_cols = [col for col in landslide_merge.columns if col.startswith('Rainfall-Induced Landslide')]
+            landslide_coords = None
+            if 'Lat' in landslide_merge.columns and 'Long' in landslide_merge.columns:
+                landslide_coords = landslide_merge[['Lat', 'Long'] + landslide_cols].copy()
+                landslide_coords['Lat'] = pd.to_numeric(landslide_coords['Lat'], errors='coerce')
+                landslide_coords['Long'] = pd.to_numeric(landslide_coords['Long'], errors='coerce')
             if 'Facility' in landslide_merge.columns:
                 if landslide_merge['Facility'].duplicated().any():
                     dupes = landslide_merge[landslide_merge['Facility'].duplicated()]['Facility'].unique()
@@ -915,8 +921,102 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             logger.info("=== MERGING LANDSLIDE ===")
             logger.info(f"  landslide dataframe shape: {landslide_merge.shape}")
             logger.info(f"  landslide columns: {landslide_merge.columns.tolist()}")
-            combined_df = combined_df.merge(landslide_merge, on=['Facility'], how='left')
+            if 'Facility' in combined_df.columns and 'Facility' in landslide_merge.columns:
+                combined_df['Facility_merge_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
+                landslide_merge['Facility_merge_key'] = landslide_merge['Facility'].astype(str).str.strip().str.lower()
+                combined_df = combined_df.merge(
+                    landslide_merge,
+                    on=['Facility_merge_key'],
+                    how='left',
+                    suffixes=('', '_landslide')
+                )
+                if 'Facility_landslide' in combined_df.columns:
+                    combined_df.drop(columns=['Facility_landslide'], inplace=True)
+                combined_df.drop(columns=['Facility_merge_key'], inplace=True)
+            else:
+                combined_df = combined_df.merge(landslide_merge, on=['Facility'], how='left')
+
+            if landslide_coords is not None and landslide_cols:
+                for coord_col in ['Lat', 'Long']:
+                    if coord_col in combined_df.columns:
+                        combined_df[coord_col] = pd.to_numeric(combined_df[coord_col], errors='coerce')
+
+                landslide_coords = landslide_coords.dropna(subset=['Lat', 'Long'])
+                if not landslide_coords.empty:
+                    landslide_coords['coord_key'] = (
+                        landslide_coords['Lat'].round(6).astype(str) + '|' +
+                        landslide_coords['Long'].round(6).astype(str)
+                    )
+
+                    combined_df['coord_key'] = (
+                        combined_df['Lat'].round(6).astype(str) + '|' +
+                        combined_df['Long'].round(6).astype(str)
+                    )
+
+                    coord_lookup = landslide_coords[['coord_key'] + landslide_cols].drop_duplicates(subset=['coord_key'])
+                    combined_df = combined_df.merge(
+                        coord_lookup,
+                        on='coord_key',
+                        how='left',
+                        suffixes=('', '_landslide_coord')
+                    )
+
+                    for col in landslide_cols:
+                        coord_col = f"{col}_landslide_coord"
+                        if coord_col in combined_df.columns:
+                            combined_df[col] = combined_df[col].fillna(combined_df[coord_col])
+                            combined_df.drop(columns=[coord_col], inplace=True)
+
+                    combined_df.drop(columns=['coord_key'], inplace=True)
             logger.info(f"  Combined DF after landslide merge - shape: {combined_df.shape}")
+        # Backfill missing landslide values for point assets using coordinates.
+        if 'Rainfall-Induced Landslide (factor of safety)' in combined_df.columns:
+            landslide_cols = [
+                'Rainfall-Induced Landslide (factor of safety)',
+                'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
+                'Rainfall-Induced Landslide (factor of safety) - Worst Case'
+            ]
+            missing_mask = False
+            for col in landslide_cols:
+                if col in combined_df.columns:
+                    col_missing = combined_df[col].isna() | (combined_df[col].astype(str).str.strip().str.upper() == 'N/A')
+                    missing_mask = col_missing if isinstance(missing_mask, bool) else (missing_mask | col_missing)
+            if not isinstance(missing_mask, bool):
+                df_missing = combined_df.loc[missing_mask, ['Facility', 'Lat', 'Long']].copy()
+                df_missing['Lat'] = pd.to_numeric(df_missing['Lat'], errors='coerce')
+                df_missing['Long'] = pd.to_numeric(df_missing['Long'], errors='coerce')
+                df_missing = df_missing.dropna(subset=['Lat', 'Long'])
+                if not df_missing.empty:
+                    try:
+                        fp_ls = os.path.join(input_dir, 'PH_LandslideHazards_UTM_ProjectNOAH_Unmasked.tif')
+                        fp_ls_mod = os.path.join(input_dir, 'PH_LandslideHazards_RCP26_UTM_ProjectNOAH-GIRI_Unmasked.tif')
+                        fp_ls_worst = os.path.join(input_dir, 'PH_LandslideHazards_RCP85_UTM_ProjectNOAH-GIRI_Unmasked.tif')
+                        fallback_vals = generate_rainfall_induced_landslide_analysis(
+                            df_missing,
+                            fp_ls,
+                            fp_ls_mod,
+                            fp_ls_worst,
+                            facility_geofile_path=None,
+                            facility_geojson_records=None,
+                        )
+                        if fallback_vals is not None:
+                            fallback_vals['Facility_merge_key'] = fallback_vals['Facility'].astype(str).str.strip().str.lower()
+                            combined_df['Facility_merge_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
+                            combined_df = combined_df.merge(
+                                fallback_vals[['Facility_merge_key'] + landslide_cols],
+                                on='Facility_merge_key',
+                                how='left',
+                                suffixes=('', '_landslide_fallback')
+                            )
+                            for col in landslide_cols:
+                                fallback_col = f"{col}_landslide_fallback"
+                                if fallback_col in combined_df.columns:
+                                    combined_df[col] = combined_df[col].fillna(combined_df[fallback_col])
+                                    combined_df.drop(columns=[fallback_col], inplace=True)
+                            combined_df.drop(columns=['Facility_merge_key'], inplace=True)
+                            logger.info("Applied landslide fallback values for missing facilities")
+                    except Exception as e:
+                        logger.exception(f"Error applying landslide fallback values: {e}")
 
         data_frames = [
             (slr_values, "sea level rise"),

@@ -475,17 +475,21 @@ View Sensitivity Results
 
                                                                 {# Flood Depth styling #}
                                                                 {% elif "Flood Depth (meters)" in key %}
-                                                                    {% if value == "0.1 to 0.5" %}
-                                                                        <span class="risk-low">{{ value }}</span>
-                                                                    {% elif value == "0.5 to 1.5" %}
-                                                                        <span class="risk-medium">{{ value }}</span>
-                                                                    {% elif value == "Greater than 1.5" or value == ">= 1.5" or value == ">1.5" or value == "> 1.5" or value == "≥ 1.5" %}
-                                                                        <span class="risk-high">≥ 1.5</span>
-                                                                    {% elif value == "Unknown" %}
-                                                                        <span class="risk-unknown">{{ value }}</span>
-                                                                    {% else %}
-                                                                        <span class="risk-medium">{{ value }}</span>
-                                                                    {% endif %}
+                                                                    {% with normalized_value=value|replace:"-, to " %}
+                                                                        {% if normalized_value == "<0.1" or normalized_value == "< 0.1" %}
+                                                                            <span class="risk-none" style="font-weight: bold;">Little to none</span>
+                                                                        {% elif normalized_value == "0.1 to 0.5" %}
+                                                                            <span class="risk-low">{{ normalized_value }}</span>
+                                                                        {% elif normalized_value == "0.5 to 1.5" %}
+                                                                            <span class="risk-medium">{{ normalized_value }}</span>
+                                                                        {% elif normalized_value == "Greater than 1.5" or normalized_value == ">= 1.5" or normalized_value == ">1.5" or normalized_value == "> 1.5" or normalized_value == "≥ 1.5" %}
+                                                                            <span class="risk-high">≥ 1.5</span>
+                                                                        {% elif normalized_value == "Unknown" %}
+                                                                            <span class="risk-unknown">{{ normalized_value }}</span>
+                                                                        {% else %}
+                                                                            <span class="risk-medium">{{ normalized_value }}</span>
+                                                                        {% endif %}
+                                                                    {% endwith %}
 
                                                                 {# Heat exposure styling with archetype-specific thresholds #}
                                                                 {% elif "Days over" in key and "Celsius" in key and value != "N/A" %}
@@ -541,6 +545,14 @@ View Sensitivity Results
                                                                 {% elif "Rainfall-Induced Landslide (factor of safety)" in key %}
                                                                     {% if value == "Data not available" %}
                                                                         <span class="risk-none">{{ value }}</span>
+                                                                    {% elif value == "Generally Stable" %}
+                                                                        <span class="risk-none" style="font-weight: bold;">{{ value }}</span>
+                                                                    {% elif value == ">1.5" or value == ">= 1.5" or value == "Greater than 1.5" %}
+                                                                        <span class="risk-low">{{ value }}</span>
+                                                                    {% elif value == "1-1.5" %}
+                                                                        <span class="risk-medium">1 to 1.5</span>
+                                                                    {% elif value == "<1" %}
+                                                                        <span class="risk-high">{{ value }}</span>
                                                                     {% elif value != "N/A" %}
                                                                         {% with ril=value|to_float high=1.5 low=1 %}
                                                                             {% if ril > 2.5 %}
@@ -548,7 +560,7 @@ View Sensitivity Results
                                                                             {% elif ril > high %}
                                                                                 <span class="risk-low">FoS > {{ high }}</span>
                                                                             {% elif ril >= low %}
-                                                                                <span class="risk-medium">FoS {{ low }} &lt; FoS &lt; {{ high }}</span>
+                                                                                <span class="risk-medium">FoS {{ low }} to {{ high }}</span>
                                                                             {% else %}
                                                                                 <span class="risk-high">FoS < {{ low }}</span>
                                                                             {% endif %}

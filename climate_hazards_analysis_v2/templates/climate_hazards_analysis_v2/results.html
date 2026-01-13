@@ -803,7 +803,7 @@ Climate Hazard Analysis Results
                     {% elif "Flood Depth (meters)" in key and value != "N/A" %}
                         {% with numeric=value|to_float %}
                             {% if value == "<0.1" %}
-                                <span style="color: black; font-weight: bold;">&lt;0.1</span>
+                                <span style="color: black; font-weight: bold;">Little to none</span>
                             {% elif value == "0.1-0.5" %}
                                 <span style="color: green; font-weight: bold;">0.1 to 0.5</span>
                             {% elif value == "0.5-1.5" %}
