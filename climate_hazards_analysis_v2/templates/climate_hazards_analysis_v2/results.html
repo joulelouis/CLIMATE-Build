@@ -827,11 +827,11 @@ Climate Hazard Analysis Results
                     {% elif "Days over" in key and "Celsius" in key and value != "N/A" %}
                         {% with num=value|to_float %}
                             {% if num >= 45 %}
-                                <span style="color: red; font-weight: bold;">{{ value }}</span>
+                                <span style="color: red; font-weight: bold;">{% if key == "Days over 35 Celsius" or key == "Days over 35° Celsius" %}{{ num|floatformat:"0" }}{% else %}{{ value }}{% endif %}</span>
                             {% elif num >= 10 %}
-                                <span style="color: orange; font-weight: bold;">{{ value }}</span>
+                                <span style="color: orange; font-weight: bold;">{% if key == "Days over 35 Celsius" or key == "Days over 35° Celsius" %}{{ num|floatformat:"0" }}{% else %}{{ value }}{% endif %}</span>
                             {% else %}
-                                <span style="color: green; font-weight: bold;">{{ value }}</span>
+                                <span style="color: green; font-weight: bold;">{% if key == "Days over 35 Celsius" or key == "Days over 35° Celsius" %}{{ num|floatformat:"0" }}{% else %}{{ value }}{% endif %}</span>
                             {% endif %}
                         {% endwith %}
                     

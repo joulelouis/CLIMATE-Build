@@ -103,7 +103,7 @@ def generate_heat_exposure_analysis(facility_csv_path):
         for col in heat_cols:
             if col in df_heat.columns:
                 df_heat.loc[:, col] = df_heat[col].apply(
-                    lambda v: int(math.ceil(v)) if pd.notnull(v) else v)
+                    lambda v: int(round(v)) if pd.notnull(v) else v)
 
         # Plot is optional; keep for compatibility
         fig, ax = plt.subplots(figsize=(12, 8))

@@ -126,7 +126,7 @@ def generate_heat_future_analysis(df: pd.DataFrame, tiff_dir: str | Path | None 
 
     for col in cols:
         gdf[col] = pd.to_numeric(gdf[col], errors='coerce')
-        gdf[col] = np.ceil(gdf[col]).astype('Int64')
+        gdf[col] = np.rint(gdf[col]).astype('Int64')
 
     # Drop base column from output (baseline already provided elsewhere)
     drop_cols = ['geometry']

@@ -495,11 +495,11 @@ View Sensitivity Results
                                                                 {% elif "Days over" in key and "Celsius" in key and value != "N/A" %}
                                                                     {% with num=value|to_float low_threshold=row|get_item:"Heat_Low_Threshold"|default:10 high_threshold=row|get_item:"Heat_High_Threshold"|default:45 %}
                                                                         {% if num < low_threshold %}
-                                                                            <span class="risk-low" title="Low Risk: {{ num }} days < {{ low_threshold }} days">{{ value }}</span>
+                                                                            <span class="risk-low" title="Low Risk: {{ num }} days < {{ low_threshold }} days">{% if key == "Days over 35 Celsius" or key == "Days over 35° Celsius" %}{{ num|floatformat:"0" }}{% else %}{{ value }}{% endif %}</span>
                                                                         {% elif num > high_threshold %}
-                                                                            <span class="risk-high" title="High Risk: {{ num }} days > {{ high_threshold }} days">{{ value }}</span>
+                                                                            <span class="risk-high" title="High Risk: {{ num }} days > {{ high_threshold }} days">{% if key == "Days over 35 Celsius" or key == "Days over 35° Celsius" %}{{ num|floatformat:"0" }}{% else %}{{ value }}{% endif %}</span>
                                                                         {% else %}
-                                                                            <span class="risk-medium" title="Medium Risk: {{ low_threshold }} days ≤ {{ num }} days ≤ {{ high_threshold }} days">{{ value }}</span>
+                                                                            <span class="risk-medium" title="Medium Risk: {{ low_threshold }} days ≤ {{ num }} days ≤ {{ high_threshold }} days">{% if key == "Days over 35 Celsius" or key == "Days over 35° Celsius" %}{{ num|floatformat:"0" }}{% else %}{{ value }}{% endif %}</span>
                                                                         {% endif %}
                                                                     {% endwith %}
 
