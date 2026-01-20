@@ -507,7 +507,12 @@ def process_tropical_cyclone_analysis(facility_csv_path, selected_fields):
         return None, []
 
 
-def process_heat_exposure_analysis(facility_csv_path, selected_fields):
+def process_heat_exposure_analysis(
+    facility_csv_path,
+    selected_fields,
+    facility_geofile_path=None,
+    facility_geojson_records=None,
+):
     """
     Process heat exposure analysis if selected.
     
@@ -525,7 +530,11 @@ def process_heat_exposure_analysis(facility_csv_path, selected_fields):
     plot_paths = []
     
     try:
-        heat_res = generate_heat_exposure_analysis(facility_csv_path)
+        heat_res = generate_heat_exposure_analysis(
+            facility_csv_path,
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records,
+        )
         
         if 'error' in heat_res:
             logger.warning(f"Warning in Heat Exposure Analysis: {heat_res['error']}")
@@ -552,7 +561,8 @@ def process_heat_exposure_analysis(facility_csv_path, selected_fields):
         
         # Handle original format from heat_exposure_analysis.py
         temp_mapping = {
-            'n>35degC_2125': 'Days over 35° Celsius'
+            'n>35degC_2125': 'Days over 35° Celsius',
+            'Days over 35 Celsius': 'Days over 35° Celsius',
         }
         
         for old, new in temp_mapping.items():
@@ -568,6 +578,19 @@ def process_heat_exposure_analysis(facility_csv_path, selected_fields):
             
         # Create heat values dataframe
         heat_values = df_heat[['Facility', 'Lat', 'Long'] + heat_cols].copy()
+        try:
+            df_fac = pd.read_csv(facility_csv_path)
+            df_fac = standardize_facility_dataframe(df_fac)
+            if 'Facility' in df_fac.columns and 'Lat' in df_fac.columns and 'Long' in df_fac.columns:
+                df_fac_unique = df_fac.drop_duplicates(subset=['Facility']).copy()
+                df_fac_unique['Facility_key'] = df_fac_unique['Facility'].astype(str).str.strip().str.lower()
+                lat_map = df_fac_unique.set_index('Facility_key')['Lat'].to_dict()
+                long_map = df_fac_unique.set_index('Facility_key')['Long'].to_dict()
+                heat_keys = heat_values['Facility'].astype(str).str.strip().str.lower()
+                heat_values['Lat'] = heat_keys.map(lat_map).fillna(heat_values['Lat'])
+                heat_values['Long'] = heat_keys.map(long_map).fillna(heat_values['Long'])
+        except Exception:
+            logger.info("Heat exposure coordinate alignment skipped")
         
         # Collect plot paths
         if heat_res.get('png_paths'):
@@ -864,7 +887,10 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         all_plot_paths.extend(tc_plots)
         
         heat_values, heat_plots = process_heat_exposure_analysis(
-            facility_csv_path, selected_fields
+            facility_csv_path,
+            selected_fields,
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records,
         )
         all_plot_paths.extend(heat_plots)
         
@@ -1046,10 +1072,33 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         if 'Heat' in selected_fields:
             try:
                 tiff_dir = Path(settings.BASE_DIR) / 'climate_hazards_analysis' / 'static' / 'input_files'
-                combined_df = generate_heat_future_analysis(combined_df, tiff_dir)
+                combined_df = generate_heat_future_analysis(
+                    combined_df,
+                    tiff_dir,
+                    facility_geofile_path=facility_geofile_path,
+                    facility_geojson_records=facility_geojson_records,
+                )
                 logger.info('Future heat exposure columns added')
             except Exception as e:
                 logger.warning(f'Failed to add future heat exposure values: {e}')
+
+            combined_df = _collapse_duplicate_columns(combined_df)
+
+            base_col = 'DaysOver35C_base_2125'
+            baseline_col = 'Days over 35° Celsius'
+            if base_col in combined_df.columns:
+                if baseline_col not in combined_df.columns:
+                    combined_df[baseline_col] = np.nan
+                baseline_series = combined_df[baseline_col]
+                if isinstance(baseline_series, pd.DataFrame):
+                    baseline_series = baseline_series.iloc[:, 0]
+                base_series = combined_df[base_col]
+                if isinstance(base_series, pd.DataFrame):
+                    base_series = base_series.iloc[:, 0]
+                combined_df[baseline_col] = baseline_series.where(
+                    baseline_series.notna(),
+                    base_series,
+                )
 
             rename_map = {
                 'DaysOver35C_ssp245_2630': 'Days over 35° Celsius (2026 - 2030) - Moderate Case',
@@ -1088,6 +1137,15 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         # Future rainfall-induced landslide values now computed in process_landslide_analysis.
 
 
+        # Remove duplicate rows that can arise from merges on repeated keys.
+        dedupe_cols = ['Facility', 'Lat', 'Long']
+        if 'Asset Archetype' in combined_df.columns:
+            dedupe_cols.append('Asset Archetype')
+        if combined_df.duplicated(subset=dedupe_cols).any():
+            dupes = combined_df[combined_df.duplicated(subset=dedupe_cols)]['Facility'].unique()
+            logger.warning(f"Duplicate facilities detected in combined output: {dupes}")
+            combined_df = combined_df.drop_duplicates(subset=dedupe_cols, keep='first')
+
         # VERIFICATION: Check if flood column exists
         logger.info("=== FINAL VERIFICATION ===")
         logger.info(f"Final combined DataFrame shape: {combined_df.shape}")
@@ -1102,6 +1160,9 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             if 'Flood' in selected_fields:
                 combined_df['Flood Depth (meters)'] = '0.1 to 0.5'
                 logger.info("Added placeholder Flood Depth (meters) column")
+
+        # Normalize duplicate columns before NaN processing
+        combined_df = _collapse_duplicate_columns(combined_df)
 
         # Process NaN values
         combined_df = process_nan_values(combined_df)
@@ -1298,4 +1359,20 @@ def validate_and_clean_dataframe(df, analysis_name=""):
                     df[col].fillna('N/A', inplace=True)
     
     logger.info(f"{analysis_name} dataframe validation complete")
+    return df
+
+
+def _collapse_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    dupes = df.columns[df.columns.duplicated()].unique().tolist()
+    if not dupes:
+        return df
+
+    df = df.copy()
+    for col in dupes:
+        dup_df = df.loc[:, df.columns == col]
+        if dup_df.shape[1] <= 1:
+            continue
+        merged = dup_df.bfill(axis=1).iloc[:, 0]
+        df = df.drop(columns=[col])
+        df[col] = merged
     return df

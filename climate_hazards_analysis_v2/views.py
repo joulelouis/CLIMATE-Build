@@ -257,20 +257,34 @@ def view_map(request):
                             remaining = 'unknown'
                         logger.info(f"[SHAPEFILE_DEBUG] Removed invalid geometries, remaining: {remaining}")
 
-                    # Calculate centroids with error handling
-                    try:
-                        gdf['Lat'] = gdf.geometry.centroid.y
-                        gdf['Long'] = gdf.geometry.centroid.x
-                    except Exception as e:
-                        logger.error(f"[SHAPEFILE_DEBUG] Error calculating centroids: {e}")
-                        # Fallback: use representative point instead of centroid
+                    # Prefer existing coordinate fields if present; fall back to centroid.
+                    lat_candidates = ['Lat', 'Latitude', 'LAT', 'latitude', 'lat']
+                    lon_candidates = ['Long', 'Longitude', 'LONG', 'longitude', 'lon', 'long']
+                    lat_col = next((c for c in lat_candidates if c in gdf.columns), None)
+                    lon_col = next((c for c in lon_candidates if c in gdf.columns), None)
+
+                    if lat_col and lon_col:
+                        gdf['Lat'] = pd.to_numeric(gdf[lat_col], errors='coerce')
+                        gdf['Long'] = pd.to_numeric(gdf[lon_col], errors='coerce')
+                    else:
+                        gdf['Lat'] = pd.Series([pd.NA] * len(gdf))
+                        gdf['Long'] = pd.Series([pd.NA] * len(gdf))
+
+                    needs_centroid = gdf['Lat'].isna() | gdf['Long'].isna()
+                    if needs_centroid.any():
                         try:
-                            gdf['Lat'] = gdf.geometry.representative_point().y
-                            gdf['Long'] = gdf.geometry.representative_point().x
-                            logger.info(f"[SHAPEFILE_DEBUG] Used representative points as fallback")
-                        except Exception as e2:
-                            logger.error(f"[SHAPEFILE_DEBUG] Error with representative points: {e2}")
-                            raise ValueError(f"Failed to extract coordinates from shapefile: {e2}")
+                            gdf.loc[needs_centroid, 'Lat'] = gdf.loc[needs_centroid].geometry.centroid.y
+                            gdf.loc[needs_centroid, 'Long'] = gdf.loc[needs_centroid].geometry.centroid.x
+                        except Exception as e:
+                            logger.error(f"[SHAPEFILE_DEBUG] Error calculating centroids: {e}")
+                            # Fallback: use representative point instead of centroid
+                            try:
+                                gdf.loc[needs_centroid, 'Lat'] = gdf.loc[needs_centroid].geometry.representative_point().y
+                                gdf.loc[needs_centroid, 'Long'] = gdf.loc[needs_centroid].geometry.representative_point().x
+                                logger.info(f"[SHAPEFILE_DEBUG] Used representative points as fallback")
+                            except Exception as e2:
+                                logger.error(f"[SHAPEFILE_DEBUG] Error with representative points: {e2}")
+                                raise ValueError(f"Failed to extract coordinates from shapefile: {e2}")
 
                     # Filter out any rows with NaN coordinates before creating DataFrame
                     try:
@@ -330,6 +344,26 @@ def view_map(request):
                         uploaded_facilities.append(record)
                 else:
                     uploaded_facilities = df.to_dict(orient='records')
+
+                deduped_facilities = []
+                seen_facilities = set()
+                for record in uploaded_facilities:
+                    key = (
+                        str(record.get('Facility', '')).strip().lower(),
+                        record.get('Lat'),
+                        record.get('Long'),
+                        record.get('AssetType')
+                    )
+                    if key in seen_facilities:
+                        continue
+                    seen_facilities.add(key)
+                    deduped_facilities.append(record)
+                if len(deduped_facilities) != len(uploaded_facilities):
+                    logger.warning(
+                        f"Removed {len(uploaded_facilities) - len(deduped_facilities)} duplicate facilities "
+                        f"from upload {file.name}"
+                    )
+                uploaded_facilities = deduped_facilities
 
                 # Debug: Log the uploaded facility data
                 logger.info(f"Processed {len(uploaded_facilities)} facilities from file: {str(uploaded_facilities)[:200]}...")
@@ -9944,6 +9978,34 @@ def _rebuild_combined_facility_data(request):
         for facility in file_facility_data:
             facility['_file_id'] = file_id
         combined_facility_data.extend(file_facility_data)
+
+    # De-duplicate facilities across uploads to prevent repeated rows.
+    deduped_facilities = []
+    seen_facilities = set()
+    for facility in combined_facility_data:
+        name = str(facility.get('Facility', '')).strip().lower()
+        lat = facility.get('Lat')
+        lon = facility.get('Long')
+        asset_type = facility.get('AssetType') or ('polygon' if facility.get('geometry') else 'point')
+        geom = facility.get('geometry')
+        geom_key = ''
+        if geom is not None:
+            try:
+                geom_key = str(geom.get('type', '')) + ':' + str(len(str(geom)))
+            except Exception:
+                geom_key = 'geom'
+        key = (name, lat, lon, asset_type, geom_key)
+        if key in seen_facilities:
+            continue
+        seen_facilities.add(key)
+        deduped_facilities.append(facility)
+
+    if len(deduped_facilities) != len(combined_facility_data):
+        logger.warning(
+            f"Removed {len(combined_facility_data) - len(deduped_facilities)} duplicate facilities "
+            f"from combined session data"
+        )
+    combined_facility_data = deduped_facilities
 
     # Store the combined data for backward compatibility
     request.session['climate_hazards_v2_facility_data'] = combined_facility_data

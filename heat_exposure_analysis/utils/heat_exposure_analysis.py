@@ -4,7 +4,7 @@ import geopandas as gpd
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from shapely.geometry import Point
+from shapely.geometry import Point, shape
 import rasterstats as rstat
 import math
 from django.conf import settings
@@ -46,7 +46,60 @@ def _read_facility_csv(facility_csv_path: str) -> pd.DataFrame:
     return df
 
 
-def generate_heat_exposure_analysis(facility_csv_path):
+def _load_polygon_gdf(facility_geofile_path, facility_geojson_records):
+    gdf = None
+    if facility_geofile_path:
+        try:
+            gdf = gpd.read_file(facility_geofile_path)
+        except Exception:
+            gdf = None
+
+    if gdf is None and facility_geojson_records:
+        geo_rows = []
+        geometries = []
+        for record in facility_geojson_records:
+            geom = record.get("geometry")
+            if not geom:
+                continue
+            try:
+                geometries.append(shape(geom))
+            except Exception:
+                continue
+            geo_rows.append(
+                {
+                    "Facility": record.get("Facility")
+                    or record.get("Name")
+                    or record.get("Site"),
+                    "Lat": record.get("Lat"),
+                    "Long": record.get("Long"),
+                }
+            )
+        if geo_rows and geometries:
+            gdf = gpd.GeoDataFrame(geo_rows, geometry=geometries, crs="EPSG:4326")
+
+    if gdf is None:
+        return None
+
+    gdf = gdf.to_crs("EPSG:4326")
+    if "Facility" not in gdf.columns:
+        for name_col in ["Name", "name", "NAME", "Site", "Asset", "asset", "facility"]:
+            if name_col in gdf.columns:
+                gdf["Facility"] = gdf[name_col].astype(str)
+                break
+    if "Facility" not in gdf.columns:
+        gdf["Facility"] = [f"Facility {i + 1}" for i in range(len(gdf))]
+
+    if "Lat" not in gdf.columns or "Long" not in gdf.columns:
+        gdf["Lat"] = gdf.geometry.centroid.y
+        gdf["Long"] = gdf.geometry.centroid.x
+    else:
+        gdf["Lat"] = pd.to_numeric(gdf["Lat"], errors="coerce")
+        gdf["Long"] = pd.to_numeric(gdf["Long"], errors="coerce")
+
+    return gdf
+
+
+def generate_heat_exposure_analysis(facility_csv_path, facility_geofile_path=None, facility_geojson_records=None):
     """
     Performs heat exposure analysis for facility locations using only >35°C baseline.
 
@@ -68,35 +121,51 @@ def generate_heat_exposure_analysis(facility_csv_path):
             print(f"Warning: Missing heat exposure raster file: {heat_file}")
 
         df_fac = _read_facility_csv(facility_csv_path)
+        polygon_gdf = _load_polygon_gdf(facility_geofile_path, facility_geojson_records)
 
         heat_cols = ["n>35degC_2125"]
-        df_heat = df_fac[['Facility', 'Lat', 'Long']].copy()
-        df_heat[heat_cols[0]] = np.nan
+        if polygon_gdf is not None:
+            df_heat = polygon_gdf.drop(columns=["geometry"]).copy()
+            df_heat[heat_cols[0]] = np.nan
+        else:
+            df_heat = df_fac[['Facility', 'Lat', 'Long']].copy()
+            df_heat[heat_cols[0]] = np.nan
 
         if heat_file.exists():
             try:
-                gs = gpd.points_from_xy(df_fac['Long'], df_fac['Lat'], crs='EPSG:4326').to_crs('EPSG:32651')
-                gdf_heat = gpd.GeoDataFrame(df_fac, geometry=gs, crs='EPSG:32651')
-
-                gdf_heat['lot_area'] = gdf_heat.get('lot_area', 1000**2)
-                gdf_heat['geometry'] = gdf_heat.geometry.buffer(
-                    np.sqrt(gdf_heat['lot_area'])/2, cap_style='square', join_style='mitre')
-
-                temp_geo = Path('temp.features.geojson')
-                try:
-                    gdf_heat.to_crs('EPSG:4326').to_file(str(temp_geo), driver='GeoJSON')
+                if polygon_gdf is not None:
                     out = rstat.zonal_stats(
-                        str(temp_geo), str(heat_file), stats='percentile_75',
-                        all_touched=True, geojson_out=True
+                        polygon_gdf,
+                        str(heat_file),
+                        stats='percentile_75',
+                        all_touched=True
                     )
                     if out:
-                        idxs = [int(feat['id']) for feat in out]
-                        vals = [feat['properties']['percentile_75'] for feat in out]
-                        gdf_heat[heat_cols[0]] = pd.Series(vals, index=idxs)
-                        df_heat[heat_cols[0]] = gdf_heat[heat_cols[0]]
-                finally:
-                    if temp_geo.exists():
-                        temp_geo.unlink()
+                        vals = [feat.get('percentile_75') for feat in out]
+                        df_heat[heat_cols[0]] = pd.Series(vals)
+                else:
+                    gs = gpd.points_from_xy(df_fac['Long'], df_fac['Lat'], crs='EPSG:4326').to_crs('EPSG:32651')
+                    gdf_heat = gpd.GeoDataFrame(df_fac, geometry=gs, crs='EPSG:32651')
+
+                    gdf_heat['lot_area'] = gdf_heat.get('lot_area', 1000**2)
+                    gdf_heat['geometry'] = gdf_heat.geometry.buffer(
+                        np.sqrt(gdf_heat['lot_area'])/2, cap_style='square', join_style='mitre')
+
+                    temp_geo = Path('temp.features.geojson')
+                    try:
+                        gdf_heat.to_crs('EPSG:4326').to_file(str(temp_geo), driver='GeoJSON')
+                        out = rstat.zonal_stats(
+                            str(temp_geo), str(heat_file), stats='percentile_75',
+                            all_touched=True, geojson_out=True
+                        )
+                        if out:
+                            idxs = [int(feat['id']) for feat in out]
+                            vals = [feat['properties']['percentile_75'] for feat in out]
+                            gdf_heat[heat_cols[0]] = pd.Series(vals, index=idxs)
+                            df_heat[heat_cols[0]] = gdf_heat[heat_cols[0]]
+                    finally:
+                        if temp_geo.exists():
+                            temp_geo.unlink()
             except Exception as e:
                 print(f"Error in heat raster processing: {e}")
 
