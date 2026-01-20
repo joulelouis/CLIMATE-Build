@@ -18,6 +18,7 @@ import numpy as np
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import rasterstats as rstat
+from shapely.geometry import shape
 from django.conf import settings
 
 # Import specialized hazard analysis modules
@@ -316,7 +317,95 @@ def process_water_stress_analysis(facility_csv_path, selected_fields, buffer_siz
         return None, []
 
 
-def process_sea_level_rise_analysis(facility_csv_path, selected_fields):
+def _load_facility_geometries_for_slr(facility_geofile_path, facility_geojson_records, df_fallback):
+    gdf = None
+    if facility_geofile_path:
+        try:
+            gdf = gpd.read_file(facility_geofile_path)
+        except Exception:
+            gdf = None
+
+    if gdf is None and facility_geojson_records:
+        geo_rows = []
+        geometries = []
+        for record in facility_geojson_records:
+            geom = record.get("geometry")
+            if not geom:
+                continue
+            try:
+                geometries.append(shape(geom))
+            except Exception:
+                continue
+            geo_rows.append(
+                {
+                    "Facility": record.get("Facility")
+                    or record.get("Name")
+                    or record.get("Site"),
+                    "Lat": record.get("Lat"),
+                    "Long": record.get("Long"),
+                }
+            )
+        if geo_rows and geometries:
+            gdf = gpd.GeoDataFrame(geo_rows, geometry=geometries, crs="EPSG:4326")
+
+    if gdf is None:
+        df_points = df_fallback[['Facility', 'Lat', 'Long']].copy()
+        geometry = gpd.points_from_xy(df_points['Long'], df_points['Lat'], crs='EPSG:4326')
+        gdf = gpd.GeoDataFrame(df_points, geometry=geometry, crs='EPSG:4326')
+
+    gdf = gdf.to_crs("EPSG:4326")
+    if "Facility" not in gdf.columns:
+        for name_col in ["Name", "name", "NAME", "Site", "Asset", "asset", "facility"]:
+            if name_col in gdf.columns:
+                gdf["Facility"] = gdf[name_col].astype(str)
+                break
+    if "Facility" not in gdf.columns:
+        gdf["Facility"] = [f"Facility {i + 1}" for i in range(len(gdf))]
+
+    return gdf[['Facility', 'geometry']].copy()
+
+
+def _apply_ssa1_exposure_mask(slr_values, facility_geofile_path, facility_geojson_records):
+    ssa1_path = Path(settings.BASE_DIR) / 'climate_hazards_analysis' / 'static' / 'input_files' / 'PH_SSA1.shp'
+    if not ssa1_path.exists():
+        logger.warning(f"SSA1 file not found: {ssa1_path}")
+        return slr_values
+
+    try:
+        ssa1_gdf = gpd.read_file(ssa1_path).to_crs("EPSG:4326")
+    except Exception as e:
+        logger.warning(f"Failed to load SSA1 file: {e}")
+        return slr_values
+
+    fac_gdf = _load_facility_geometries_for_slr(
+        facility_geofile_path,
+        facility_geojson_records,
+        slr_values[['Facility', 'Lat', 'Long']]
+    )
+    if fac_gdf.empty:
+        return slr_values
+
+    fac_gdf['Facility_key'] = fac_gdf['Facility'].astype(str).str.strip().str.lower()
+    slr_values = slr_values.copy()
+    slr_values['Facility_key'] = slr_values['Facility'].astype(str).str.strip().str.lower()
+
+    try:
+        coastal = gpd.sjoin(fac_gdf, ssa1_gdf, how='inner', predicate='intersects')
+        coastal_keys = set(coastal['Facility_key'].unique())
+    except Exception as e:
+        logger.warning(f"SSA1 spatial join failed: {e}")
+        return slr_values.drop(columns=['Facility_key'], errors='ignore')
+
+    slr_cols = [c for c in slr_values.columns if 'Sea Level Rise (meters)' in c]
+    if slr_cols:
+        mask = ~slr_values['Facility_key'].isin(coastal_keys)
+        for col in slr_cols:
+            slr_values.loc[mask, col] = 'Not Exposed'
+
+    return slr_values.drop(columns=['Facility_key'], errors='ignore')
+
+
+def process_sea_level_rise_analysis(facility_csv_path, selected_fields, facility_geofile_path=None, facility_geojson_records=None):
     """
     Process sea level rise analysis if selected.
 
@@ -417,6 +506,12 @@ def process_sea_level_rise_analysis(facility_csv_path, selected_fields):
         slr_values = df_slr[required_cols + available_slr_cols].copy()
         logger.info(f"Created SLR values dataframe with shape: {slr_values.shape}")
         logger.info(f"SLR values columns: {slr_values.columns.tolist()}")
+
+        slr_values = _apply_ssa1_exposure_mask(
+            slr_values,
+            facility_geofile_path,
+            facility_geojson_records,
+        )
 
         # Collect plot paths
         if slr_res.get('png_paths'):
@@ -877,7 +972,10 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         # 3. Other analyses (no buffer size needed for these)
         logger.info("=== PROCESSING OTHER ANALYSES ===")
         slr_values, slr_plots = process_sea_level_rise_analysis(
-            facility_csv_path, selected_fields
+            facility_csv_path,
+            selected_fields,
+            facility_geofile_path=facility_geofile_path,
+            facility_geojson_records=facility_geojson_records,
         )
         all_plot_paths.extend(slr_plots)
         

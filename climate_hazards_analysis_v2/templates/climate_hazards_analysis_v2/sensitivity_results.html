@@ -571,13 +571,19 @@ View Sensitivity Results
 
                                                                 {# Fallback: output the value normally #}
                                                                 {% elif "Sea Level Rise" in key and value != "N/A" %}
-                                                                    {% with num=value|to_float %}
-                                                                        {% if num > 0 %}
-                                                                            <span class="risk-high">{{ value }}</span>
-                                                                        {% else %}
-                                                                            <span class="risk-none">{{ value }}</span>
-                                                                        {% endif %}
-                                                                    {% endwith %}
+                                                                    {% if value == "Not Exposed" %}
+                                                                        <span style="color: black; font-weight: bold;">{{ value }}</span>
+                                                                    {% elif value == "Little to none" %}
+                                                                        <span style="color: black; font-weight: bold;">{{ value }}</span>
+                                                                    {% else %}
+                                                                        {% with num=value|to_float %}
+                                                                            {% if num > 0 %}
+                                                                                <span class="risk-high">{{ value }}</span>
+                                                                            {% else %}
+                                                                                <span class="risk-none">{{ value }}</span>
+                                                                            {% endif %}
+                                                                        {% endwith %}
+                                                                    {% endif %}
                                                                 {% else %}
                                                                     {{ value }}
                                                                 {% endif %}

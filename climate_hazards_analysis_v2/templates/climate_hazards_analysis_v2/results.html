@@ -836,8 +836,14 @@ Climate Hazard Analysis Results
                         {% endwith %}
                     
                     {# Sea Level Rise styling - display in red when value is present #}
-                    {% elif "Sea Level Rise" in key and value != "N/A" and value != "Little to none" %}
-                        <span style="color: red; font-weight: bold;">{{ value }}</span>
+                    {% elif "Sea Level Rise" in key and value != "N/A" %}
+                        {% if value == "Not Exposed" %}
+                            <span style="color: black; font-weight: bold;">{{ value }}</span>
+                        {% elif value == "Little to none" %}
+                            <span style="color: black; font-weight: bold;">{{ value }}</span>
+                        {% else %}
+                            <span style="color: red; font-weight: bold;">{{ value }}</span>
+                        {% endif %}
                     
                     {# Tropical Cyclone Wind Speed styling #}
                     {% elif "Windspeed" in key and "km/h" in key %}
