@@ -190,11 +190,8 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None, facility
                 crs='EPSG:4326'
             ).to_crs(raster_crs)
 
-            # Use ~500m buffer (matches prior ~0.0045 deg buffer) for polygon stats
-            buffer_distance_m = 500
-            stats_geometries = [
-                geom.buffer(buffer_distance_m, cap_style=3) for geom in points.geometry
-            ]
+            # Use point sampling for point assets (align with flood_updated.py logic)
+            stats_geometries = points.geometry
         else:
             gdf_proj = gdf.to_crs(raster_crs)
             stats_geometries = []
