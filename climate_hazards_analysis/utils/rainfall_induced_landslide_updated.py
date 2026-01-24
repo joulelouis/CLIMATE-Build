@@ -139,10 +139,13 @@ def generate_rainfall_induced_landslide_analysis(
         ] = _zonal_percentile90_to_categories(polygon_gdf, worst_raster)
 
         # Include point assets from df_fac that are not part of the polygon results.
-        polygon_facilities = set(df_out["Facility"].astype(str).tolist())
+        polygon_facilities = set(
+            df_out["Facility"].astype(str).str.strip().str.lower().tolist()
+        )
         df_points = df_fac.copy()
         df_points["Facility"] = df_points["Facility"].astype(str)
-        df_points = df_points[~df_points["Facility"].isin(polygon_facilities)]
+        df_points["Facility_key"] = df_points["Facility"].str.strip().str.lower()
+        df_points = df_points[~df_points["Facility_key"].isin(polygon_facilities)]
 
         if not df_points.empty:
             df_points["Lat"] = pd.to_numeric(df_points["Lat"], errors="coerce")
@@ -166,7 +169,13 @@ def generate_rainfall_induced_landslide_analysis(
                     _zonal_percentile90_to_categories(gdf_points, worst_raster)
                 )
 
-                df_out = pd.concat([df_out, df_points.drop(columns=["geometry"], errors="ignore")], ignore_index=True)
+                df_out = pd.concat(
+                    [
+                        df_out,
+                        df_points.drop(columns=["geometry", "Facility_key"], errors="ignore"),
+                    ],
+                    ignore_index=True
+                )
 
         return df_out
 

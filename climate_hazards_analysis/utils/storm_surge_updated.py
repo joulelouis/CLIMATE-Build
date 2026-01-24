@@ -125,6 +125,38 @@ def generate_storm_surge_analysis(
         df_out[
             "Storm Surge Flood Depth (meters) - Worst Case"
         ] = _zonal_max_to_categories(polygon_gdf, future_raster)
+        polygon_keys = set(
+            df_out["Facility"].astype(str).str.strip().str.lower().tolist()
+        )
+        df_points = df_fac.copy()
+        df_points["Facility"] = df_points["Facility"].astype(str)
+        df_points["Facility_key"] = df_points["Facility"].str.strip().str.lower()
+        df_points = df_points[~df_points["Facility_key"].isin(polygon_keys)]
+
+        if not df_points.empty:
+            df_points["Lat"] = pd.to_numeric(df_points["Lat"], errors="coerce")
+            df_points["Long"] = pd.to_numeric(df_points["Long"], errors="coerce")
+            df_points = df_points.dropna(subset=["Lat", "Long"])
+
+            if not df_points.empty:
+                gdf_points = gpd.GeoDataFrame(
+                    df_points,
+                    geometry=gpd.points_from_xy(df_points["Long"], df_points["Lat"]),
+                    crs="EPSG:4326",
+                )
+
+                df_points["Storm Surge Flood Depth (meters)"] = _zonal_max_to_categories(
+                    gdf_points, current_raster
+                )
+                df_points["Storm Surge Flood Depth (meters) - Worst Case"] = _zonal_max_to_categories(
+                    gdf_points, future_raster
+                )
+
+                df_out = pd.concat(
+                    [df_out, df_points.drop(columns=["geometry", "Facility_key"], errors="ignore")],
+                    ignore_index=True
+                )
+
         return df_out
 
     df = df_fac.copy()

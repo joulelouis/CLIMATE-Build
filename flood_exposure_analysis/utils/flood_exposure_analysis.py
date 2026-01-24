@@ -130,10 +130,9 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None, facility
             if geo_rows and geometries:
                 gdf = gpd.GeoDataFrame(geo_rows, geometry=geometries, crs='EPSG:4326')
 
-        # Load facility locations
-        if gdf is None:
-            df_fac = pd.read_csv(facility_csv_path)
-        else:
+        # Load facility locations (always include point assets from CSV)
+        df_fac = pd.read_csv(facility_csv_path)
+        if gdf is not None:
             gdf = gdf.to_crs('EPSG:4326')
             if 'Facility' not in gdf.columns:
                 for name_col in ['Name', 'Site', 'Facility', 'Asset', 'asset', 'facility']:
@@ -149,8 +148,6 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None, facility
             else:
                 gdf['Lat'] = pd.to_numeric(gdf['Lat'], errors='coerce')
                 gdf['Long'] = pd.to_numeric(gdf['Long'], errors='coerce')
-
-            df_fac = gdf.drop(columns='geometry')
 
             try:
                 debug_dir = os.path.join(settings.BASE_DIR, 'climate_hazards_analysis_v2', 'static', 'input_files')
@@ -183,26 +180,32 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None, facility
 
         # Build geometries in raster CRS (EPSG:32651)
         raster_crs = CRS('epsg:32651')
-        if gdf is None:
-            points = gpd.GeoDataFrame(
-                df_fac.copy(),
-                geometry=gpd.points_from_xy(df_fac['Long'], df_fac['Lat']),
-                crs='EPSG:4326'
-            ).to_crs(raster_crs)
+        polygon_gdf = None
+        df_points = df_fac.copy()
 
-            # Use point sampling for point assets (align with flood_updated.py logic)
-            stats_geometries = points.geometry
-        else:
-            gdf_proj = gdf.to_crs(raster_crs)
-            stats_geometries = []
-            for geom in gdf_proj.geometry:
-                if geom is None or geom.is_empty:
-                    stats_geometries.append(geom)
-                    continue
-                if geom.geom_type in ['Polygon', 'MultiPolygon']:
-                    stats_geometries.append(geom)
-                else:
-                    stats_geometries.append(geom.buffer(500, cap_style=3))
+        if gdf is not None:
+            polygon_gdf = gdf.copy()
+            polygon_gdf['Facility_key'] = polygon_gdf['Facility'].astype(str).str.strip().str.lower()
+            df_points['Facility'] = df_points['Facility'].astype(str)
+            df_points['Facility_key'] = df_points['Facility'].str.strip().str.lower()
+            df_points = df_points[~df_points['Facility_key'].isin(polygon_gdf['Facility_key'])]
+
+        df_points['Long'] = pd.to_numeric(df_points['Long'], errors='coerce')
+        df_points['Lat'] = pd.to_numeric(df_points['Lat'], errors='coerce')
+        df_points = df_points.dropna(subset=['Long', 'Lat'])
+
+        gdf_points_proj = None
+        if not df_points.empty:
+            gdf_points = gpd.GeoDataFrame(
+                df_points.copy(),
+                geometry=gpd.points_from_xy(df_points['Long'], df_points['Lat']),
+                crs='EPSG:4326'
+            )
+            gdf_points_proj = gdf_points.to_crs(raster_crs)
+
+        gdf_poly_proj = None
+        if polygon_gdf is not None:
+            gdf_poly_proj = polygon_gdf.to_crs(raster_crs)
 
         def classify_depth(value):
             """
@@ -223,7 +226,7 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None, facility
             return mapping.get(v, 'Unknown')
 
         result_columns = ['Facility', 'Lat', 'Long']
-        combined_gdf = df_fac.copy()
+        combined_gdf = None
 
         print(f"\n{'='*60}")
         print(f"FLOOD EXPOSURE ANALYSIS - MULTI-SCENARIO PROCESSING")
@@ -248,29 +251,55 @@ def generate_flood_exposure_analysis(facility_csv_path, scenarios=None, facility
             print(f"  Raster Exists: {os.path.exists(raster_path)}")
 
             print(f"  Extracting flood depths using zonal statistics (percentile_90)...")
-            stats = zonal_stats(stats_geometries, raster_path, stats='percentile_90', nodata=255)
-            print(f"  Zonal stats completed: {len(stats)} results")
-
-            percentile_values = [
-                stat.get('percentile_90') if stat.get('percentile_90') is not None else 0
-                for stat in stats
-            ]
-            exposure_values = [classify_depth(p) for p in percentile_values]
-
             exposure_counts = {}
-            for exp in exposure_values:
-                exposure_counts[exp] = exposure_counts.get(exp, 0) + 1
+
+            if gdf_poly_proj is not None and not gdf_poly_proj.empty:
+                stats = zonal_stats(gdf_poly_proj, raster_path, stats='percentile_90', nodata=255)
+                print(f"  Zonal stats completed for polygons: {len(stats)} results")
+
+                percentile_values = [
+                    stat.get('percentile_90') if stat.get('percentile_90') is not None else 0
+                    for stat in stats
+                ]
+                exposure_values = [classify_depth(p) for p in percentile_values]
+                for exp in exposure_values:
+                    exposure_counts[exp] = exposure_counts.get(exp, 0) + 1
+
+                polygon_gdf[column_name] = exposure_values
+
+            if gdf_points_proj is not None and not gdf_points_proj.empty:
+                stats = zonal_stats(gdf_points_proj, raster_path, stats='percentile_90', nodata=255)
+                print(f"  Zonal stats completed for points: {len(stats)} results")
+
+                percentile_values = [
+                    stat.get('percentile_90') if stat.get('percentile_90') is not None else 0
+                    for stat in stats
+                ]
+                exposure_values = [classify_depth(p) for p in percentile_values]
+                for exp in exposure_values:
+                    exposure_counts[exp] = exposure_counts.get(exp, 0) + 1
+
+                df_points[column_name] = exposure_values
 
             print(f"  Exposure Classification Results:")
             for exp_level, count in exposure_counts.items():
                 print(f"    {exp_level}: {count} facilities")
-
-            combined_gdf[column_name] = exposure_values
             result_columns.append(column_name)
 
             print(f"  > Scenario '{scenario}' completed successfully")
             print(f"  > Column '{column_name}' added to results")
             print(f"  {'-'*50}")
+
+        if polygon_gdf is not None:
+            combined_gdf = pd.concat(
+                [
+                    polygon_gdf.drop(columns=['geometry', 'Facility_key'], errors='ignore'),
+                    df_points.drop(columns=['Facility_key'], errors='ignore'),
+                ],
+                ignore_index=True
+            )
+        else:
+            combined_gdf = df_points.drop(columns=['Facility_key'], errors='ignore')
 
         print(f"\n{'='*60}")
         print(f"MULTI-SCENARIO FLOOD ANALYSIS SUMMARY")
