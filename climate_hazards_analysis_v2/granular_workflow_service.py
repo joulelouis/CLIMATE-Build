@@ -16,7 +16,8 @@ from django.utils import timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-from .models import Asset, GranularAnalysisResult, HazardAnalysisResult, HeatmapData
+from climate_hazards_analysis.models import Asset
+from .models import GranularAnalysisResult, HazardAnalysisResult, HeatmapData
 from .granular_utils import (
     generate_grid_points_from_polygon, create_granular_analysis_results,
     calculate_granular_statistics, create_heatmap_data, get_granular_analysis_progress,
@@ -521,7 +522,7 @@ class GranularAnalysisWorkflowService:
             Dictionary with workflow status
         """
         try:
-            asset = Asset.objects.get(id=asset_id)
+            asset = Asset.objects.get(asset_id=asset_id)
 
             if not asset.has_granular_analysis:
                 return {

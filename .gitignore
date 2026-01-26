@@ -24,6 +24,7 @@ media
 *.db
 
 # Environment variables
+CRAproject/.env
 .env
 .env.local
 .env.development.local

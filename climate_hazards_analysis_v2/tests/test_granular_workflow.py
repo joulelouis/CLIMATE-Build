@@ -392,7 +392,7 @@ class GranularWorkflowIntegrationTest(TransactionTestCase):
         self.assertIsNotNone(results.get('asset_id'), "Asset should be created")
 
         # Verify database records
-        asset = Asset.objects.get(id=results['asset_id'])
+        asset = Asset.objects.get(asset_id=results['asset_id'])
         self.assertEqual(asset.name, 'Integration Test Asset')
         self.assertTrue(asset.has_granular_analysis)
         self.assertEqual(asset.granular_analysis_status, 'completed')

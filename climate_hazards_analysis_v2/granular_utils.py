@@ -11,7 +11,8 @@ from decimal import Decimal
 from typing import List, Tuple, Dict, Any, Optional
 from django.db import transaction
 
-from .models import Asset, GranularAnalysisResult, HeatmapData
+from climate_hazards_analysis.models import Asset
+from .models import GranularAnalysisResult, HeatmapData
 
 logger = logging.getLogger(__name__)
 

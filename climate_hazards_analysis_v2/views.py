@@ -21,7 +21,8 @@ from django.urls import reverse_lazy
 from django.core.exceptions import ValidationError
 from .utils import standardize_facility_dataframe, load_cached_hazard_data, combine_facility_with_hazard_data, validate_shapefile
 from .error_utils import handle_sensitivity_param_error
-from .models import Asset, HazardAnalysisResult, GranularAnalysisResult, HeatmapData, OverrideValue
+from climate_hazards_analysis.models import Asset
+from .models import HazardAnalysisResult, GranularAnalysisResult, HeatmapData, OverrideValue
 from .granular_analysis import generate_sample_grid, calculate_polygon_area_km2
 from .granular_utils import (
     generate_grid_points_from_polygon, create_granular_analysis_results,
@@ -428,12 +429,13 @@ def view_map(request):
 
                 # Log JSON workflow data to console
                 from .json_console_simple import simple_json_console
-                from .models import Asset
-                created_assets = Asset.objects.filter(id__in=created_asset_ids) if created_asset_ids else []
+                from climate_hazards_analysis.models import Asset
+                created_assets = Asset.objects.filter(asset_id__in=created_asset_ids) if created_asset_ids else []
 
                 if created_asset_ids:
                     # Store asset IDs in session for JSON workflow access (accumulate unique IDs across uploads)
                     existing_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+                    created_asset_ids = [str(aid) for aid in created_asset_ids]
                     updated_ids = list({*existing_asset_ids, *created_asset_ids})
                     request.session['climate_hazards_v2_uploaded_asset_ids'] = updated_ids
                     logger.info(f"Updated session with {len(updated_ids)} total asset IDs after upload (added {len(created_asset_ids)})")
@@ -493,7 +495,7 @@ def get_facility_data(request):
                 'Long': float(asset.longitude),
                 'Archetype': asset.archetype,
                 'AssetType': 'polygon',
-                'AssetId': asset.id,
+                'AssetId': str(asset.asset_id),
                 'CreatedAt': asset.created_at.isoformat()
             }
 
@@ -794,7 +796,7 @@ def add_facility(request):
                 'Long': lng,
                 'Archetype': archetype,
                 'source': 'drawn_polygon',  # treat as user-created to persist through rebuilds
-                'AssetId': asset.id if 'asset' in locals() else f"manual_{uuid.uuid4().hex[:8]}"
+                'AssetId': str(asset.asset_id) if 'asset' in locals() else f"manual_{uuid.uuid4().hex[:8]}"
             }
 
             # Add polygon geometry if provided
@@ -846,6 +848,7 @@ def add_facility(request):
                 )
                 if created_asset_ids:
                     existing_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+                    created_asset_ids = [str(aid) for aid in created_asset_ids]
                     request.session['climate_hazards_v2_uploaded_asset_ids'] = list({*existing_asset_ids, *created_asset_ids})
                     _create_unified_assets_json(request)
             except Exception:
@@ -854,7 +857,7 @@ def add_facility(request):
             return JsonResponse({
                 'success': True,
                 'facility': new_facility,
-                'asset_id': asset.id if 'asset' in locals() else None,
+                'asset_id': str(asset.asset_id) if 'asset' in locals() else None,
                 'message': f"New Facility at {lat_val:.4f}, {lng_val:.4f}" if auto_named else "Facility added successfully"
             })
         except json.JSONDecodeError:
@@ -1050,11 +1053,11 @@ def select_hazards(request):
         if granular_workflow and polygon_asset_id:
             # For granular analysis, trigger the analysis processing
             try:
-                asset = Asset.objects.get(id=polygon_asset_id)
+                asset = Asset.objects.get(asset_id=polygon_asset_id)
                 if asset.has_granular_analysis and asset.granular_analysis_status == 'pending':
                     from .granular_processor import process_asset_granular_analysis
                     processing_result = process_asset_granular_analysis(
-                        asset.id, selected_hazards, scenario='current'
+                        asset.asset_id, selected_hazards, scenario='current'
                     )
 
                     if processing_result.get('success'):
@@ -2047,7 +2050,22 @@ def show_results(request):
 
         # Remove baseline heat columns that should not be displayed in results
         hidden_heat_columns = ['Days over 30° Celsius', 'Days over 33° Celsius']
-        df = df.drop(columns=[col for col in hidden_heat_columns if col in df.columns], errors='ignore')
+        hidden_asset_columns = [
+            'source_type',
+            'source',
+            'geometry',
+            'polygon_geometry',
+            'granular_analysis_enabled',
+            'granular_analysis_progress',
+            'granular_analysis_status',
+            'granular_grid_points_count',
+            'granular_grid_spacing',
+            'has_granular_analysis',
+        ]
+        df = df.drop(
+            columns=[col for col in hidden_heat_columns + hidden_asset_columns if col in df.columns],
+            errors='ignore'
+        )
 
         # Standardize column ordering to match header mapping
         HEADER_ORDER = [
@@ -2995,7 +3013,7 @@ def _process_polygon_assets_unified(polygon_assets, selected_hazards):
                     try:
                         # Try to get asset by database ID (integer)
                         if isinstance(asset_id, int) or (isinstance(asset_id, str) and asset_id.isdigit()):
-                            asset = Asset.objects.get(id=int(asset_id))
+                            asset = Asset.objects.get(asset_id=asset_id)
                         else:
                             # Check if this is a session-based polygon asset (string ID like "polygon_b480aff8")
                             # For session-based assets, we need to create the database record first
@@ -3225,7 +3243,7 @@ def _create_asset_from_polygon_data(polygon_data):
             owner=polygon_data.get('session_key', 'session')
         )
 
-        logger.info(f"Created asset from polygon data: {asset.name} (ID: {asset.id})")
+        logger.info(f"Created asset from polygon data: {asset.name} (ID: {asset.asset_id})")
         return asset
 
     except Exception as e:
@@ -3293,6 +3311,40 @@ def _normalize_column_name(name: str) -> str:
     return name.replace('°', '')
 
 
+def _strip_non_display_columns(data, columns):
+    columns_to_remove = [
+        'Lat',
+        'Long',
+        'source_type',
+        'source',
+        'geometry',
+        'polygon_geometry',
+        'granular_analysis_enabled',
+        'granular_analysis_progress',
+        'granular_analysis_status',
+        'granular_grid_points_count',
+        'granular_grid_spacing',
+        'has_granular_analysis',
+        'Lat_storm',
+        'Long_storm',
+        'facility_key_storm',
+        'Lat_landslide',
+        'Long_landslide',
+        'facility_key_landslide',
+    ]
+
+    if columns:
+        columns = [col for col in columns if col not in columns_to_remove]
+
+    if data:
+        for row in data:
+            for col in columns_to_remove:
+                if col in row:
+                    del row[col]
+
+    return data, columns
+
+
 def _override_results_with_combined_output(context, selected_hazards):
     combined_path = os.path.join(
         settings.BASE_DIR,
@@ -3319,6 +3371,8 @@ def _override_results_with_combined_output(context, selected_hazards):
         return context
 
     columns = list(combined_data[0].keys())
+    combined_data, columns = _strip_non_display_columns(combined_data, columns)
+    logger.info(f"Final hazard exposure columns (combined_output override): {columns}")
     groups = _build_column_groups(columns, selected_hazards)
 
     context['data'] = combined_data
@@ -3431,10 +3485,14 @@ def _build_column_groups(columns, selected_hazards):
         'Rainfall-Induced Landslide'
     ]
 
+    normalized_selected = set()
+    for hazard in selected_hazards or []:
+        normalized_selected.add(hazard_name_mapping.get(hazard, hazard))
+
     # Add groups for selected hazards based on actual column presence in correct order
     for hazard in desired_hazard_order:
         # Skip if this hazard wasn't selected
-        if hazard not in selected_hazards:
+        if hazard not in normalized_selected:
             continue
         # Normalize hazard name
         normalized_hazard = hazard_name_mapping.get(hazard, hazard)
@@ -3454,39 +3512,36 @@ def _build_column_groups(columns, selected_hazards):
         else:
             logger.warning(f"Unknown hazard type: {normalized_hazard}")
 
-    # Special handling for cases where hazard might be selected but no data is available
-    # Check for any columns that contain hazard-related terms but weren't in our mapping
-    additional_hazards = set()
-    for column in columns:
-        column_lower = column.lower()
+    # Only infer extra hazard groups when no explicit selections are provided.
+    if not selected_hazards:
+        additional_hazards = set()
+        for column in columns:
+            column_lower = column.lower()
 
-        # Detect additional hazard columns that might not be in our mapping
-        if any(term in column_lower for term in ['flood', 'water stress', 'heat', 'temperature',
-                                                'sea level', 'cyclone', 'wind', 'storm surge',
-                                                'landslide', 'rainfall']):
+            if any(term in column_lower for term in ['flood', 'water stress', 'heat', 'temperature',
+                                                    'sea level', 'cyclone', 'wind', 'storm surge',
+                                                    'landslide', 'rainfall']):
 
-            # Try to categorize the column
-            if 'flood' in column_lower and 'Flood' not in groups:
-                additional_hazards.add('Flood')
-            elif 'water stress' in column_lower and 'Water Stress' not in groups:
-                additional_hazards.add('Water Stress')
-            elif any(term in column_lower for term in ['heat', 'temperature', 'celsius']) and 'Heat' not in groups:
-                additional_hazards.add('Heat')
-            elif 'sea level' in column_lower and 'Sea Level Rise' not in groups:
-                additional_hazards.add('Sea Level Rise')
-            elif any(term in column_lower for term in ['cyclone', 'wind']) and 'Tropical Cyclones' not in groups:
-                additional_hazards.add('Tropical Cyclones')
-            elif 'storm surge' in column_lower and 'Storm Surge' not in groups:
-                additional_hazards.add('Storm Surge')
-            elif any(term in column_lower for term in ['landslide', 'rainfall']) and 'Rainfall-Induced Landslide' not in groups:
-                additional_hazards.add('Rainfall-Induced Landslide')
+                if 'flood' in column_lower and 'Flood' not in groups:
+                    additional_hazards.add('Flood')
+                elif 'water stress' in column_lower and 'Water Stress' not in groups:
+                    additional_hazards.add('Water Stress')
+                elif any(term in column_lower for term in ['heat', 'temperature', 'celsius']) and 'Heat' not in groups:
+                    additional_hazards.add('Heat')
+                elif 'sea level' in column_lower and 'Sea Level Rise' not in groups:
+                    additional_hazards.add('Sea Level Rise')
+                elif any(term in column_lower for term in ['cyclone', 'wind']) and 'Tropical Cyclones' not in groups:
+                    additional_hazards.add('Tropical Cyclones')
+                elif 'storm surge' in column_lower and 'Storm Surge' not in groups:
+                    additional_hazards.add('Storm Surge')
+                elif any(term in column_lower for term in ['landslide', 'rainfall']) and 'Rainfall-Induced Landslide' not in groups:
+                    additional_hazards.add('Rainfall-Induced Landslide')
 
-    # Add any additional hazard groups found
-    for hazard in additional_hazards:
-        hazard_columns = [col for col in columns if hazard.lower() in col.lower()]
-        if hazard_columns:
-            groups[hazard] = len(hazard_columns)
-            logger.info(f"Added additional {hazard} group with {len(hazard_columns)} columns: {hazard_columns}")
+        for hazard in additional_hazards:
+            hazard_columns = [col for col in columns if hazard.lower() in col.lower()]
+            if hazard_columns:
+                groups[hazard] = len(hazard_columns)
+                logger.info(f"Added additional {hazard} group with {len(hazard_columns)} columns: {hazard_columns}")
 
     logger.info(f"Final groups dictionary: {groups}")
 
@@ -4368,8 +4423,21 @@ def sensitivity_results(request):
         sensitivity_data = copy.deepcopy(original_results['data'])
         columns = original_results['columns'].copy()
         
-        # Remove Lat and Long columns from the sensitivity results
-        columns_to_remove = ['Lat', 'Long']
+        # Remove non-display columns from sensitivity results
+        columns_to_remove = [
+            'Lat',
+            'Long',
+            'source_type',
+            'source',
+            'geometry',
+            'polygon_geometry',
+            'granular_analysis_enabled',
+            'granular_analysis_progress',
+            'granular_analysis_status',
+            'granular_grid_points_count',
+            'granular_grid_spacing',
+            'has_granular_analysis',
+        ]
         for col_to_remove in columns_to_remove:
             if col_to_remove in columns:
                 columns.remove(col_to_remove)
@@ -4929,7 +4997,7 @@ def save_table_changes(request):
                 })
 
             # Create fallback data structure
-            assets = Asset.objects.filter(id__in=uploaded_asset_ids)
+            assets = Asset.objects.filter(asset_id__in=uploaded_asset_ids)
             if not assets.exists():
                 return JsonResponse({
                     'success': False,
@@ -5100,7 +5168,7 @@ def check_analysis_context(request):
             })
 
         # Check if assets exist in database
-        assets = Asset.objects.filter(id__in=uploaded_asset_ids)
+        assets = Asset.objects.filter(asset_id__in=uploaded_asset_ids)
         if not assets.exists():
             return JsonResponse({
                 'has_context': False,
@@ -6004,7 +6072,7 @@ def get_asset_analysis_results(request, asset_id):
     API endpoint to retrieve climate hazard analysis results for a specific asset.
     """
     try:
-        asset = Asset.objects.get(id=asset_id)
+        asset = Asset.objects.get(asset_id=asset_id)
 
         # Get all analysis results for this asset
         results = HazardAnalysisResult.objects.filter(asset=asset).order_by(
@@ -6158,8 +6226,9 @@ class HazardExposureMapView(TemplateView):
         # For granular workflow, get hazards from the asset
         if has_granular_data and not selected_hazards:
             try:
-                from .models import Asset, GranularAnalysisResult
-                asset = Asset.objects.get(id=granular_asset_id)
+                from climate_hazards_analysis.models import Asset
+                from .models import GranularAnalysisResult
+                asset = Asset.objects.get(asset_id=granular_asset_id)
                 granular_hazards = list(GranularAnalysisResult.objects.filter(
                     asset=asset,
                     processing_status='completed'
@@ -6206,8 +6275,8 @@ class HazardExposureMapView(TemplateView):
             selected_hazards = self.request.session.get('climate_hazards_v2_selected_hazards', [])
 
             try:
-                from .models import Asset
-                asset = Asset.objects.get(id=granular_asset_id)
+                from climate_hazards_analysis.models import Asset
+                asset = Asset.objects.get(asset_id=granular_asset_id)
 
                 # Create facility data from granular asset
                 facility_data = [{
@@ -6216,7 +6285,7 @@ class HazardExposureMapView(TemplateView):
                     'longitude': float(asset.longitude),
                     'asset_type': 'polygon',
                     'archetype': asset.archetype or 'Unknown',
-                    'id': asset.id
+                    'id': str(asset.asset_id)
                 }]
 
                 facility_count = 1
@@ -6941,7 +7010,7 @@ def _handle_granular_polygon_results(request, asset_id: int, selected_hazards: L
         from .granular_utils import prepare_hierarchical_exposure_data
         from .granular_processor import get_granular_analysis_summary
 
-        asset = Asset.objects.get(id=asset_id)
+        asset = Asset.objects.get(asset_id=asset_id)
 
         if not asset.has_granular_analysis:
             return render(request, 'climate_hazards_analysis_v2/select_hazards.html', {
@@ -7031,7 +7100,7 @@ def _generate_basic_polygon_hazard_exposure_map(request, asset_id: int):
         JsonResponse: Map data with polygon boundary
     """
     try:
-        asset = Asset.objects.get(id=asset_id)
+        asset = Asset.objects.get(asset_id=asset_id)
 
         logger.info(f"Generating basic polygon hazard exposure map for asset {asset.name}")
 
@@ -7049,7 +7118,7 @@ def _generate_basic_polygon_hazard_exposure_map(request, asset_id: int):
             'type': 'Feature',
             'geometry': asset.polygon_geometry,
             'properties': {
-                'id': asset.id,
+                'id': str(asset.asset_id),
                 'name': asset.name,
                 'asset_type': 'polygon',
                 'feature_type': 'boundary',
@@ -7107,7 +7176,7 @@ def _generate_granular_hazard_exposure_map(request, asset_id: int):
         JsonResponse: Map data with heatmap layers for each hazard
     """
     try:
-        asset = Asset.objects.get(id=asset_id)
+        asset = Asset.objects.get(asset_id=asset_id)
 
         if not asset.has_granular_analysis:
             return JsonResponse({
@@ -7133,7 +7202,7 @@ def _generate_granular_hazard_exposure_map(request, asset_id: int):
             'type': 'Feature',
             'geometry': asset.polygon_geometry,
             'properties': {
-                'id': asset.id,
+                'id': str(asset.asset_id),
                 'name': asset.name,
                 'asset_type': 'polygon',
                 'feature_type': 'boundary',
@@ -7199,7 +7268,7 @@ def _generate_granular_hazard_exposure_map(request, asset_id: int):
                                 'row': point['row'],
                                 'col': point['col'],
                                 'feature_type': 'grid_point',
-                                'asset_id': asset.id
+                                'asset_id': str(asset.asset_id)
                             }
                         }
                         features.append(point_feature)
@@ -7216,7 +7285,7 @@ def _generate_granular_hazard_exposure_map(request, asset_id: int):
                 'coordinates': [float(asset.longitude), float(asset.latitude)]
             },
             'properties': {
-                'id': asset.id,
+                'id': str(asset.asset_id),
                 'name': asset.name,
                 'archetype': asset.archetype,
                 'asset_type': 'polygon',
@@ -7240,7 +7309,7 @@ def _generate_granular_hazard_exposure_map(request, asset_id: int):
             'data': geojson_data,
             'metadata': {
                 'asset': {
-                    'id': asset.id,
+                    'id': str(asset.asset_id),
                     'name': asset.name,
                     'asset_type': 'polygon',
                     'analysis_status': asset.granular_analysis_status,
@@ -8614,7 +8683,7 @@ def get_workflow_results_table(request, asset_id):
         asset_id: ID of the asset with granular analysis
     """
     try:
-        asset = Asset.objects.get(id=asset_id)
+        asset = Asset.objects.get(asset_id=asset_id)
 
         if not asset.has_granular_analysis:
             return JsonResponse({
@@ -8655,7 +8724,7 @@ def get_workflow_results_table(request, asset_id):
             'data': table_results,
             'columns': list(table_results[0].keys()) if table_results else [],
             'asset_info': {
-                'id': asset.id,
+                'id': str(asset.asset_id),
                 'name': asset.name,
                 'asset_type': asset.asset_type,
                 'granular_analysis_status': asset.granular_analysis_status,
@@ -9266,7 +9335,7 @@ def _create_unified_assets_json(request):
     This consolidates all asset data from multiple file uploads into a single JSON structure.
     """
     try:
-        from .models import Asset
+        from climate_hazards_analysis.models import Asset
 
         # Get all uploaded assets from the current session
         session_key = request.session.session_key
@@ -9278,7 +9347,7 @@ def _create_unified_assets_json(request):
             Asset.objects.filter(session_key=session_key, source__in=allowed_sources)
             if session_key else Asset.objects.none()
         )
-        session_asset_ids = list(session_assets_qs.values_list('id', flat=True))
+        session_asset_ids = [str(aid) for aid in session_assets_qs.values_list('asset_id', flat=True)]
 
         # Merge with any tracked IDs in session (legacy safety)
         if uploaded_asset_ids:
@@ -9296,7 +9365,7 @@ def _create_unified_assets_json(request):
         request.session.modified = True
 
         # Get all assets from database using the unified list
-        assets = Asset.objects.filter(id__in=unique_asset_ids, source__in=allowed_sources)
+        assets = Asset.objects.filter(asset_id__in=unique_asset_ids, source__in=allowed_sources)
 
         # Create unified JSON structure
         unified_assets = {
@@ -9313,7 +9382,7 @@ def _create_unified_assets_json(request):
         # Process each asset
         for asset in assets:
             asset_data = {
-                "database_id": asset.id,
+                "database_id": str(asset.asset_id),
                 "name": asset.name,
                 "latitude": float(asset.latitude),
                 "longitude": float(asset.longitude),
@@ -9709,6 +9778,8 @@ def _handle_unified_json_analysis_results(request, unified_analysis_data):
 
         # Load analysis results data
         data, columns = json_csv_loader.load_analysis_results(json_path=combined_json_path)
+        data, columns = _strip_non_display_columns(data, columns)
+        logger.info(f"Final hazard exposure columns (unified JSON): {columns}")
         df = pd.DataFrame(data)
 
         if df.empty:
@@ -9829,7 +9900,7 @@ def _store_uploaded_assets_as_json(
     Returns:
         List of created Asset IDs
     """
-    from .models import Asset
+    from climate_hazards_analysis.models import Asset
 
     created_asset_ids = []
 
@@ -9884,19 +9955,19 @@ def _store_uploaded_assets_as_json(
                 session_key=session_key
             )
 
-            created_asset_ids.append(asset.id)
+            created_asset_ids.append(str(asset.asset_id))
 
             # Log individual asset creation for debugging
             if asset_type == 'polygon':
-                logger.info(f"Created polygon asset: {name} (ID: {asset.id}) with centroid: {latitude}, {longitude}")
+                logger.info(f"Created polygon asset: {name} (ID: {asset.asset_id}) with centroid: {latitude}, {longitude}")
             else:
-                logger.info(f"Created point asset: {name} (ID: {asset.id}) at: {latitude}, {longitude}")
+                logger.info(f"Created point asset: {name} (ID: {asset.asset_id}) at: {latitude}, {longitude}")
 
         logger.info(f"Successfully created {len(created_asset_ids)} Asset records from uploaded file: {original_filename}")
 
         # Log breakdown by asset type
         from collections import Counter
-        asset_types_created = Counter([Asset.objects.get(id=aid).asset_type for aid in created_asset_ids])
+        asset_types_created = Counter([Asset.objects.get(asset_id=aid).asset_type for aid in created_asset_ids])
         logger.info(f"Asset breakdown: {dict(asset_types_created)}")
 
     except Exception as e:
@@ -10090,7 +10161,7 @@ def remove_file(request):
             _delete_physical_file(file_path)
 
         # Collect asset IDs tied to this upload (by file_id and session_key) for cleanup
-        from .models import Asset
+        from climate_hazards_analysis.models import Asset
         session_key = request.session.session_key
         assets_to_remove = Asset.objects.filter(
             source='uploaded_file',
@@ -10098,7 +10169,7 @@ def remove_file(request):
         )
         if session_key:
             assets_to_remove = assets_to_remove.filter(session_key=session_key)
-        asset_ids_to_remove = list(assets_to_remove.values_list('id', flat=True))
+        asset_ids_to_remove = [str(aid) for aid in assets_to_remove.values_list('asset_id', flat=True)]
 
         # Delete asset records for this file
         deleted_count, _ = assets_to_remove.delete()
@@ -10239,6 +10310,16 @@ def clear_all_files(request):
         # Clear polygon assets that were created from uploaded files (not user-drawn)
         Asset.objects.filter(source='session_polygon_workflow').delete()
         Asset.objects.filter(source='uploaded_file', session_key=request.session.session_key).delete()
+        try:
+            from django.db import connection
+            table = Asset._meta.db_table
+            with connection.cursor() as cursor:
+                if connection.vendor == 'postgresql':
+                    cursor.execute(f'TRUNCATE TABLE "{table}" RESTART IDENTITY CASCADE')
+                elif connection.vendor == 'sqlite':
+                    cursor.execute(f'DELETE FROM sqlite_sequence WHERE name="{table}"')
+        except Exception as reset_exc:
+            logger.warning(f"Failed to reset asset_id sequence: {reset_exc}")
 
         # Clear session data
         request.session['climate_hazards_v2_uploaded_files'] = {}

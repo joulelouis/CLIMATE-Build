@@ -4,6 +4,8 @@
 # Plot and/or write a map for a specific component, scenario, and year
 import numpy as np              # Numpy
 from netCDF4 import Dataset     # This package reads netcdf files
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt # Matplotlib's pyplot used to make the plots
 import os                       # Extracts directory names etc
 #from scipy.interpolate import interp2d

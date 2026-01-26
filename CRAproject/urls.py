@@ -27,18 +27,19 @@ urlpatterns = [
     # path('', views.homepage), 
     path('feature_1/', views.feature_1),
     path('feature_2/', views.feature_2),
-    path('posts/', include('posts.urls')), #include the urls in the posts app in the urls in myproject (main project)
+    # Non-core app routes removed in db-migration reset.
     path('delta_method/', views.delta_method),
-    path('water-stress/', include('water_stress.urls')),
-    path('flood-exposure-analysis/', include('flood_exposure_analysis.urls')),
-    path('climate-hazards-analysis/', include('climate_hazards_analysis.urls')),
-    path('sea-level-rise-analysis/', include('sea_level_rise_analysis.urls')),
-    path('tropical-cyclone-analysis/', include('tropical_cyclone_analysis.urls')),
-    path('climate-hazards-analysis-v2/', include('climate_hazards_analysis_v2.urls')),
     path('login/', login_page, name='login_page'),
     path('signup/', signup_page, name='signup_page'),
-    path('api/auth/', include('accounts.urls')),
-    path('api/', include('overrides.urls')),
+    # path('posts/', include('posts.urls')),
+    # path('water-stress/', include('water_stress.urls')),
+    # path('flood-exposure-analysis/', include('flood_exposure_analysis.urls')),
+    # path('climate-hazards-analysis/', include('climate_hazards_analysis.urls')),
+    # path('sea-level-rise-analysis/', include('sea_level_rise_analysis.urls')),
+    # path('tropical-cyclone-analysis/', include('tropical_cyclone_analysis.urls')),
+    path('climate-hazards-analysis-v2/', include('climate_hazards_analysis_v2.urls')),
+    # path('api/auth/', include('accounts.urls')),
+    # path('api/', include('overrides.urls')),
 ]
 
 # Serve media files during development

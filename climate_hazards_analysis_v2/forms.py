@@ -1,5 +1,5 @@
 from django import forms
-from .models import Asset
+from climate_hazards_analysis.models import Asset
 
 
 class AssetForm(forms.ModelForm):

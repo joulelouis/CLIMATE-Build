@@ -13,7 +13,8 @@ from django.db import transaction
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from .models import Asset, HazardAnalysisResult, GranularAnalysisResult, HeatmapData
+from climate_hazards_analysis.models import Asset
+from .models import HazardAnalysisResult, GranularAnalysisResult, HeatmapData
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +188,7 @@ class AssetService:
         """
         try:
             with transaction.atomic():
-                asset = Asset.objects.get(id=asset_id)
+                asset = Asset.objects.get(asset_id=asset_id)
                 for field, value in kwargs.items():
                     if hasattr(asset, field):
                         setattr(asset, field, value)
@@ -213,7 +214,7 @@ class AssetService:
         """
         try:
             with transaction.atomic():
-                asset = Asset.objects.get(id=asset_id)
+                asset = Asset.objects.get(asset_id=asset_id)
                 asset_name = asset.name
                 asset.delete()
                 logger.info(f"Deleted asset: {asset_name} (ID: {asset_id})")
@@ -287,7 +288,7 @@ class AssetService:
         """
         try:
             with transaction.atomic():
-                asset = Asset.objects.get(id=asset_id)
+                asset = Asset.objects.get(asset_id=asset_id)
 
                 result, created = HazardAnalysisResult.objects.update_or_create(
                     asset=asset,
@@ -483,7 +484,7 @@ class AssetAnalysisService:
         """
         try:
             with transaction.atomic():
-                asset = Asset.objects.get(id=asset_id, asset_type=AssetType.POLYGON)
+                asset = Asset.objects.get(asset_id=asset_id, asset_type=AssetType.POLYGON)
 
                 if not asset.polygon_geometry:
                     raise ValidationError("Asset has no polygon geometry")
@@ -524,7 +525,7 @@ class AssetAnalysisService:
         """
         try:
             with transaction.atomic():
-                asset = Asset.objects.get(id=asset_id)
+                asset = Asset.objects.get(asset_id=asset_id)
 
                 asset.granular_analysis_status = status
                 if progress is not None:
@@ -564,7 +565,7 @@ class AssetAnalysisService:
         """
         try:
             with transaction.atomic():
-                asset = Asset.objects.get(id=asset_id)
+                asset = Asset.objects.get(asset_id=asset_id)
 
                 result, created = GranularAnalysisResult.objects.update_or_create(
                     asset=asset,

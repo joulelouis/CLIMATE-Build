@@ -879,17 +879,27 @@ Climate Hazard Analysis Results
                     
                     {# Rainfall-Induced Landslide styling #}
                     {% elif "Landslide (factor of safety" in key and value != "N/A" %}
-                        {% with val=value|to_float %}
-                            {% if value|lower == "generally stable" or val > 2.5 %}
-                                <span style="color: black; font-weight: bold;">Generally Stable</span>
-                            {% elif val > 1.5 %}
-                                <span style="color: green; font-weight: bold;">&gt; 1.5</span>
-                            {% elif val >= 1 %}
-                                <span style="color: orange; font-weight: bold;">1 to 1.5</span>
-                            {% else %}
-                                <span style="color: red; font-weight: bold;">&lt; 1</span>
-                            {% endif %}
-                        {% endwith %}
+                        {% if value|lower == "generally stable" %}
+                            <span style="color: black; font-weight: bold;">Generally Stable</span>
+                        {% elif value == "<1" or value == "< 1" %}
+                            <span style="color: red; font-weight: bold;">&lt; 1</span>
+                        {% elif value == "1-1.5" or value == "1 to 1.5" %}
+                            <span style="color: orange; font-weight: bold;">1 to 1.5</span>
+                        {% elif value == ">1.5" or value == "> 1.5" %}
+                            <span style="color: green; font-weight: bold;">&gt; 1.5</span>
+                        {% else %}
+                            {% with val=value|to_float %}
+                                {% if val > 2.5 %}
+                                    <span style="color: black; font-weight: bold;">Generally Stable</span>
+                                {% elif val > 1.5 %}
+                                    <span style="color: green; font-weight: bold;">&gt; 1.5</span>
+                                {% elif val >= 1 %}
+                                    <span style="color: orange; font-weight: bold;">1 to 1.5</span>
+                                {% else %}
+                                    <span style="color: red; font-weight: bold;">&lt; 1</span>
+                                {% endif %}
+                            {% endwith %}
+                        {% endif %}
                     
                     {# Default cell display #}
                     {% else %}

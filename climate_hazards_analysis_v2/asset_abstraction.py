@@ -12,7 +12,8 @@ from typing import List, Dict, Any, Optional, Tuple, Union
 from decimal import Decimal
 from dataclasses import dataclass, asdict
 
-from .models import Asset, HazardAnalysisResult, GranularAnalysisResult, HeatmapData
+from climate_hazards_analysis.models import Asset
+from .models import HazardAnalysisResult, GranularAnalysisResult, HeatmapData
 from .asset_service import AssetService, AssetAnalysisService, AssetType, AnalysisStatus
 
 logger = logging.getLogger(__name__)

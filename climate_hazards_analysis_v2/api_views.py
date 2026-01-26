@@ -98,7 +98,7 @@ class AssetListCreateView(AssetAPIView):
             assets_data = []
             for asset in assets:
                 asset_data = {
-                    'id': asset.id,
+                    'id': str(asset.asset_id),
                     'name': asset.name,
                     'archetype': asset.archetype,
                     'asset_type': asset.asset_type,
@@ -113,7 +113,7 @@ class AssetListCreateView(AssetAPIView):
                 # Add hazard analysis results if requested
                 if hazard_types:
                     analysis_results = AssetService.get_asset_analysis_results(
-                        asset.id, scenario=scenario
+                        asset.asset_id, scenario=scenario
                     )
                     if 'error' not in analysis_results:
                         asset_data['hazard_data'] = analysis_results.get('analysis_results', {})
@@ -167,7 +167,7 @@ class AssetListCreateView(AssetAPIView):
 
             # Return asset data in format expected by frontend
             asset_data = {
-                'id': asset.id,
+                'id': str(asset.asset_id),
                 'name': asset.name,
                 'archetype': asset.archetype,
                 'asset_type': asset.asset_type,
@@ -226,7 +226,7 @@ class AssetDetailView(AssetAPIView):
             asset = AssetService.update_asset(asset_id, **data)
 
             asset_data = {
-                'id': asset.id,
+                'id': str(asset.asset_id),
                 'name': asset.name,
                 'archetype': asset.archetype,
                 'asset_type': asset.asset_type,
@@ -339,7 +339,7 @@ class GranularAnalysisView(AssetAPIView):
             )
 
             return self.success_response({
-                'asset_id': asset.id,
+                'asset_id': str(asset.asset_id),
                 'grid_spacing': grid_spacing,
                 'grid_points_count': len(grid_points),
                 'grid_points': grid_points,
@@ -388,7 +388,7 @@ class GranularAnalysisView(AssetAPIView):
             )
 
             return self.success_response({
-                'asset_id': asset.id,
+                'asset_id': str(asset.asset_id),
                 'status': asset.granular_analysis_status,
                 'progress': asset.granular_analysis_progress,
                 'grid_points_count': asset.granular_grid_points_count
@@ -819,8 +819,8 @@ def save_hazard_selection_json(request):
         parameters = data.get('parameters', {})
 
         # Store hazard selection in existing Asset model properties field
-        from .models import Asset
-        assets = Asset.objects.filter(id__in=asset_ids)
+        from climate_hazards_analysis.models import Asset
+        assets = Asset.objects.filter(asset_id__in=asset_ids)
 
         for asset in assets:
             # Update properties with hazard selection
@@ -866,8 +866,8 @@ def run_json_analysis(request):
         if not asset_ids:
             return JsonResponse({'error': 'No asset IDs provided'}, status=400)
 
-        from .models import Asset
-        assets = Asset.objects.filter(id__in=asset_ids)
+        from climate_hazards_analysis.models import Asset
+        assets = Asset.objects.filter(asset_id__in=asset_ids)
 
         # Collect hazard selections and prepare analysis data
         analysis_data = []
@@ -883,7 +883,7 @@ def run_json_analysis(request):
                 'latitude': asset.latitude,
                 'longitude': asset.longitude,
                 'archetype': asset.archetype,
-                'asset_id': asset.id,
+                'asset_id': str(asset.asset_id),
                 'selected_hazards': selected_hazards,
                 'parameters': parameters
             }
@@ -920,7 +920,7 @@ def run_json_analysis(request):
             # Store results in database for persistence
             from .models import HazardAnalysisResult
             for asset in assets:
-                asset_result = next((r for r in results if r.get('asset_id') == asset.id), None)
+                asset_result = next((r for r in results if r.get('asset_id') == str(asset.asset_id)), None)
                 if asset_result:
                     HazardAnalysisResult.objects.update_or_create(
                         asset=asset,
@@ -984,8 +984,9 @@ def get_json_analysis_results(request):
         if not asset_ids:
             return JsonResponse({'error': 'No asset IDs provided'}, status=400)
 
-        from .models import Asset, HazardAnalysisResult
-        assets = Asset.objects.filter(id__in=asset_ids)
+        from climate_hazards_analysis.models import Asset
+        from .models import HazardAnalysisResult
+        assets = Asset.objects.filter(asset_id__in=asset_ids)
 
         # Collect stored results
         all_results = []

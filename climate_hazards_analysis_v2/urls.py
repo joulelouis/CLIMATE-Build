@@ -69,13 +69,11 @@ urlpatterns = [
     path('api/granular/workflow/clear/', clear_granular_workflow, name='clear_granular_workflow'),
     path('api/granular/workflow/state/', get_granular_workflow_state, name='get_granular_workflow_state'),
 
-    
     # Complete granular analysis workflow endpoints
     path('api/granular/workflow/execute/', execute_complete_granular_workflow, name='execute_complete_granular_workflow'),
     path('api/granular/workflow/results/<int:asset_id>/', get_workflow_results_table, name='get_workflow_results_table'),
 
     # New Stateless API Endpoints
-    # Core asset management
     path('api/v2/assets/', assets_api, name='assets_api'),
     path('api/v2/assets/<int:asset_id>/', asset_detail_api, name='asset_detail_api'),
     path('api/v2/assets/<int:asset_id>/analysis/', asset_analysis_api, name='asset_analysis_api'),

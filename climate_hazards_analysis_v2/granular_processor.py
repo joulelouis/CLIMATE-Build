@@ -13,7 +13,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 from django.db import models
-from .models import Asset, GranularAnalysisResult, HazardAnalysisResult, HeatmapData
+from climate_hazards_analysis.models import Asset
+from .models import GranularAnalysisResult, HazardAnalysisResult, HeatmapData
 from .granular_utils import create_heatmap_data
 from .utils import load_cached_hazard_data, combine_facility_with_hazard_data
 
@@ -370,7 +371,7 @@ def process_asset_granular_analysis(asset_id: int, hazard_types: List[str],
         Dictionary with processing results
     """
     try:
-        asset = Asset.objects.get(id=asset_id)
+        asset = Asset.objects.get(asset_id=asset_id)
 
         if not asset.has_granular_analysis:
             return {'success': False, 'error': 'Asset does not have granular analysis enabled'}
@@ -396,7 +397,7 @@ def get_granular_analysis_summary(asset_id: int) -> Dict[str, Any]:
         Dictionary with analysis summary
     """
     try:
-        asset = Asset.objects.get(id=asset_id)
+        asset = Asset.objects.get(asset_id=asset_id)
 
         if not asset.has_granular_analysis:
             return {
