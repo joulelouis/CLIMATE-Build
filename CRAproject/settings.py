@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'sea_level_rise_analysis',
     'tropical_cyclone_analysis',
     'climate_hazards_analysis_v2',
+    'structural_impact_analysis',
 ]
 
 MIDDLEWARE = [

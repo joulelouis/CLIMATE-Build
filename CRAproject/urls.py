@@ -38,6 +38,7 @@ urlpatterns = [
     # path('sea-level-rise-analysis/', include('sea_level_rise_analysis.urls')),
     # path('tropical-cyclone-analysis/', include('tropical_cyclone_analysis.urls')),
     path('climate-hazards-analysis-v2/', include('climate_hazards_analysis_v2.urls')),
+    path('structural-impact-analysis/', include('structural_impact_analysis.urls')),
     # path('api/auth/', include('accounts.urls')),
     # path('api/', include('overrides.urls')),
 ]
