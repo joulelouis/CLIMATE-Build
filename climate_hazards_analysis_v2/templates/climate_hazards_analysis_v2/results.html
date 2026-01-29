@@ -92,41 +92,57 @@ Climate Hazard Analysis Results
 
     /* Custom Table Styling */
     .custom-table {
+        --col-asset: 180px;
+        --col-archetype: 160px;
+        --col-default: 120px;
         background-color: white;
         border-radius: 10px;
-        overflow: hidden;
+        overflow: visible;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         border: none;
-        width: max-content;
-        min-width: 100%;
+        width: 100%;
         border-collapse: collapse;
         border-spacing: 0 8px;
-        table-layout: fixed;
     }
 
     .custom-table th,
     .custom-table td {
         border-right: 1px solid #ccc;
         padding: 8px;
-        width: 120px;
-        min-width: 120px;
-        max-width: 120px;
+        box-sizing: border-box;
         word-wrap: break-word;
     }
 
-    .custom-table th:nth-child(1),
-    .custom-table td:nth-child(1) {
-        width: 180px;
-        min-width: 180px;
-        max-width: 180px;
+    .custom-table thead tr.custom-table-header th,
+    .custom-table tbody td {
+        width: var(--col-default);
+        min-width: var(--col-default);
+        max-width: var(--col-default);
     }
 
-    .custom-table th:nth-child(2),
-    .custom-table td:nth-child(2) {
-        width: 160px;
-        min-width: 160px;
-        max-width: 160px;
+    .custom-table thead tr.custom-table-header th:nth-child(1),
+    .custom-table tbody td:nth-child(1) {
+        width: var(--col-asset);
+        min-width: var(--col-asset);
+        max-width: var(--col-asset);
     }
+
+    .custom-table thead tr.custom-table-header th:nth-child(2),
+    .custom-table tbody td:nth-child(2) {
+        width: var(--col-archetype);
+        min-width: var(--col-archetype);
+        max-width: var(--col-archetype);
+    }
+
+    .custom-table thead tr.group-header th,
+    .custom-table thead tr.sub-group-header th {
+        width: auto;
+        min-width: 0;
+        max-width: none;
+    }
+
+
+
 
     .custom-table-header {
         background-color: #F8F8F8;
@@ -1535,12 +1551,15 @@ if (typeof window.jQuery === 'undefined') {
             setupPagination();
             setupSearch();
 
-            // Initial setup
-            renderTable();
-            updatePaginationControls();
+    // Initial setup
+    renderTable();
+    updatePaginationControls();
 
-            // Initialize header alignment
-            updateGroupAndScenarioHeaders();
+    // Initialize header alignment
+    updateGroupAndScenarioHeaders();
+    
+            
+            
 
             setTimeout(() => {
                 attachEditableHandlers();
@@ -1560,6 +1579,7 @@ if (typeof window.jQuery === 'undefined') {
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(function() {
                 dataTable.columns.adjust();
+                
             }, 250);
         }
     });
@@ -2657,6 +2677,7 @@ function updateColumnVisibility() {
 
             // Hide/show body cells
             $(`#hazard-data-table tbody tr td:nth-child(${columnIndex + 1})`).toggle(shouldShow);
+
         });
         
         // Re-attach editable handlers after column changes
@@ -2667,6 +2688,8 @@ function updateColumnVisibility() {
 
         // Update group and scenario headers after column visibility changes
         updateGroupAndScenarioHeaders();
+        
+
 
         console.log('Column visibility update complete');
 
@@ -2675,6 +2698,7 @@ function updateColumnVisibility() {
         showError('Error updating column visibility: ' + error.message);
     }
 }
+
 
 // === GROUP AND SCENARIO HEADER MANAGEMENT ===
 function updateGroupAndScenarioHeaders() {
@@ -2856,6 +2880,7 @@ function updateGroupAndScenarioHeaders() {
 
     // Update scenario headers
     $('#hazard-data-table thead tr.sub-group-header').html(scenarioHeaderHtml);
+
 
     // Update group header colspans
     $('#hazard-data-table thead tr.group-header th').each(function(index) {
@@ -3179,6 +3204,7 @@ function renderTable() {
 
         // Update header colspans based on visible columns
         updateGroupAndScenarioHeaders();
+        
 
         // Re-attach editable handlers for newly rendered cells
         setTimeout(function() {
