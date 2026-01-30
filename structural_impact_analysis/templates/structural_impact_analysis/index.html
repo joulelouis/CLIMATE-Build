@@ -1,8 +1,273 @@
 {% extends 'base.html' %}
+{% load static %}
 
 {% block content %}
-<section class="container">
-  <h1>Structural Impact Analysis</h1>
-  <p>Initial scaffold for the structural impact analysis workflow.</p>
-</section>
+<style>
+  /* === Circle-based Step Styles === */
+  .step-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    z-index: 2;
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+
+  .step-circle {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background-color: #e9ecef;
+    color: #6c757d;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-weight: bold;
+    font-size: 18px;
+    border: 3px solid #e9ecef;
+    transition: all 0.3s ease;
+    margin-bottom: 8px;
+  }
+
+  .step-circle.active-step {
+    background-color: #F1D500;
+    color: #000;
+    border-color: #F1D500;
+    box-shadow: 0 0 0 4px rgba(241, 213, 0, 0.2);
+  }
+
+  .step-circle.completed-step {
+    background-color: #28a745;
+    color: #fff;
+    border-color: #28a745;
+  }
+
+  .step-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: #6c757d;
+    text-align: center;
+    max-width: 120px;
+    transition: all 0.3s ease;
+  }
+
+  .step-label.active-label {
+    color: #000;
+    font-weight: 600;
+  }
+
+  .step-label.completed-label {
+    color: #28a745;
+    font-weight: 600;
+  }
+
+  .step-item:hover .step-circle:not(.active-step):not(.completed-step) {
+    background-color: #dee2e6;
+    border-color: #dee2e6;
+  }
+
+  .step-item:hover .step-label:not(.active-label):not(.completed-label) {
+    color: #495057;
+  }
+
+  .progress-line {
+    position: absolute;
+    top: 25px; /* center of the 50px step circles */
+    left: 50px;
+    right: 50px;
+    height: 2px;
+    background-color: #e9ecef;
+    z-index: 1;
+  }
+</style>
+
+<div class="container-fluid mt-4">
+  <div class="row">
+    <div class="col-6 d-flex flex-column">
+      <div class="icon-container">
+        <img src="{% static 'images/sgv-logo.png' %}" alt="SGV Logo">
+      </div>
+      <h1 class="page-heading">Structural Impact Analysis</h1>
+    </div>
+  </div>
+
+  <!-- Step by Step Procedure UI -->
+  <div class="row mt-4 mb-4">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-body p-4">
+          <div class="steps-block">
+            <div class="d-flex justify-content-between align-items-center position-relative steps-row">
+              <!-- Progress Line -->
+              <div class="progress-line"></div>
+
+              <!-- Step 1 -->
+              <div class="step-item" data-step="1">
+                <div class="step-circle completed-step">1</div>
+                <div class="step-label completed-label">Upload Asset Data</div>
+              </div>
+
+              <!-- Step 2 -->
+              <div class="step-item" data-step="2">
+                <div class="step-circle completed-step">2</div>
+                <div class="step-label completed-label">Select Hazards and Scenarios</div>
+              </div>
+
+              <!-- Step 3 -->
+              <div class="step-item" data-step="3">
+                <div class="step-circle completed-step">3</div>
+                <div class="step-label completed-label">Consider Site Conditions to Adjust Magnitude</div>
+              </div>
+
+              <!-- Step 4 -->
+              <div class="step-item" data-step="4">
+                <div class="step-circle completed-step">4</div>
+                <div class="step-label completed-label">Adjust Sensitivity Thresholds</div>
+              </div>
+
+              <!-- Step 5 -->
+              <div class="step-item" data-step="5">
+                <div class="step-circle completed-step">5</div>
+                <div class="step-label completed-label">View Sensitivity Results</div>
+              </div>
+            </div>
+
+            <div class="d-flex justify-content-center align-items-center gap-4 mt-3 position-relative steps-row">
+              <div class="progress-line"></div>
+              <!-- Step 6 -->
+              <div class="step-item" data-step="6">
+                <div class="step-circle active-step">6</div>
+                <div class="step-label active-label">Compute Structural Damage-Loss Estimates</div>
+              </div>
+
+              <!-- Step 7 -->
+              <div class="step-item" data-step="7">
+                <div class="step-circle">7</div>
+                <div class="step-label">Adjust Site-Specific Structural Wind Velocities</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mt-4">
+    <!-- Left side: Upload Asset Data -->
+    <div class="col-md-4">
+      <form id="structural-upload-form" action="#" method="POST" enctype="multipart/form-data">
+        <div class="card h-100 mb-3 custom-card">
+          <div class="card-header no-border upload-card-header">
+            <strong>Upload Asset Data File</strong>
+          </div>
+          <div class="card-body upload-card-body">
+            <div class="file-input-wrapper">
+              <label class="file-upload-box" for="structuralFacilityCsv" style="cursor: pointer;">
+                <i class="fas fa-upload upload-icon"></i>
+                <span class="upload-label">Choose File</span>
+                <p id="structural-file-name" class="file-name-display mb-0">No file chosen</p>
+              </label>
+              <input id="structuralFacilityCsv" name="facility_csv" type="file" class="d-none" multiple accept=".csv,.xlsx,.xls,.zip,.gpkg,.shp" />
+            </div>
+
+            <div class="alert alert-info mt-3" role="alert" style="margin-right: 40px;">
+              Ensure your asset file includes the columns <strong>Facility</strong>, <strong>Latitude</strong>, <strong>Longitude</strong>, and <strong>Archetype</strong>.
+            </div>
+
+            <div class="mt-4">
+              <div class="accordion" id="structuralInstructionsAccordion">
+                <div class="accordion-item">
+                  <h2 class="accordion-header" id="structuralInstructionsHeading">
+                    <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#structuralInstructionsCollapse" aria-expanded="true" aria-controls="structuralInstructionsCollapse">
+                      <strong>Instructions</strong>
+                    </button>
+                  </h2>
+                  <div id="structuralInstructionsCollapse" class="accordion-collapse collapse" aria-labelledby="structuralInstructionsHeading" data-bs-parent="#structuralInstructionsAccordion">
+                    <div class="accordion-body bg-light">
+                      <ol class="mb-0 ps-3">
+                        <li>Upload a CSV, Excel (.xlsx), zipped Shapefile (.zip), or GeoPackage (.gpkg) with facility locations.</li>
+                        <li>The asset map will render after upload.</li>
+                        <li>Use the map to review asset placement before proceeding.</li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer text-center card-footer-no-border">
+            <div class="footer-button-wrapper d-flex justify-content-center gap-2">
+              <div class="d-flex gap-2">
+                <button type="button" class="btn btn-warning preview-button flex-fill" disabled>
+                  <strong>Preview File Upload</strong>
+                </button>
+                <button type="button" class="btn btn-info enhanced-preview-button flex-fill" disabled>
+                  <strong><i class="fas fa-layer-group me-2"></i>Enhanced Preview</strong>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Right side: Interactive Asset Map -->
+    <div class="col-md-8">
+      <div class="card custom-card">
+        <div class="card-header no-border">
+          <strong>Interactive Asset Map</strong>
+        </div>
+        <div class="card-body p-0">
+          <div class="bg-light border rounded-3 d-flex align-items-center justify-content-center" style="height: 600px;">
+            <div class="text-center text-muted">
+              <i class="fas fa-map-marked-alt fa-2x mb-2"></i>
+              <div>Map placeholder</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="text-end mt-3">
+        <button class="btn btn-warning btn-lg shadow" disabled>
+          <strong>Proceed to Next Step</strong>
+          <i class="fas fa-arrow-right ms-2"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mt-4">
+    <div class="col-12">
+      <div class="card custom-card">
+        <div class="card-header no-border">
+          <strong>Asset Preview</strong>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table custom-table mb-0">
+              <thead class="custom-table-header">
+                <tr>
+                  <th>Facility</th>
+                  <th>Class Description</th>
+                  <th>Specific Occupancy Class</th>
+                  <th>Material (optional)</th>
+                  <th>Story/Height (optional)</th>
+                  <th>Input Detail</th>
+                  <th>Windspeed (100-yr)</th>
+                  <th>Location</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="custom-table-row">
+                  <td colspan="8" class="text-center text-muted py-4">No assets loaded yet</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}

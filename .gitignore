@@ -38,7 +38,8 @@ CRAproject/.env
 #claude
 .claude
 
-#defect_screenshots
+#creenshots
+screenshots
 defect_screenshots
 
 #input_data

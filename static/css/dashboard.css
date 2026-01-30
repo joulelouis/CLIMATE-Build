@@ -68,6 +68,11 @@ body {
   display: block;
 }
 
+/* Keep sidebar logo aligned with nav text */
+.sidebar-logo {
+  padding: 0 15px;
+}
+
 
 /* Sidebar Navigation Links */
 .sidebar .nav-link {
@@ -91,6 +96,7 @@ body {
   justify-content: center;
   margin-right: 8px; /* Adjust spacing as needed */
   font-size: 18px;   /* Adjust icon size if desired */
+  width: 18px;
 }
 
 
