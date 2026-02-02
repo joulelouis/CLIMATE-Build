@@ -1761,11 +1761,6 @@
         // Load files after a short delay to ensure everything is initialized
         setTimeout(loadUploadedFiles, 500);
         setTimeout(loadManualAssets, 700);
-        setInterval(() => {
-            if (!manualAssetsLoading) {
-                loadManualAssets();
-            }
-        }, 4000);
 
         // Also load files after form submission
         const uploadForm = document.getElementById('upload-form');
