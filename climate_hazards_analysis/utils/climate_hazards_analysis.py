@@ -792,9 +792,12 @@ def process_storm_surge_analysis(
             facility_geofile_path=facility_geofile_path,
             facility_geojson_records=facility_geojson_records,
         )
-        return df_values[['Facility', 'Lat', 'Long',
-                          'Storm Surge Flood Depth (meters)',
-                          'Storm Surge Flood Depth (meters) - Worst Case']].copy()
+        base_cols = ['Facility', 'Lat', 'Long',
+                     'Storm Surge Flood Depth (meters)',
+                     'Storm Surge Flood Depth (meters) - Worst Case']
+        if 'Asset_ID' in df_values.columns:
+            base_cols.insert(1, 'Asset_ID')
+        return df_values[base_cols].copy()
 
     except Exception as e:
         logger.exception(f"Error in Storm Surge analysis: {e}")
@@ -839,14 +842,26 @@ def process_landslide_analysis(
             facility_geofile_path=facility_geofile_path,
             facility_geojson_records=facility_geojson_records,
         )
-        return df_values[['Facility', 'Lat', 'Long',
-                          'Rainfall-Induced Landslide (factor of safety)',
-                          'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
-                          'Rainfall-Induced Landslide (factor of safety) - Worst Case']].copy()
-
+        base_cols = ['Facility', 'Lat', 'Long',
+                     'Rainfall-Induced Landslide (factor of safety)',
+                     'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
+                     'Rainfall-Induced Landslide (factor of safety) - Worst Case']
+        if 'Asset_ID' in df_values.columns:
+            base_cols.insert(1, 'Asset_ID')
+        return df_values[base_cols].copy()
     except Exception as e:
         logger.exception(f"Error in Rainfall Induced Landslide analysis: {e}")
         return None
+
+
+def _normalize_asset_id_key(series):
+    if series is None:
+        return series
+    return (
+        series.astype(str)
+        .str.strip()
+        .str.replace(r"\.0$", "", regex=True)
+    )
 
 
 
@@ -1065,7 +1080,7 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             combined_df['Lat'] = pd.to_numeric(combined_df['Lat'], errors='coerce')
             combined_df['Long'] = pd.to_numeric(combined_df['Long'], errors='coerce')
             if 'Asset_ID' in storm_merge.columns:
-                storm_merge['asset_id_key'] = storm_merge['Asset_ID'].astype(str).str.strip()
+                storm_merge['asset_id_key'] = _normalize_asset_id_key(storm_merge['Asset_ID'])
             storm_merge['facility_key'] = storm_merge['Facility'].astype(str).str.strip().str.lower()
             storm_merge['merge_key'] = (
                 storm_merge['Facility'].astype(str).str.strip().str.lower() + '|' +
@@ -1078,13 +1093,25 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
                 combined_df['Long'].round(6).astype(str)
             )
             if 'Asset_ID' in combined_df.columns:
-                combined_df['asset_id_key'] = combined_df['Asset_ID'].astype(str).str.strip()
+                combined_df['asset_id_key'] = _normalize_asset_id_key(combined_df['Asset_ID'])
             combined_df['facility_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
 
             logger.info("=== MERGING STORM SURGE ===")
             logger.info(f"  storm surge dataframe shape: {storm_merge.shape}")
             logger.info(f"  storm surge columns: {storm_merge.columns.tolist()}")
             if 'asset_id_key' in combined_df.columns and 'asset_id_key' in storm_merge.columns:
+                storm_null = storm_merge['asset_id_key'].isna().sum()
+                combined_null = combined_df['asset_id_key'].isna().sum()
+                if storm_null or combined_null:
+                    logger.warning(f"Storm merge asset_id_key nulls: storm={storm_null}, combined={combined_null}")
+                storm_keys = set(storm_merge['asset_id_key'].dropna().tolist())
+                combined_keys = set(combined_df['asset_id_key'].dropna().tolist())
+                missing_in_storm = list(combined_keys - storm_keys)
+                missing_in_combined = list(storm_keys - combined_keys)
+                if missing_in_storm:
+                    logger.warning(f"Storm merge missing in storm (sample): {missing_in_storm[:5]}")
+                if missing_in_combined:
+                    logger.warning(f"Storm merge missing in combined (sample): {missing_in_combined[:5]}")
                 combined_df = combined_df.merge(
                     storm_merge,
                     on=['asset_id_key'],
@@ -1173,7 +1200,7 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             combined_df['Lat'] = pd.to_numeric(combined_df['Lat'], errors='coerce')
             combined_df['Long'] = pd.to_numeric(combined_df['Long'], errors='coerce')
             if 'Asset_ID' in landslide_merge.columns:
-                landslide_merge['asset_id_key'] = landslide_merge['Asset_ID'].astype(str).str.strip()
+                landslide_merge['asset_id_key'] = _normalize_asset_id_key(landslide_merge['Asset_ID'])
             landslide_merge['facility_key'] = landslide_merge['Facility'].astype(str).str.strip().str.lower()
             landslide_merge['merge_key'] = (
                 landslide_merge['Facility'].astype(str).str.strip().str.lower() + '|' +
@@ -1186,13 +1213,25 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
                 combined_df['Long'].round(6).astype(str)
             )
             if 'Asset_ID' in combined_df.columns:
-                combined_df['asset_id_key'] = combined_df['Asset_ID'].astype(str).str.strip()
+                combined_df['asset_id_key'] = _normalize_asset_id_key(combined_df['Asset_ID'])
             combined_df['facility_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
 
             logger.info("=== MERGING LANDSLIDE ===")
             logger.info(f"  landslide dataframe shape: {landslide_merge.shape}")
             logger.info(f"  landslide columns: {landslide_merge.columns.tolist()}")
             if 'asset_id_key' in combined_df.columns and 'asset_id_key' in landslide_merge.columns:
+                landslide_null = landslide_merge['asset_id_key'].isna().sum()
+                combined_null = combined_df['asset_id_key'].isna().sum()
+                if landslide_null or combined_null:
+                    logger.warning(f"Landslide merge asset_id_key nulls: landslide={landslide_null}, combined={combined_null}")
+                landslide_keys = set(landslide_merge['asset_id_key'].dropna().tolist())
+                combined_keys = set(combined_df['asset_id_key'].dropna().tolist())
+                missing_in_landslide = list(combined_keys - landslide_keys)
+                missing_in_combined = list(landslide_keys - combined_keys)
+                if missing_in_landslide:
+                    logger.warning(f"Landslide merge missing in landslide (sample): {missing_in_landslide[:5]}")
+                if missing_in_combined:
+                    logger.warning(f"Landslide merge missing in combined (sample): {missing_in_combined[:5]}")
                 combined_df = combined_df.merge(
                     landslide_merge,
                     on=['asset_id_key'],
@@ -1458,7 +1497,18 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             df_points = df_points.dropna(subset=['Lat', 'Long'])
 
             if not df_points.empty:
-                combined_df['Facility_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
+                combined_df['Lat'] = pd.to_numeric(combined_df['Lat'], errors='coerce')
+                combined_df['Long'] = pd.to_numeric(combined_df['Long'], errors='coerce')
+                combined_df['merge_key'] = (
+                    combined_df['Facility'].astype(str).str.strip().str.lower() + '|' +
+                    combined_df['Lat'].round(6).astype(str) + '|' +
+                    combined_df['Long'].round(6).astype(str)
+                )
+                df_points['merge_key'] = (
+                    df_points['Facility'].astype(str).str.strip().str.lower() + '|' +
+                    df_points['Lat'].round(6).astype(str) + '|' +
+                    df_points['Long'].round(6).astype(str)
+                )
 
                 ss_cols = [
                     'Storm Surge Flood Depth (meters)',
@@ -1476,11 +1526,17 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
                         facility_geojson_records=None,
                     )
                     if ss_recalc is not None:
-                        ss_recalc['Facility_key'] = ss_recalc['Facility'].astype(str).str.strip().str.lower()
+                        ss_recalc['Lat'] = pd.to_numeric(ss_recalc['Lat'], errors='coerce')
+                        ss_recalc['Long'] = pd.to_numeric(ss_recalc['Long'], errors='coerce')
+                        ss_recalc['merge_key'] = (
+                            ss_recalc['Facility'].astype(str).str.strip().str.lower() + '|' +
+                            ss_recalc['Lat'].round(6).astype(str) + '|' +
+                            ss_recalc['Long'].round(6).astype(str)
+                        )
                         for col in ss_cols:
                             if col in ss_recalc.columns and col in combined_df.columns:
-                                val_map = ss_recalc.set_index('Facility_key')[col].to_dict()
-                                combined_df[col] = combined_df['Facility_key'].map(val_map).fillna(combined_df[col])
+                                val_map = ss_recalc.set_index('merge_key')[col].to_dict()
+                                combined_df[col] = combined_df['merge_key'].map(val_map).fillna(combined_df[col])
 
                 landslide_cols = [
                     'Rainfall-Induced Landslide (factor of safety)',
@@ -1500,16 +1556,22 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
                         facility_geojson_records=None,
                     )
                     if ls_recalc is not None:
-                        ls_recalc['Facility_key'] = ls_recalc['Facility'].astype(str).str.strip().str.lower()
+                        ls_recalc['Lat'] = pd.to_numeric(ls_recalc['Lat'], errors='coerce')
+                        ls_recalc['Long'] = pd.to_numeric(ls_recalc['Long'], errors='coerce')
+                        ls_recalc['merge_key'] = (
+                            ls_recalc['Facility'].astype(str).str.strip().str.lower() + '|' +
+                            ls_recalc['Lat'].round(6).astype(str) + '|' +
+                            ls_recalc['Long'].round(6).astype(str)
+                        )
                         for col in landslide_cols:
                             if col in ls_recalc.columns and col in combined_df.columns:
-                                val_map = ls_recalc.set_index('Facility_key')[col].to_dict()
-                                combined_df[col] = combined_df['Facility_key'].map(val_map).fillna(combined_df[col])
+                                val_map = ls_recalc.set_index('merge_key')[col].to_dict()
+                                combined_df[col] = combined_df['merge_key'].map(val_map).fillna(combined_df[col])
         except Exception as e:
             logger.warning(f"Point hazard override failed: {e}")
         finally:
-            if 'Facility_key' in combined_df.columns:
-                combined_df.drop(columns=['Facility_key'], inplace=True)
+            if 'merge_key' in combined_df.columns:
+                combined_df.drop(columns=['merge_key'], inplace=True)
 
         if 'DaysOver35C_base_2125' in combined_df.columns:
             combined_df.drop(columns=['DaysOver35C_base_2125'], inplace=True)

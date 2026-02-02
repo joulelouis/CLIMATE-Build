@@ -758,12 +758,16 @@ def add_facility(request):
             # Create database asset record (simplified)
             try:
                 session_key = request.session.session_key or 'anonymous'
+                asset_type = 'polygon' if geometry else 'point'
                 asset = Asset(
                     name=name_clean,
                     archetype=archetype.strip() if archetype else 'default archetype',
                     latitude=lat_val,
                     longitude=lng_val,
-                    source=session_key,
+                    asset_type=asset_type,
+                    polygon_geometry=geometry if geometry else None,
+                    source='map_click',
+                    source_type='map_click',
                     session_key=session_key
                 )
 
@@ -6035,6 +6039,38 @@ def create_polygon_asset(request):
 
         logger.info(f"Created session-only polygon asset: {data['name'].strip()} (ID: {unique_id})")
 
+        # Persist polygon asset to DB for unified analysis pipeline
+        try:
+            session_key = request.session.session_key or 'anonymous'
+            asset_properties = {
+                'session_asset_id': unique_id,
+                'polygon_area_km2': area_km2,
+                'grid_spacing_meters': grid_spacing,
+            }
+            if granular_points:
+                asset_properties['granular-points'] = granular_points
+
+            db_asset = Asset.objects.create(
+                name=data['name'].strip(),
+                archetype=data.get('archetype', 'default archetype').strip() or 'default archetype',
+                latitude=centroid_lat,
+                longitude=centroid_lng,
+                asset_type='polygon',
+                polygon_geometry=geometry,
+                source='manual_polygon',
+                source_type='manual_polygon',
+                session_key=session_key,
+                properties=asset_properties
+            )
+
+            existing_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+            request.session['climate_hazards_v2_uploaded_asset_ids'] = list({*existing_asset_ids, str(db_asset.asset_id)})
+            request.session.modified = True
+            _create_unified_assets_json(request)
+            logger.info(f"Persisted polygon asset to DB: {db_asset.asset_id}")
+        except Exception as db_exc:
+            logger.warning(f"Failed to persist polygon asset to DB: {db_exc}")
+
         # Return GeoJSON-like response for frontend compatibility
         geojson_asset = {
             'type': 'Feature',
@@ -9335,88 +9371,14 @@ def _create_unified_assets_json(request):
     This consolidates all asset data from multiple file uploads into a single JSON structure.
     """
     try:
-        from climate_hazards_analysis.models import Asset
+        from .db_analysis_pipeline import build_unified_assets_json_from_db
 
-        # Get all uploaded assets from the current session
-        session_key = request.session.session_key
-        uploaded_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
-        allowed_sources = ['uploaded_file', 'session_polygon_workflow']
-
-        # Primary source of truth: all assets for this session key
-        session_assets_qs = (
-            Asset.objects.filter(session_key=session_key, source__in=allowed_sources)
-            if session_key else Asset.objects.none()
-        )
-        session_asset_ids = [str(aid) for aid in session_assets_qs.values_list('asset_id', flat=True)]
-
-        # Merge with any tracked IDs in session (legacy safety)
-        if uploaded_asset_ids:
-            session_asset_ids = list({*session_asset_ids, *uploaded_asset_ids})
-
-        if not session_asset_ids:
+        unified_assets = build_unified_assets_json_from_db(request)
+        if not unified_assets:
             logger.info("No uploaded assets to create unified JSON")
             return None
 
-        # Normalize and persist the merged IDs back to the session
-        unique_asset_ids = list(set(session_asset_ids))
-        if len(unique_asset_ids) != len(uploaded_asset_ids):
-            logger.info(f"Session asset IDs refreshed from DB for session_key={session_key}; total {len(unique_asset_ids)} assets")
-        request.session['climate_hazards_v2_uploaded_asset_ids'] = unique_asset_ids
-        request.session.modified = True
-
-        # Get all assets from database using the unified list
-        assets = Asset.objects.filter(asset_id__in=unique_asset_ids, source__in=allowed_sources)
-
-        # Create unified JSON structure
-        unified_assets = {
-            "metadata": {
-                "total_assets": assets.count(),
-                "upload_session_id": request.session.session_key,
-                "created_at": timezone.now().isoformat(),
-                "files_uploaded": [],
-                "asset_types": {"point_assets": 0, "polygon_assets": 0}
-            },
-            "assets": []
-        }
-
-        # Process each asset
-        for asset in assets:
-            asset_data = {
-                "database_id": str(asset.asset_id),
-                "name": asset.name,
-                "latitude": float(asset.latitude),
-                "longitude": float(asset.longitude),
-                "archetype": asset.archetype,
-                "asset_type": asset.asset_type,
-                "source": asset.source,
-                "created_at": asset.created_at.isoformat(),
-                "properties": asset.properties,
-                "polygon_geometry": asset.polygon_geometry
-            }
-
-            unified_assets["assets"].append(asset_data)
-
-            # Track file uploads
-            original_filename = asset.properties.get('original_filename', 'unknown')
-            if original_filename not in [f['filename'] for f in unified_assets["metadata"]["files_uploaded"]]:
-                file_info = {
-                    "filename": original_filename,
-                    "file_type": asset.properties.get('file_type', 'unknown'),
-                    "upload_id": asset.properties.get('file_upload_id', 'unknown'),
-                    "asset_count": 0
-                }
-                unified_assets["metadata"]["files_uploaded"].append(file_info)
-
-            # Update file asset count
-            for file_info in unified_assets["metadata"]["files_uploaded"]:
-                if file_info["filename"] == original_filename:
-                    file_info["asset_count"] += 1
-
-            # Count asset types
-            if asset.asset_type == 'polygon':
-                unified_assets["metadata"]["asset_types"]["polygon_assets"] += 1
-            else:
-                unified_assets["metadata"]["asset_types"]["point_assets"] += 1
+        unified_assets["metadata"]["created_at"] = timezone.now().isoformat()
 
         # Store unified JSON in session for easy access
         request.session['unified_uploaded_assets_json'] = unified_assets
@@ -9530,6 +9492,12 @@ def _get_unified_json_for_analysis(request):
     Includes both asset data and selected hazards for the analysis engine.
     """
     try:
+        from .db_analysis_pipeline import build_analysis_payload_from_db
+
+        db_analysis_data = build_analysis_payload_from_db(request)
+        if db_analysis_data:
+            return db_analysis_data
+
         # Ensure data consistency with display workflow by rebuilding combined facility data
         # This fixes the multi-file upload inconsistency issue
         _rebuild_combined_facility_data(request)
@@ -9589,6 +9557,7 @@ def _get_unified_json_for_analysis(request):
                 "Archetype": asset["archetype"],
                 "_file_id": asset.get("properties", {}).get("file_upload_id"),
                 "selected_hazards": selected_hazards,
+                "Asset_ID": asset["database_id"],
                 "asset_id": asset["database_id"],
                 "asset_type": asset["asset_type"],
                 "source_file": asset.get("properties", {}).get("original_filename", "unknown")
@@ -9616,6 +9585,7 @@ def _execute_climate_analysis_unified_json(request):
     This function uses the consolidated JSON structure containing both assets and hazards.
     """
     try:
+        print("[DEBUG] _execute_climate_analysis_unified_json entered")
         # Get unified JSON ready for analysis
         analysis_data = _get_unified_json_for_analysis(request)
 
@@ -9677,8 +9647,21 @@ def _execute_climate_analysis_unified_json(request):
         # Execute analysis using existing engine
         from climate_hazards_analysis.utils.climate_hazards_analysis import generate_climate_hazards_analysis
 
-        facility_geofile_path = _get_latest_polygon_geofile_path(request)
-        facility_geojson_records = _get_polygon_geojson_records(request)
+        facility_geojson_records = analysis_data.get("polygon_geojson_records") or _get_polygon_geojson_records(request)
+        using_db_polygons = bool(analysis_data.get("polygon_geojson_records"))
+        facility_geofile_path = None if using_db_polygons else _get_latest_polygon_geofile_path(request)
+        logger.warning(
+            "Polygon source for unified analysis: %s (db_records=%s, geofile=%s)",
+            "db" if using_db_polygons else "geofile",
+            len(facility_geojson_records) if facility_geojson_records else 0,
+            facility_geofile_path or "none",
+        )
+        print(
+            f"[DEBUG] Polygon source for unified analysis: "
+            f"{'db' if using_db_polygons else 'geofile'} "
+            f"(db_records={len(facility_geojson_records) if facility_geojson_records else 0}, "
+            f"geofile={facility_geofile_path or 'none'})"
+        )
         result = generate_climate_hazards_analysis(
             facility_csv_path=temp_csv_path,
             selected_fields=selected_hazards,
@@ -9742,7 +9725,12 @@ def _handle_unified_json_analysis_results(request, unified_analysis_data):
         selected_hazards = unified_analysis_data["metadata"]["selected_hazards"]
         assets_for_analysis = unified_analysis_data["assets_for_analysis"]
 
-        logger.info(f"Executing unified JSON analysis for {len(assets_for_analysis)} assets with {len(selected_hazards)} hazards")
+        logger.warning(
+            "Unified JSON handler invoked: assets=%s hazards=%s",
+            len(assets_for_analysis),
+            len(selected_hazards),
+        )
+        print(f"[DEBUG] Unified JSON handler invoked: assets={len(assets_for_analysis)} hazards={len(selected_hazards)}")
 
         # Execute analysis using unified JSON data
         result = _execute_climate_analysis_unified_json(request)

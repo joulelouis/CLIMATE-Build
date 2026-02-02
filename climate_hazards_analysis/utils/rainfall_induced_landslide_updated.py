@@ -76,6 +76,7 @@ def _build_polygon_gdf(facility_geofile_path, facility_geojson_records):
                     or record.get("Site"),
                     "Lat": record.get("Lat"),
                     "Long": record.get("Long"),
+                    "Asset_ID": record.get("Asset_ID") or record.get("asset_id"),
                 }
             )
         if geo_rows and geometries:
@@ -99,6 +100,8 @@ def _build_polygon_gdf(facility_geofile_path, facility_geojson_records):
     else:
         gdf["Lat"] = pd.to_numeric(gdf["Lat"], errors="coerce")
         gdf["Long"] = pd.to_numeric(gdf["Long"], errors="coerce")
+    if "Asset_ID" in gdf.columns:
+        gdf["Asset_ID"] = gdf["Asset_ID"].astype(str).str.strip()
 
     return gdf
 
@@ -139,13 +142,30 @@ def generate_rainfall_induced_landslide_analysis(
         ] = _zonal_percentile90_to_categories(polygon_gdf, worst_raster)
 
         # Include point assets from df_fac that are not part of the polygon results.
-        polygon_facilities = set(
-            df_out["Facility"].astype(str).str.strip().str.lower().tolist()
-        )
-        df_points = df_fac.copy()
-        df_points["Facility"] = df_points["Facility"].astype(str)
-        df_points["Facility_key"] = df_points["Facility"].str.strip().str.lower()
-        df_points = df_points[~df_points["Facility_key"].isin(polygon_facilities)]
+        if "asset_type" in df_fac.columns or "AssetType" in df_fac.columns:
+            df_points = df_fac.copy()
+            asset_type_col = "asset_type" if "asset_type" in df_points.columns else "AssetType"
+            df_points[asset_type_col] = df_points[asset_type_col].astype(str).str.lower()
+            df_points = df_points[df_points[asset_type_col] != "polygon"]
+        elif "Asset_ID" in df_out.columns and df_out["Asset_ID"].notna().any():
+            polygon_keys = set(
+                df_out["Asset_ID"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True).tolist()
+            )
+            df_points = df_fac.copy()
+            df_points["asset_id_key"] = (
+                df_points["Asset_ID"].astype(str)
+                .str.strip()
+                .str.replace(r"\.0$", "", regex=True)
+            )
+            df_points = df_points[~df_points["asset_id_key"].isin(polygon_keys)]
+        else:
+            polygon_facilities = set(
+                df_out["Facility"].astype(str).str.strip().str.lower().tolist()
+            )
+            df_points = df_fac.copy()
+            df_points["Facility"] = df_points["Facility"].astype(str)
+            df_points["Facility_key"] = df_points["Facility"].str.strip().str.lower()
+            df_points = df_points[~df_points["Facility_key"].isin(polygon_facilities)]
 
         if not df_points.empty:
             df_points["Lat"] = pd.to_numeric(df_points["Lat"], errors="coerce")
@@ -172,7 +192,7 @@ def generate_rainfall_induced_landslide_analysis(
                 df_out = pd.concat(
                     [
                         df_out,
-                        df_points.drop(columns=["geometry", "Facility_key"], errors="ignore"),
+                        df_points.drop(columns=["geometry", "Facility_key", "asset_id_key"], errors="ignore"),
                     ],
                     ignore_index=True
                 )
