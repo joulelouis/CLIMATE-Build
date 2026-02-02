@@ -9890,9 +9890,40 @@ def _store_uploaded_assets_as_json(
     """
     from climate_hazards_analysis.models import Asset
 
+    import hashlib
+    import json
+
     created_asset_ids = []
 
+    def _asset_dedupe_key(name, lat, lon, asset_type, polygon_geometry):
+        geom_sig = ''
+        if polygon_geometry is not None:
+            try:
+                geom_sig = json.dumps(polygon_geometry, sort_keys=True, ensure_ascii=True)
+            except Exception:
+                geom_sig = str(polygon_geometry)
+        raw = f"{name}|{lat}|{lon}|{asset_type}|{geom_sig}"
+        return hashlib.sha1(raw.encode('utf-8')).hexdigest()
+
     try:
+        existing_keys = set()
+        if session_key and original_filename:
+            existing_assets = Asset.objects.filter(
+                source=source,
+                session_key=session_key,
+                properties__original_filename=original_filename
+            )
+            for asset in existing_assets:
+                existing_keys.add(
+                    _asset_dedupe_key(
+                        asset.name,
+                        asset.latitude,
+                        asset.longitude,
+                        asset.asset_type,
+                        asset.polygon_geometry
+                    )
+                )
+
         for facility_record in facility_data:
             # Extract asset data from facility record
             name = facility_record.get('Facility', facility_record.get('name', 'Unknown Facility'))
@@ -9915,13 +9946,21 @@ def _store_uploaded_assets_as_json(
                 logger.warning(f"Skipping asset with invalid coordinates: {name}")
                 continue  # Skip invalid coordinates
 
+            dedupe_key = _asset_dedupe_key(name, latitude, longitude, asset_type, polygon_geometry)
+            if dedupe_key in existing_keys:
+                logger.warning(f"Skipping duplicate asset from upload {original_filename}: {name}")
+                continue
+
+            geometry_hash = dedupe_key
+
             # Create Asset record with enhanced properties
             asset_properties = {
                 'original_filename': original_filename,
                 'file_upload_id': file_upload_id,
                 'upload_method': 'json_workflow',
                 'original_data': facility_record,
-                'file_type': original_filename.split('.')[-1].lower() if '.' in original_filename else 'unknown'
+                'file_type': original_filename.split('.')[-1].lower() if '.' in original_filename else 'unknown',
+                'geometry_hash': geometry_hash
             }
 
             # Add polygon-specific metadata
@@ -9944,6 +9983,7 @@ def _store_uploaded_assets_as_json(
             )
 
             created_asset_ids.append(str(asset.asset_id))
+            existing_keys.add(dedupe_key)
 
             # Log individual asset creation for debugging
             if asset_type == 'polygon':
@@ -10151,10 +10191,14 @@ def remove_file(request):
         # Collect asset IDs tied to this upload (by file_id and session_key) for cleanup
         from climate_hazards_analysis.models import Asset
         session_key = request.session.session_key
+        from django.db.models import Q
+        original_filename = file_metadata.get('name')
+        asset_filter = Q(properties__file_upload_id=file_id)
+        if original_filename:
+            asset_filter = asset_filter | Q(properties__original_filename=original_filename)
         assets_to_remove = Asset.objects.filter(
-            source='uploaded_file',
-            properties__file_upload_id=file_id
-        )
+            source='uploaded_file'
+        ).filter(asset_filter)
         if session_key:
             assets_to_remove = assets_to_remove.filter(session_key=session_key)
         asset_ids_to_remove = [str(aid) for aid in assets_to_remove.values_list('asset_id', flat=True)]

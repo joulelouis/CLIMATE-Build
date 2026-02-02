@@ -863,6 +863,25 @@ def _normalize_asset_id_key(series):
         .str.replace(r"\.0$", "", regex=True)
     )
 
+def _get_polygon_asset_id_keys(df_fac=None, facility_geojson_records=None):
+    polygon_ids = set()
+    if df_fac is not None and 'asset_type' in df_fac.columns and 'Asset_ID' in df_fac.columns:
+        mask = df_fac['asset_type'].astype(str).str.strip().str.lower() == 'polygon'
+        if mask.any():
+            ids = _normalize_asset_id_key(df_fac.loc[mask, 'Asset_ID']).dropna().tolist()
+            polygon_ids.update(ids)
+    if facility_geojson_records:
+        for record in facility_geojson_records:
+            if not isinstance(record, dict):
+                continue
+            asset_id = record.get('Asset_ID') or record.get('asset_id') or record.get('AssetId')
+            if asset_id is None:
+                continue
+            norm = _normalize_asset_id_key(pd.Series([asset_id]))
+            if norm is not None and not norm.empty and pd.notna(norm.iloc[0]):
+                polygon_ids.add(norm.iloc[0])
+    return polygon_ids
+
 
 
 
@@ -980,6 +999,7 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
             logger.info("No Asset Archetype column found in facility data, will add default later")
 
         combined_df = df_fac[base_columns].copy()
+        asset_id_strict = 'Asset_ID' in combined_df.columns and combined_df['Asset_ID'].notna().all()
         logger.info(f"Initialized combined DataFrame with columns: {combined_df.columns.tolist()}")
         
         # Track plots for visualization
@@ -1137,50 +1157,71 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
                         combined_df.loc[missing, col] = combined_df.loc[missing, key_col].map(val_map)
             logger.info(f"  Combined DF after storm surge merge - shape: {combined_df.shape}")
 
-            try:
-                polygon_keys = _get_polygon_facility_keys(
-                    facility_geofile_path,
-                    facility_geojson_records,
-                )
-                if polygon_keys:
-                    combined_df['Facility_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
-                    point_mask = ~combined_df['Facility_key'].isin(polygon_keys)
-                else:
-                    combined_df['Facility_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
-                    point_mask = combined_df['Facility_key'].notna()
-
-                ss_cols = [
-                    'Storm Surge Flood Depth (meters)',
-                    'Storm Surge Flood Depth (meters) - Worst Case'
-                ]
-                if any(col in combined_df.columns for col in ss_cols):
-                    df_points = combined_df.loc[point_mask, ['Facility', 'Lat', 'Long']].copy()
-                    df_points['Lat'] = pd.to_numeric(df_points['Lat'], errors='coerce')
-                    df_points['Long'] = pd.to_numeric(df_points['Long'], errors='coerce')
-                    df_points = df_points.dropna(subset=['Lat', 'Long'])
-                    if not df_points.empty:
-                        ss_dir = Path(settings.BASE_DIR) / 'climate_hazards_analysis' / 'static' / 'input_files'
-                        fp_ss = ss_dir / 'PH_StormSurge_Advisory4_UTM_ProjectNOAH_Unmasked.tif'
-                        fp_ss_future = ss_dir / 'PH_StormSurge_Advisory4_Future_UTM_ProjectNOAH-GIRI_Unmasked.tif'
-                        ss_recalc = generate_storm_surge_analysis(
-                            df_points,
-                            fp_ss,
-                            fp_ss_future,
-                            facility_geofile_path=None,
-                            facility_geojson_records=None,
+            if asset_id_strict:
+                logger.info("Skipping storm surge point backfill (Asset_ID strict mode)")
+            else:
+                try:
+                    polygon_asset_ids = _get_polygon_asset_id_keys(df_fac, facility_geojson_records)
+                    if 'Asset_ID' in combined_df.columns:
+                        combined_df['asset_id_key'] = _normalize_asset_id_key(combined_df['Asset_ID'])
+                        if polygon_asset_ids:
+                            point_mask = ~combined_df['asset_id_key'].isin(polygon_asset_ids)
+                        else:
+                            polygon_keys = _get_polygon_facility_keys(
+                                facility_geofile_path,
+                                facility_geojson_records,
+                            )
+                            combined_df['Facility_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
+                            point_mask = ~combined_df['Facility_key'].isin(polygon_keys) if polygon_keys else combined_df['Facility_key'].notna()
+                    else:
+                        polygon_keys = _get_polygon_facility_keys(
+                            facility_geofile_path,
+                            facility_geojson_records,
                         )
-                        if ss_recalc is not None:
-                            ss_recalc['Facility_key'] = ss_recalc['Facility'].astype(str).str.strip().str.lower()
-                            for col in ss_cols:
-                                if col in ss_recalc.columns and col in combined_df.columns:
-                                    val_map = ss_recalc.set_index('Facility_key')[col].to_dict()
-                                    mapped = combined_df.loc[point_mask, 'Facility_key'].map(val_map)
-                                    combined_df.loc[point_mask, col] = mapped.where(
-                                        mapped.notna(),
-                                        combined_df.loc[point_mask, col],
-                                    )
-            except Exception as e:
-                logger.warning(f"Storm surge point backfill failed: {e}")
+                        combined_df['Facility_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
+                        point_mask = ~combined_df['Facility_key'].isin(polygon_keys) if polygon_keys else combined_df['Facility_key'].notna()
+
+                    if 'Facility_key' not in combined_df.columns:
+                        combined_df['Facility_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
+
+                    ss_cols = [
+                        'Storm Surge Flood Depth (meters)',
+                        'Storm Surge Flood Depth (meters) - Worst Case'
+                    ]
+                    if any(col in combined_df.columns for col in ss_cols):
+                        df_points = combined_df.loc[point_mask, ['Facility', 'Lat', 'Long']].copy()
+                        df_points['Lat'] = pd.to_numeric(df_points['Lat'], errors='coerce')
+                        df_points['Long'] = pd.to_numeric(df_points['Long'], errors='coerce')
+                        df_points = df_points.dropna(subset=['Lat', 'Long'])
+                        if 'Asset_ID' in combined_df.columns:
+                            df_points['Asset_ID'] = combined_df.loc[point_mask, 'Asset_ID'].values
+                        if not df_points.empty:
+                            ss_dir = Path(settings.BASE_DIR) / 'climate_hazards_analysis' / 'static' / 'input_files'
+                            fp_ss = ss_dir / 'PH_StormSurge_Advisory4_UTM_ProjectNOAH_Unmasked.tif'
+                            fp_ss_future = ss_dir / 'PH_StormSurge_Advisory4_Future_UTM_ProjectNOAH-GIRI_Unmasked.tif'
+                            ss_recalc = generate_storm_surge_analysis(
+                                df_points,
+                                fp_ss,
+                                fp_ss_future,
+                                facility_geofile_path=None,
+                                facility_geojson_records=None,
+                            )
+                            if ss_recalc is not None:
+                                for col in ss_cols:
+                                    if col in ss_recalc.columns and col in combined_df.columns:
+                                        if 'Asset_ID' not in ss_recalc.columns or 'Asset_ID' not in combined_df.columns:
+                                            logger.warning("Storm surge point backfill skipped: Asset_ID missing")
+                                            break
+                                        ss_recalc['asset_id_key'] = _normalize_asset_id_key(ss_recalc['Asset_ID'])
+                                        combined_df['asset_id_key'] = _normalize_asset_id_key(combined_df['Asset_ID'])
+                                        val_map = ss_recalc.set_index('asset_id_key')[col].to_dict()
+                                        mapped = combined_df.loc[point_mask, 'asset_id_key'].map(val_map)
+                                        combined_df.loc[point_mask, col] = mapped.where(
+                                            mapped.notna(),
+                                            combined_df.loc[point_mask, col],
+                                        )
+                except Exception as e:
+                    logger.warning(f"Storm surge point backfill failed: {e}")
 
             if 'Facility_key' in combined_df.columns:
                 combined_df.drop(columns=['Facility_key'], inplace=True)
@@ -1276,86 +1317,119 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
                     col_missing = combined_df[col].isna() | (combined_df[col].astype(str).str.strip().str.upper() == 'N/A')
                     missing_mask = col_missing if isinstance(missing_mask, bool) else (missing_mask | col_missing)
             if not isinstance(missing_mask, bool):
-                df_missing = combined_df.loc[missing_mask, ['Facility', 'Lat', 'Long']].copy()
-                df_missing['Lat'] = pd.to_numeric(df_missing['Lat'], errors='coerce')
-                df_missing['Long'] = pd.to_numeric(df_missing['Long'], errors='coerce')
-                df_missing = df_missing.dropna(subset=['Lat', 'Long'])
-                if not df_missing.empty:
-                    try:
+                if asset_id_strict:
+                    logger.info("Skipping landslide fallback (Asset_ID strict mode)")
+                else:
+                    polygon_asset_ids = _get_polygon_asset_id_keys(df_fac, facility_geojson_records)
+                    if 'Asset_ID' in combined_df.columns and polygon_asset_ids:
+                        combined_df['asset_id_key'] = _normalize_asset_id_key(combined_df['Asset_ID'])
+                        missing_mask = missing_mask & ~combined_df['asset_id_key'].isin(polygon_asset_ids)
+                    df_missing = combined_df.loc[missing_mask, ['Facility', 'Lat', 'Long']].copy()
+                    if 'Asset_ID' in combined_df.columns:
+                        df_missing['Asset_ID'] = combined_df.loc[missing_mask, 'Asset_ID'].values
+                    df_missing['Lat'] = pd.to_numeric(df_missing['Lat'], errors='coerce')
+                    df_missing['Long'] = pd.to_numeric(df_missing['Long'], errors='coerce')
+                    df_missing = df_missing.dropna(subset=['Lat', 'Long'])
+                    if not df_missing.empty:
+                        try:
+                            fp_ls = os.path.join(input_dir, 'PH_LandslideHazards_UTM_ProjectNOAH_Unmasked.tif')
+                            fp_ls_mod = os.path.join(input_dir, 'PH_LandslideHazards_RCP26_UTM_ProjectNOAH-GIRI_Unmasked.tif')
+                            fp_ls_worst = os.path.join(input_dir, 'PH_LandslideHazards_RCP85_UTM_ProjectNOAH-GIRI_Unmasked.tif')
+                            fallback_vals = generate_rainfall_induced_landslide_analysis(
+                                df_missing,
+                                fp_ls,
+                                fp_ls_mod,
+                                fp_ls_worst,
+                                facility_geofile_path=None,
+                                facility_geojson_records=None,
+                            )
+                            if fallback_vals is not None:
+                                if 'Asset_ID' not in fallback_vals.columns or 'Asset_ID' not in combined_df.columns:
+                                    logger.warning("Landslide fallback skipped: Asset_ID missing")
+                                else:
+                                    fallback_vals['asset_id_key'] = _normalize_asset_id_key(fallback_vals['Asset_ID'])
+                                    combined_df['asset_id_key'] = _normalize_asset_id_key(combined_df['Asset_ID'])
+                                    combined_df = combined_df.merge(
+                                        fallback_vals[['asset_id_key'] + landslide_cols],
+                                        on='asset_id_key',
+                                        how='left',
+                                        suffixes=('', '_landslide_fallback')
+                                    )
+                                    for col in landslide_cols:
+                                        fallback_col = f"{col}_landslide_fallback"
+                                        if fallback_col in combined_df.columns:
+                                            combined_df[col] = combined_df[col].fillna(combined_df[fallback_col])
+                                            combined_df.drop(columns=[fallback_col], inplace=True)
+                                    logger.info("Applied landslide fallback values for missing facilities")
+                        except Exception as e:
+                            logger.exception(f"Error applying landslide fallback values: {e}")
+                    if 'asset_id_key' in combined_df.columns:
+                        combined_df.drop(columns=['asset_id_key'], inplace=True)
+
+        # Recompute landslide values for point assets if polygon inputs are present.
+        if 'Rainfall-Induced Landslide (factor of safety)' in combined_df.columns:
+            if asset_id_strict:
+                logger.info("Skipping landslide point backfill (Asset_ID strict mode)")
+            else:
+                try:
+                    polygon_asset_ids = _get_polygon_asset_id_keys(df_fac, facility_geojson_records)
+                    combined_df['Facility_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
+                    if 'Asset_ID' in combined_df.columns:
+                        combined_df['asset_id_key'] = _normalize_asset_id_key(combined_df['Asset_ID'])
+                        if polygon_asset_ids:
+                            point_mask = ~combined_df['asset_id_key'].isin(polygon_asset_ids)
+                        else:
+                            polygon_keys = _get_polygon_facility_keys(
+                                facility_geofile_path,
+                                facility_geojson_records,
+                            )
+                            point_mask = ~combined_df['Facility_key'].isin(polygon_keys) if polygon_keys else combined_df['Facility_key'].notna()
+                    else:
+                        polygon_keys = _get_polygon_facility_keys(
+                            facility_geofile_path,
+                            facility_geojson_records,
+                        )
+                        point_mask = ~combined_df['Facility_key'].isin(polygon_keys) if polygon_keys else combined_df['Facility_key'].notna()
+
+                    df_points = combined_df.loc[point_mask, ['Facility', 'Lat', 'Long']].copy()
+                    df_points['Lat'] = pd.to_numeric(df_points['Lat'], errors='coerce')
+                    df_points['Long'] = pd.to_numeric(df_points['Long'], errors='coerce')
+                    df_points = df_points.dropna(subset=['Lat', 'Long'])
+                    if 'Asset_ID' in combined_df.columns:
+                        df_points['Asset_ID'] = combined_df.loc[point_mask, 'Asset_ID'].values
+                    if not df_points.empty:
                         fp_ls = os.path.join(input_dir, 'PH_LandslideHazards_UTM_ProjectNOAH_Unmasked.tif')
                         fp_ls_mod = os.path.join(input_dir, 'PH_LandslideHazards_RCP26_UTM_ProjectNOAH-GIRI_Unmasked.tif')
                         fp_ls_worst = os.path.join(input_dir, 'PH_LandslideHazards_RCP85_UTM_ProjectNOAH-GIRI_Unmasked.tif')
-                        fallback_vals = generate_rainfall_induced_landslide_analysis(
-                            df_missing,
+                        recalc = generate_rainfall_induced_landslide_analysis(
+                            df_points,
                             fp_ls,
                             fp_ls_mod,
                             fp_ls_worst,
                             facility_geofile_path=None,
                             facility_geojson_records=None,
                         )
-                        if fallback_vals is not None:
-                            fallback_vals['Facility_merge_key'] = fallback_vals['Facility'].astype(str).str.strip().str.lower()
-                            combined_df['Facility_merge_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
-                            combined_df = combined_df.merge(
-                                fallback_vals[['Facility_merge_key'] + landslide_cols],
-                                on='Facility_merge_key',
-                                how='left',
-                                suffixes=('', '_landslide_fallback')
-                            )
+                        if recalc is not None:
                             for col in landslide_cols:
-                                fallback_col = f"{col}_landslide_fallback"
-                                if fallback_col in combined_df.columns:
-                                    combined_df[col] = combined_df[col].fillna(combined_df[fallback_col])
-                                    combined_df.drop(columns=[fallback_col], inplace=True)
-                            combined_df.drop(columns=['Facility_merge_key'], inplace=True)
-                            logger.info("Applied landslide fallback values for missing facilities")
-                    except Exception as e:
-                        logger.exception(f"Error applying landslide fallback values: {e}")
-
-        # Recompute landslide values for point assets if polygon inputs are present.
-        if 'Rainfall-Induced Landslide (factor of safety)' in combined_df.columns:
-            try:
-                polygon_keys = _get_polygon_facility_keys(
-                    facility_geofile_path,
-                    facility_geojson_records,
-                )
-                combined_df['Facility_key'] = combined_df['Facility'].astype(str).str.strip().str.lower()
-                if polygon_keys:
-                    point_mask = ~combined_df['Facility_key'].isin(polygon_keys)
-                else:
-                    point_mask = combined_df['Facility_key'].notna()
-
-                df_points = combined_df.loc[point_mask, ['Facility', 'Lat', 'Long']].copy()
-                df_points['Lat'] = pd.to_numeric(df_points['Lat'], errors='coerce')
-                df_points['Long'] = pd.to_numeric(df_points['Long'], errors='coerce')
-                df_points = df_points.dropna(subset=['Lat', 'Long'])
-                if not df_points.empty:
-                    fp_ls = os.path.join(input_dir, 'PH_LandslideHazards_UTM_ProjectNOAH_Unmasked.tif')
-                    fp_ls_mod = os.path.join(input_dir, 'PH_LandslideHazards_RCP26_UTM_ProjectNOAH-GIRI_Unmasked.tif')
-                    fp_ls_worst = os.path.join(input_dir, 'PH_LandslideHazards_RCP85_UTM_ProjectNOAH-GIRI_Unmasked.tif')
-                    recalc = generate_rainfall_induced_landslide_analysis(
-                        df_points,
-                        fp_ls,
-                        fp_ls_mod,
-                        fp_ls_worst,
-                        facility_geofile_path=None,
-                        facility_geojson_records=None,
-                    )
-                    if recalc is not None:
-                        recalc['Facility_key'] = recalc['Facility'].astype(str).str.strip().str.lower()
-                        for col in landslide_cols:
-                            if col in recalc.columns and col in combined_df.columns:
-                                val_map = recalc.set_index('Facility_key')[col].to_dict()
-                                mapped = combined_df.loc[point_mask, 'Facility_key'].map(val_map)
-                                combined_df.loc[point_mask, col] = mapped.where(
-                                    mapped.notna(),
-                                    combined_df.loc[point_mask, col],
-                                )
-            except Exception as e:
-                logger.warning(f"Landslide point backfill failed: {e}")
-            finally:
-                if 'Facility_key' in combined_df.columns:
-                    combined_df.drop(columns=['Facility_key'], inplace=True)
+                                if col in recalc.columns and col in combined_df.columns:
+                                    if 'Asset_ID' not in recalc.columns or 'Asset_ID' not in combined_df.columns:
+                                        logger.warning("Landslide point backfill skipped: Asset_ID missing")
+                                        break
+                                    recalc['asset_id_key'] = _normalize_asset_id_key(recalc['Asset_ID'])
+                                    combined_df['asset_id_key'] = _normalize_asset_id_key(combined_df['Asset_ID'])
+                                    val_map = recalc.set_index('asset_id_key')[col].to_dict()
+                                    mapped = combined_df.loc[point_mask, 'asset_id_key'].map(val_map)
+                                    combined_df.loc[point_mask, col] = mapped.where(
+                                        mapped.notna(),
+                                        combined_df.loc[point_mask, col],
+                                    )
+                except Exception as e:
+                    logger.warning(f"Landslide point backfill failed: {e}")
+                finally:
+                    if 'Facility_key' in combined_df.columns:
+                        combined_df.drop(columns=['Facility_key'], inplace=True)
+                    if 'asset_id_key' in combined_df.columns:
+                        combined_df.drop(columns=['asset_id_key'], inplace=True)
 
         data_frames = [
             (slr_values, "sea level rise"),
@@ -1481,97 +1555,103 @@ def generate_climate_hazards_analysis(facility_csv_path=None, selected_fields=No
         combined_df = process_nan_values(combined_df)
 
         # Final override: ensure point assets keep their own storm surge/landslide values.
-        try:
-            polygon_keys = _get_polygon_facility_keys(
-                facility_geofile_path,
-                facility_geojson_records,
-            )
-            df_points = df_fac.copy()
-            df_points['Facility'] = df_points['Facility'].astype(str)
-            df_points['Facility_key'] = df_points['Facility'].str.strip().str.lower()
-            if polygon_keys:
-                df_points = df_points[~df_points['Facility_key'].isin(polygon_keys)]
-
-            df_points['Lat'] = pd.to_numeric(df_points['Lat'], errors='coerce')
-            df_points['Long'] = pd.to_numeric(df_points['Long'], errors='coerce')
-            df_points = df_points.dropna(subset=['Lat', 'Long'])
-
-            if not df_points.empty:
-                combined_df['Lat'] = pd.to_numeric(combined_df['Lat'], errors='coerce')
-                combined_df['Long'] = pd.to_numeric(combined_df['Long'], errors='coerce')
-                combined_df['merge_key'] = (
-                    combined_df['Facility'].astype(str).str.strip().str.lower() + '|' +
-                    combined_df['Lat'].round(6).astype(str) + '|' +
-                    combined_df['Long'].round(6).astype(str)
-                )
-                df_points['merge_key'] = (
-                    df_points['Facility'].astype(str).str.strip().str.lower() + '|' +
-                    df_points['Lat'].round(6).astype(str) + '|' +
-                    df_points['Long'].round(6).astype(str)
-                )
-
-                ss_cols = [
-                    'Storm Surge Flood Depth (meters)',
-                    'Storm Surge Flood Depth (meters) - Worst Case'
-                ]
-                if any(col in combined_df.columns for col in ss_cols):
-                    ss_dir = Path(settings.BASE_DIR) / 'climate_hazards_analysis' / 'static' / 'input_files'
-                    fp_ss = ss_dir / 'PH_StormSurge_Advisory4_UTM_ProjectNOAH_Unmasked.tif'
-                    fp_ss_future = ss_dir / 'PH_StormSurge_Advisory4_Future_UTM_ProjectNOAH-GIRI_Unmasked.tif'
-                    ss_recalc = generate_storm_surge_analysis(
-                        df_points[['Facility', 'Lat', 'Long']],
-                        fp_ss,
-                        fp_ss_future,
-                        facility_geofile_path=None,
-                        facility_geojson_records=None,
+        if asset_id_strict:
+            logger.info("Skipping point hazard override (Asset_ID strict mode)")
+        else:
+            try:
+                df_points = df_fac.copy()
+                df_points['Facility'] = df_points['Facility'].astype(str)
+                if 'asset_type' in df_points.columns:
+                    df_points = df_points[df_points['asset_type'].astype(str).str.strip().str.lower() != 'polygon']
+                else:
+                    polygon_keys = _get_polygon_facility_keys(
+                        facility_geofile_path,
+                        facility_geojson_records,
                     )
-                    if ss_recalc is not None:
-                        ss_recalc['Lat'] = pd.to_numeric(ss_recalc['Lat'], errors='coerce')
-                        ss_recalc['Long'] = pd.to_numeric(ss_recalc['Long'], errors='coerce')
-                        ss_recalc['merge_key'] = (
-                            ss_recalc['Facility'].astype(str).str.strip().str.lower() + '|' +
-                            ss_recalc['Lat'].round(6).astype(str) + '|' +
-                            ss_recalc['Long'].round(6).astype(str)
-                        )
-                        for col in ss_cols:
-                            if col in ss_recalc.columns and col in combined_df.columns:
-                                val_map = ss_recalc.set_index('merge_key')[col].to_dict()
-                                combined_df[col] = combined_df['merge_key'].map(val_map).fillna(combined_df[col])
+                    df_points['Facility_key'] = df_points['Facility'].str.strip().str.lower()
+                    if polygon_keys:
+                        df_points = df_points[~df_points['Facility_key'].isin(polygon_keys)]
 
-                landslide_cols = [
-                    'Rainfall-Induced Landslide (factor of safety)',
-                    'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
-                    'Rainfall-Induced Landslide (factor of safety) - Worst Case'
-                ]
-                if any(col in combined_df.columns for col in landslide_cols):
-                    fp_ls = os.path.join(input_dir, 'PH_LandslideHazards_UTM_ProjectNOAH_Unmasked.tif')
-                    fp_ls_mod = os.path.join(input_dir, 'PH_LandslideHazards_RCP26_UTM_ProjectNOAH-GIRI_Unmasked.tif')
-                    fp_ls_worst = os.path.join(input_dir, 'PH_LandslideHazards_RCP85_UTM_ProjectNOAH-GIRI_Unmasked.tif')
-                    ls_recalc = generate_rainfall_induced_landslide_analysis(
-                        df_points[['Facility', 'Lat', 'Long']],
-                        fp_ls,
-                        fp_ls_mod,
-                        fp_ls_worst,
-                        facility_geofile_path=None,
-                        facility_geojson_records=None,
+                df_points['Lat'] = pd.to_numeric(df_points['Lat'], errors='coerce')
+                df_points['Long'] = pd.to_numeric(df_points['Long'], errors='coerce')
+                df_points = df_points.dropna(subset=['Lat', 'Long'])
+
+                if not df_points.empty:
+                    combined_df['Lat'] = pd.to_numeric(combined_df['Lat'], errors='coerce')
+                    combined_df['Long'] = pd.to_numeric(combined_df['Long'], errors='coerce')
+                    combined_df['merge_key'] = (
+                        combined_df['Facility'].astype(str).str.strip().str.lower() + '|' +
+                        combined_df['Lat'].round(6).astype(str) + '|' +
+                        combined_df['Long'].round(6).astype(str)
                     )
-                    if ls_recalc is not None:
-                        ls_recalc['Lat'] = pd.to_numeric(ls_recalc['Lat'], errors='coerce')
-                        ls_recalc['Long'] = pd.to_numeric(ls_recalc['Long'], errors='coerce')
-                        ls_recalc['merge_key'] = (
-                            ls_recalc['Facility'].astype(str).str.strip().str.lower() + '|' +
-                            ls_recalc['Lat'].round(6).astype(str) + '|' +
-                            ls_recalc['Long'].round(6).astype(str)
+                    df_points['merge_key'] = (
+                        df_points['Facility'].astype(str).str.strip().str.lower() + '|' +
+                        df_points['Lat'].round(6).astype(str) + '|' +
+                        df_points['Long'].round(6).astype(str)
+                    )
+
+                    ss_cols = [
+                        'Storm Surge Flood Depth (meters)',
+                        'Storm Surge Flood Depth (meters) - Worst Case'
+                    ]
+                    if any(col in combined_df.columns for col in ss_cols):
+                        ss_dir = Path(settings.BASE_DIR) / 'climate_hazards_analysis' / 'static' / 'input_files'
+                        fp_ss = ss_dir / 'PH_StormSurge_Advisory4_UTM_ProjectNOAH_Unmasked.tif'
+                        fp_ss_future = ss_dir / 'PH_StormSurge_Advisory4_Future_UTM_ProjectNOAH-GIRI_Unmasked.tif'
+                        ss_recalc = generate_storm_surge_analysis(
+                            df_points[['Facility', 'Lat', 'Long', 'Asset_ID']] if 'Asset_ID' in df_points.columns else df_points[['Facility', 'Lat', 'Long']],
+                            fp_ss,
+                            fp_ss_future,
+                            facility_geofile_path=None,
+                            facility_geojson_records=None,
                         )
-                        for col in landslide_cols:
-                            if col in ls_recalc.columns and col in combined_df.columns:
-                                val_map = ls_recalc.set_index('merge_key')[col].to_dict()
-                                combined_df[col] = combined_df['merge_key'].map(val_map).fillna(combined_df[col])
-        except Exception as e:
-            logger.warning(f"Point hazard override failed: {e}")
-        finally:
-            if 'merge_key' in combined_df.columns:
-                combined_df.drop(columns=['merge_key'], inplace=True)
+                        if ss_recalc is not None:
+                            ss_recalc['Lat'] = pd.to_numeric(ss_recalc['Lat'], errors='coerce')
+                            ss_recalc['Long'] = pd.to_numeric(ss_recalc['Long'], errors='coerce')
+                            for col in ss_cols:
+                                if col in ss_recalc.columns and col in combined_df.columns:
+                                    if 'Asset_ID' not in ss_recalc.columns or 'Asset_ID' not in combined_df.columns:
+                                        logger.warning("Storm surge override skipped: Asset_ID missing")
+                                        break
+                                    ss_recalc['asset_id_key'] = _normalize_asset_id_key(ss_recalc['Asset_ID'])
+                                    combined_df['asset_id_key'] = _normalize_asset_id_key(combined_df['Asset_ID'])
+                                    val_map = ss_recalc.set_index('asset_id_key')[col].to_dict()
+                                    combined_df[col] = combined_df['asset_id_key'].map(val_map).fillna(combined_df[col])
+
+                    landslide_cols = [
+                        'Rainfall-Induced Landslide (factor of safety)',
+                        'Rainfall-Induced Landslide (factor of safety) - Moderate Case',
+                        'Rainfall-Induced Landslide (factor of safety) - Worst Case'
+                    ]
+                    if any(col in combined_df.columns for col in landslide_cols):
+                        fp_ls = os.path.join(input_dir, 'PH_LandslideHazards_UTM_ProjectNOAH_Unmasked.tif')
+                        fp_ls_mod = os.path.join(input_dir, 'PH_LandslideHazards_RCP26_UTM_ProjectNOAH-GIRI_Unmasked.tif')
+                        fp_ls_worst = os.path.join(input_dir, 'PH_LandslideHazards_RCP85_UTM_ProjectNOAH-GIRI_Unmasked.tif')
+                        ls_recalc = generate_rainfall_induced_landslide_analysis(
+                            df_points[['Facility', 'Lat', 'Long', 'Asset_ID']] if 'Asset_ID' in df_points.columns else df_points[['Facility', 'Lat', 'Long']],
+                            fp_ls,
+                            fp_ls_mod,
+                            fp_ls_worst,
+                            facility_geofile_path=None,
+                            facility_geojson_records=None,
+                        )
+                        if ls_recalc is not None:
+                            ls_recalc['Lat'] = pd.to_numeric(ls_recalc['Lat'], errors='coerce')
+                            ls_recalc['Long'] = pd.to_numeric(ls_recalc['Long'], errors='coerce')
+                            for col in landslide_cols:
+                                if col in ls_recalc.columns and col in combined_df.columns:
+                                    if 'Asset_ID' not in ls_recalc.columns or 'Asset_ID' not in combined_df.columns:
+                                        logger.warning("Landslide override skipped: Asset_ID missing")
+                                        break
+                                    ls_recalc['asset_id_key'] = _normalize_asset_id_key(ls_recalc['Asset_ID'])
+                                    combined_df['asset_id_key'] = _normalize_asset_id_key(combined_df['Asset_ID'])
+                                    val_map = ls_recalc.set_index('asset_id_key')[col].to_dict()
+                                    combined_df[col] = combined_df['asset_id_key'].map(val_map).fillna(combined_df[col])
+            except Exception as e:
+                logger.warning(f"Point hazard override failed: {e}")
+            finally:
+                if 'merge_key' in combined_df.columns:
+                    combined_df.drop(columns=['merge_key'], inplace=True)
 
         if 'DaysOver35C_base_2125' in combined_df.columns:
             combined_df.drop(columns=['DaysOver35C_base_2125'], inplace=True)

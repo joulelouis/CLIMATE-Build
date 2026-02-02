@@ -192,7 +192,7 @@ def standardize_facility_dataframe(df: pd.DataFrame,
     # Ensure archetype column exists for downstream consumers (upload tests rely on this)
     archetype_col = 'Archetype'
     if archetype_col not in df.columns:
-        archetype_variations = ['archetype', 'type', 'asset_type', 'asset type', 'archetype_name']
+        archetype_variations = ['archetype', 'type', 'archetype_name']
         archetype_found = False
         for col in df.columns:
             if col.strip().lower() in archetype_variations:
