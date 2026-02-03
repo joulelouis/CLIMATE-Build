@@ -19,6 +19,7 @@ from django.views.generic import TemplateView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.urls import reverse_lazy
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from .utils import standardize_facility_dataframe, load_cached_hazard_data, combine_facility_with_hazard_data, validate_shapefile
 from .error_utils import handle_sensitivity_param_error
 from climate_hazards_analysis.models import Asset
@@ -2167,9 +2168,8 @@ def show_results(request):
             'success_message': f"Successfully analyzed {len(df)} facilities for {len(selected_hazards)} hazard types."
         }
 
-        context = _override_results_with_combined_output(context, selected_hazards)
+        context = _override_results_with_combined_output(context, selected_hazards, request)
         logger.info("Rendering results template...")
-        context = _override_results_with_combined_output(context, selected_hazards)
         return render(request, 'climate_hazards_analysis_v2/results.html', context)
 
     except Exception as e:
@@ -2249,7 +2249,7 @@ def _handle_unified_mixed_assets_results(request, asset_inventory, selected_haza
 
         logger.info(f"Successfully processed mixed assets via unified CSV: {len(hierarchical_data)} total rows")
 
-        context = _override_results_with_combined_output(context, selected_hazards)
+        context = _override_results_with_combined_output(context, selected_hazards, request)
         return render(request, 'climate_hazards_analysis_v2/results.html', context)
 
     except Exception as e:
@@ -3349,7 +3349,7 @@ def _strip_non_display_columns(data, columns):
     return data, columns
 
 
-def _override_results_with_combined_output(context, selected_hazards):
+def _override_results_with_combined_output(context, selected_hazards, request=None):
     combined_path = os.path.join(
         settings.BASE_DIR,
         'climate_hazards_analysis',
@@ -3376,6 +3376,8 @@ def _override_results_with_combined_output(context, selected_hazards):
 
     columns = list(combined_data[0].keys())
     combined_data, columns = _strip_non_display_columns(combined_data, columns)
+    if request is not None:
+        combined_data = _apply_overrides_to_rows(combined_data, request)
     logger.info(f"Final hazard exposure columns (combined_output override): {columns}")
     groups = _build_column_groups(columns, selected_hazards)
 
@@ -3383,6 +3385,48 @@ def _override_results_with_combined_output(context, selected_hazards):
     context['columns'] = columns
     context['groups'] = groups
     return context
+
+
+def _apply_overrides_to_rows(rows, request):
+    if not rows:
+        return rows
+
+    session_key = request.session.session_key
+    session_asset_ids = request.session.get('climate_hazards_v2_uploaded_asset_ids', [])
+    asset_ids = [str(aid) for aid in session_asset_ids if str(aid).strip()]
+
+    assets_qs = Asset.objects.none()
+    if asset_ids:
+        assets_qs = Asset.objects.filter(asset_id__in=asset_ids)
+    if session_key:
+        session_qs = Asset.objects.filter(session_key=session_key)
+        assets_qs = session_qs if not asset_ids else Asset.objects.filter(
+            Q(asset_id__in=asset_ids) | Q(session_key=session_key)
+        )
+
+    overrides = OverrideValue.objects.filter(asset__in=assets_qs)
+    if not overrides.exists():
+        return rows
+
+    overrides_by_asset_id = {}
+    overrides_by_name = {}
+    for ov in overrides:
+        asset_id = str(ov.asset_id)
+        overrides_by_asset_id.setdefault(asset_id, {})[ov.column_name] = ov.override_value
+        overrides_by_name.setdefault(ov.asset.name, {})[ov.column_name] = ov.override_value
+
+    for row in rows:
+        asset_id = row.get('Asset_ID') or row.get('asset_id')
+        if asset_id is not None:
+            asset_id = str(asset_id)
+        name = row.get('Facility')
+        override_cols = overrides_by_asset_id.get(asset_id) if asset_id in overrides_by_asset_id else overrides_by_name.get(name, {})
+        if not override_cols:
+            continue
+        for col, val in override_cols.items():
+            row[col] = convert_table_value(val, col)
+
+    return rows
 
 
 def _build_column_groups(columns, selected_hazards):
@@ -4451,6 +4495,9 @@ def sensitivity_results(request):
             for col_to_remove in columns_to_remove:
                 if col_to_remove in row:
                     del row[col_to_remove]
+
+        # Apply overrides before sensitivity thresholds
+        sensitivity_data = _apply_overrides_to_rows(sensitivity_data, request)
 
         desired_order = [
             'Facility',
