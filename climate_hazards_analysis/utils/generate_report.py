@@ -16,7 +16,13 @@ from reportlab.lib import colors
 from PIL import Image as PILImage
 
 
-def generate_climate_hazards_report_pdf(buffer, selected_fields, high_risk_assets=None, risk_counts=None):
+def generate_climate_hazards_report_pdf(
+    buffer,
+    selected_fields,
+    high_risk_assets=None,
+    risk_counts=None,
+    include_asset_maps=True,
+):
     """
     Generate a PDF report of climate hazard exposure analysis with each hazard on a separate page.
     
@@ -334,31 +340,32 @@ def generate_climate_hazards_report_pdf(buffer, selected_fields, high_risk_asset
     mindanao_map_path = os.path.join(settings.BASE_DIR, "climate_hazards_analysis", "static", "images", "mindanao.png")
     
     # Add hazard pages with dynamic high-risk assets
-    for hazard_name in selected_fields:
-        # Get high-risk assets for this hazard (or use empty list if not available)
-        assets_list = []
-        if high_risk_assets and hazard_name in high_risk_assets:
-            assets_list = [asset['name'] for asset in high_risk_assets[hazard_name]]
-        
-        # Show "No high-risk assets identified" if the list is empty
-        if not assets_list:
-            assets_list = ["No high-risk assets identified for this hazard"]
-        
-        # Get appropriate map paths
-        map_paths = []
-        if hazard_name == 'Heat':
-            map_paths = [luzon_map_path, mindanao_map_path]
-        elif hazard_name in ['Water Stress', 'Storm Surge', 'Rainfall Induced Landslide']:
-            map_paths = [luzon_map_path]
-        elif hazard_name in ['Sea Level Rise', 'Flood']:
-            map_paths = [luzon_map_path, mindanao_map_path]
-        elif hazard_name == 'Tropical Cyclones':
-            map_paths = [luzon_map_path]
-        else:
-            map_paths = [luzon_map_path]  # Default to Luzon map
-        
-        # Add the hazard page with the dynamic assets list
-        add_hazard_page(hazard_name, map_paths, assets_list)
+    if include_asset_maps:
+        for hazard_name in selected_fields:
+            # Get high-risk assets for this hazard (or use empty list if not available)
+            assets_list = []
+            if high_risk_assets and hazard_name in high_risk_assets:
+                assets_list = [asset['name'] for asset in high_risk_assets[hazard_name]]
+            
+            # Show "No high-risk assets identified" if the list is empty
+            if not assets_list:
+                assets_list = ["No high-risk assets identified for this hazard"]
+            
+            # Get appropriate map paths
+            map_paths = []
+            if hazard_name == 'Heat':
+                map_paths = [luzon_map_path, mindanao_map_path]
+            elif hazard_name in ['Water Stress', 'Storm Surge', 'Rainfall Induced Landslide']:
+                map_paths = [luzon_map_path]
+            elif hazard_name in ['Sea Level Rise', 'Flood']:
+                map_paths = [luzon_map_path, mindanao_map_path]
+            elif hazard_name == 'Tropical Cyclones':
+                map_paths = [luzon_map_path]
+            else:
+                map_paths = [luzon_map_path]  # Default to Luzon map
+            
+            # Add the hazard page with the dynamic assets list
+            add_hazard_page(hazard_name, map_paths, assets_list)
     
     # Build the document
     doc.build(elements)

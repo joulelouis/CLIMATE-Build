@@ -3984,11 +3984,13 @@ def generate_report(request):
     buffer = BytesIO()
     
     # Generate the PDF report with dynamic high-risk assets
+    include_asset_maps = request.GET.get("sensitivity") != "1"
     generate_climate_hazards_report_pdf(
         buffer,
         selected_fields,
         high_risk_assets=high_risk_assets,
         risk_counts=risk_counts,
+        include_asset_maps=include_asset_maps,
     )
     
     # Get the PDF content
