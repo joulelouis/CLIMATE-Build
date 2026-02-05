@@ -22,6 +22,7 @@ def generate_climate_hazards_report_pdf(
     high_risk_assets=None,
     risk_counts=None,
     include_asset_maps=True,
+    total_assets=None,
 ):
     """
     Generate a PDF report of climate hazard exposure analysis with each hazard on a separate page.
@@ -136,11 +137,11 @@ def generate_climate_hazards_report_pdf(
     wrap_style = styles["Normal"]
 
     overview_data = [
-        [Paragraph("Climate Hazard", wrap_style),
-         Paragraph("Current Portfolio Exposure Rating", wrap_style),
-         Paragraph("Future (Moderate Case) Portfolio Exposure Rating", wrap_style),
-         Paragraph("Future (Worst Case) Portfolio Exposure Rating", wrap_style),
-         Paragraph("Explanation and Recommendation", wrap_style)]
+        [Paragraph("<strong>Climate Hazard</strong>", wrap_style),
+         Paragraph("<strong>Current Portfolio Exposure Rating</strong>", wrap_style),
+         Paragraph("<strong>Future (Moderate Case) Portfolio Exposure Rating</strong>", wrap_style),
+         Paragraph("<strong>Future (Worst Case) Portfolio Exposure Rating</strong>", wrap_style),
+         Paragraph("<strong>Explanation and Recommendation</strong>", wrap_style)]
     ]
 
     def format_risk(count):
@@ -148,53 +149,87 @@ def generate_climate_hazards_report_pdf(
             return Paragraph(f"<strong><font color='red'>High</font></strong> ({count} assets at risk)", wrap_style)
         return Paragraph("-", wrap_style)
 
+    total_assets_count = total_assets if isinstance(total_assets, int) and total_assets > 0 else None
+
     for hazard in selected_fields:
         if not risk_counts or hazard not in risk_counts:
             continue
         counts = risk_counts.get(hazard, {})
+        hazard_label = 'River/Urban Flood' if hazard == 'Flood' else hazard
+
+        explanation_text = f"Lorem Ipsum with a long explanation for {hazard_label}."
+        if hazard in ['Flood', 'Tropical Cyclones', 'Storm Surge']:
+            current_high = counts.get('current', 0) or 0
+            future_worst_high = counts.get('future_worst', 0) or 0
+            if total_assets_count:
+                delta_pct = ((future_worst_high - current_high) / total_assets_count) * 100
+            else:
+                delta_pct = 0
+            delta_str = f"{delta_pct:.1f}%"
+
+            if hazard == 'Flood':
+                explanation_text = (
+                    f"<strong>Key Insight:</strong> Total assets highly exposed to river or urban flood are expected to rise by "
+                    f"<strong>{delta_str}</strong> in the future worst-case climate scenario.<br/><br/>"
+                    f"<strong>Implications:</strong> Transport networks and logistics may be disrupted, resulting in delivery delays "
+                    f"and reduced operational efficiency. Power may also be cut off to prevent electrical hazards. Structures exposed "
+                    f"to flooding may sustain damage and detoriate. These impacts are expected to increase insurance premiums and shorten asset lifespan.<br/><br/>"
+                    f"<strong>Recommendations:</strong> Develop comprehensive flood risk management plans that include the construction "
+                    f"of flood barriers and retention basins. Additionally, invest in real-time monitoring systems to predict flooding "
+                    f"events and establish evacuation plans for employees and assets located in flood-prone areas."
+                )
+            else:
+                if hazard == 'Tropical Cyclones':
+                    explanation_text = (
+                        f"<strong>Key Insight:</strong> Total assets highly exposed to tropical cyclone are expected to rise by "
+                        f"<strong>{delta_str}</strong> in the future worst-case climate scenario.<br/><br/>"
+                        f"<strong>Implications:</strong> Damages to structures are expected, and operational disruptions are possible due to power outages, "
+                        f"accessibility constraints, and workforce unavailability, potentially leading to reduced revenues. Higher insurance costs and increased "
+                        f"operational expenditures associated with preparedness and recovery are also anticipated.<br/><br/>"
+                        f"<strong>Recommendations:</strong> Implement robust infrastructure enhancements to withstand high winds associated with typhoons. "
+                        f"This includes reinforcing building structures and establishing emergency response protocols to ensure business continuity during and after such events."
+                    )
+                else:
+                    explanation_text = (
+                        f"<strong>Key Insight:</strong> Total assets highly exposed to storm surge are expected to rise by "
+                        f"<strong>{delta_str}</strong> in the future worst-case climate scenario.<br/><br/>"
+                        f"<strong>Implications:</strong> Storm surge can inundate low-lying coastal areas, causing structural damage and disrupting transport networks. "
+                        f"In addition, saltwater intrusion and corrosion pose significant risk to critical infrastructure, resulting in both immediate damage and long-term detoriation.<br/><br/>"
+                        f"<strong>Recommendation:</strong> Assess and upgrade coastal facilities to mitigate the impacts of storm surges, including elevating structures and installing seawalls. "
+                        f"Regularly conduct risk assessment and scenario planning to prepare for potential storm surge events, ensuring that emergency response teams are trained and equipped."
+                    )
         
         overview_data.append([
-            Paragraph(hazard, wrap_style),
+            Paragraph(hazard_label, wrap_style),
             format_risk(counts.get('current', 0)),
             format_risk(counts.get('future_moderate', 0)),
             format_risk(counts.get('future_worst', 0)),
-            Paragraph(f"Lorem Ipsum with a long explanation for {hazard}.", wrap_style)
+            Paragraph(explanation_text, wrap_style)
         ])
 
     # Create overview table with proper styling
     available_width = doc.width
     col_widths = [
-        available_width * 0.2,
-        available_width * 0.2,
-        available_width * 0.2,
-        available_width * 0.2,
-        available_width * 0.2,
+        available_width * 0.15,
+        available_width * 0.15,
+        available_width * 0.15,
+        available_width * 0.15,
+        available_width * 0.40,
     ]
-    overview_table = Table(overview_data, colWidths=col_widths)
+    overview_table = Table(overview_data, colWidths=col_widths, repeatRows=1, splitByRow=1)
     overview_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
         ("GRID", (0, 0), (-1, -1), 1, colors.black),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        # You can also add cell padding if desired:
-        ("LEFTPADDING", (0, 0), (-1, -1), 10),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-    ]))
-
-    # Wrap the table in a container table to provide overall margins
-    container = Table([[overview_table]], colWidths=[doc.width])
-    container.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 8),   # adjust margin (in points)
-        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
 
-    # Append the container instead of the table directly
-    elements.append(container)
+    elements.append(overview_table)
     elements.append(Spacer(1, 24))
     
     # Helper function to safely create resized images

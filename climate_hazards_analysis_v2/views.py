@@ -3985,12 +3985,14 @@ def generate_report(request):
     
     # Generate the PDF report with dynamic high-risk assets
     include_asset_maps = request.GET.get("sensitivity") != "1"
+    total_assets = len(analysis_data) if analysis_data else None
     generate_climate_hazards_report_pdf(
         buffer,
         selected_fields,
         high_risk_assets=high_risk_assets,
         risk_counts=risk_counts,
         include_asset_maps=include_asset_maps,
+        total_assets=total_assets,
     )
     
     # Get the PDF content
@@ -4105,6 +4107,22 @@ def compute_sensitivity_high_risk_counts(sensitivity_results, selected_hazards):
     data = sensitivity_results.get('data', [])
     counts = {h: {'current': 0, 'future_moderate': 0, 'future_worst': 0} for h in selected_hazards}
 
+    def _is_high_flood(value):
+        if isinstance(value, (int, float)):
+            return value > 1.5
+        if isinstance(value, str):
+            v = value.strip()
+            return v in ['>1.5', 'Greater than 1.5', 'High Risk']
+        return False
+
+    def _is_high_storm_surge(value):
+        if isinstance(value, (int, float)):
+            return value > 1.5
+        if isinstance(value, str):
+            v = value.strip()
+            return v in ['>1.5', 'Greater than 1.5', 'High Risk']
+        return False
+
     hazard_thresholds = {
         'Water Stress': {
             'current': [('Water Stress Exposure (%)', lambda v: isinstance(v, (int, float)) and v > 30)],
@@ -4135,9 +4153,9 @@ def compute_sensitivity_high_risk_counts(sensitivity_results, selected_hazards):
             ],
         },
         'Flood': {
-            'current': [('Flood Depth (meters)', lambda v: v in ['Greater than 1.5', 'High Risk'])],
-            'future_moderate': [],
-            'future_worst': [],
+            'current': [('Flood Depth (meters)', _is_high_flood)],
+            'future_moderate': [('Flood Depth (meters) - Moderate Case', _is_high_flood)],
+            'future_worst': [('Flood Depth (meters) - Worst Case', _is_high_flood)],
         },
         'Sea Level Rise': {
             'current': [],
@@ -4146,13 +4164,21 @@ def compute_sensitivity_high_risk_counts(sensitivity_results, selected_hazards):
         },
         'Tropical Cyclones': {
             'current': [('Extreme Windspeed 100 year Return Period (km/h)', lambda v: isinstance(v, (int, float)) and v >= 178)],
-            'future_moderate': [],
-            'future_worst': [],
+            'future_moderate': [
+                ('2030 - Extreme Windspeed 100 year Return Period (km/h)', lambda v: isinstance(v, (int, float)) and v >= 178),
+                ('2040 - Extreme Windspeed 100 year Return Period (km/h)', lambda v: isinstance(v, (int, float)) and v >= 178),
+                ('2050 - Extreme Windspeed 100 year Return Period (km/h)', lambda v: isinstance(v, (int, float)) and v >= 178),
+            ],
+            'future_worst': [
+                ('2030 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5', lambda v: isinstance(v, (int, float)) and v >= 178),
+                ('2040 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5', lambda v: isinstance(v, (int, float)) and v >= 178),
+                ('2050 - Extreme Windspeed 100 year Return Period (km/h) - RCP8.5', lambda v: isinstance(v, (int, float)) and v >= 178),
+            ],
         },
         'Storm Surge': {
-            'current': [('Storm Surge Flood Depth (meters)', lambda v: isinstance(v, (int, float)) and v >= 1.5)],
-            'future_moderate': [],
-            'future_worst': [('Storm Surge Flood Depth (meters) - Worst Case', lambda v: isinstance(v, (int, float)) and v >= 1.5)],
+            'current': [('Storm Surge Flood Depth (meters)', _is_high_storm_surge)],
+            'future_moderate': [('Storm Surge Flood Depth (meters) - Moderate Case', _is_high_storm_surge)],
+            'future_worst': [('Storm Surge Flood Depth (meters) - Worst Case', _is_high_storm_surge)],
         },
         'Rainfall Induced Landslide': {
             'current': [('Rainfall-Induced Landslide (factor of safety)', lambda v: isinstance(v, (int, float)) and v < 1)],
