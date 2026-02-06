@@ -884,13 +884,13 @@ Hazard Exposure Map
                         </label>
                     </div>
                     <div class="form-check form-switch mb-2">
-                        <input class="form-check-input" type="checkbox" id="show-heatmap-mode" checked>
+                        <input class="form-check-input" type="checkbox" id="show-heatmap-mode">
                         <label class="form-check-label" for="show-heatmap-mode">
                             <i class="fas fa-fire me-1"></i>Granular Heatmaps
                         </label>
                     </div>
                     <div class="form-check form-switch mb-2">
-                        <input class="form-check-input" type="checkbox" id="showseverity-based-sizing" checked>
+                        <input class="form-check-input" type="checkbox" id="showseverity-based-sizing">
                         <label class="form-check-label" for="showseverity-based-sizing">
                             <i class="fas fa-expand me-1"></i>Severity-Based Sizing
                         </label>
@@ -979,9 +979,18 @@ function initializeMap() {
     map = new maplibregl.Map({
         container: 'hazard-map',
         style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
-        center: [0, 20],
-        zoom: 2,
+        center: [121.0, 12.0],
+        zoom: 5,
         attributionControl: false
+    });
+
+    // Center on the Philippines / PAR bounds
+    map.on('load', () => {
+        const parBounds = [
+            [114.0, 4.0],   // southwest (lng, lat)
+            [135.0, 24.5],  // northeast (lng, lat)
+        ];
+        map.fitBounds(parBounds, { padding: 2 });
     });
 
     // Handle missing images to prevent errors
@@ -1076,77 +1085,40 @@ function setupEnhancedHazardControls() {
     document.querySelectorAll('.hazard-group').forEach(checkbox => {
         checkbox.addEventListener('change', function() {
             const hazardGroup = this.dataset.hazard;
-            const isChecked = this.checked;
-
-            // Handle child checkboxes
             const childCheckboxes = document.querySelectorAll(`.hazard-column.${hazardGroup}`);
-            childCheckboxes.forEach(child => {
-                child.checked = isChecked;
-                if (isChecked) {
-                    activeHazardColumns.add(child.dataset.column);
-                } else {
-                    activeHazardColumns.delete(child.dataset.column);
-                }
-            });
+            const firstChild = childCheckboxes.length > 0 ? childCheckboxes[0] : null;
 
-            updateMapLayers();
+            if (this.checked && firstChild) {
+                enforceSingleHazardSelection(firstChild);
+                return;
+            }
+
+            // Keep one selection active at all times
+            const currentChecked = document.querySelector('.hazard-column:checked');
+            if (!currentChecked) {
+                const visibleColumns = getVisibleHazardColumns();
+                if (visibleColumns.length > 0) {
+                    enforceSingleHazardSelection(visibleColumns[0]);
+                }
+            } else {
+                updateAllParentCheckboxStates();
+                updateMapLayers();
+            }
         });
     });
 
     // Setup individual hazard column handlers
     document.querySelectorAll('.hazard-column').forEach(checkbox => {
         checkbox.addEventListener('change', function() {
-            const column = this.dataset.column;
-
-            if (this.checked) {
-                activeHazardColumns.add(column);
-
-                // Show granular heatmaps for this hazard if heatmap mode is enabled
-                if (document.getElementById('show-heatmap-mode').checked &&
-                    window.granularAnalysisData && window.granularAnalysisData.polygon_assets) {
-                    Object.keys(window.granularAnalysisData.polygon_assets).forEach(assetId => {
-                        const assetData = window.granularAnalysisData.polygon_assets[assetId];
-                        Object.keys(assetData.heatmaps).forEach(hazardType => {
-                            if (column.includes(hazardType.toLowerCase())) {
-                                const heatmapData = assetData.heatmaps[hazardType];
-                                createRealHeatmap(hazardType, heatmapData);
-                            }
-                        });
-                    });
-                }
-            } else {
-                activeHazardColumns.delete(column);
-
-                // Hide granular heatmaps for this hazard
-                if (window.granularAnalysisData && window.granularAnalysisData.polygon_assets) {
-                    Object.keys(window.granularAnalysisData.polygon_assets).forEach(assetId => {
-                        const assetData = window.granularAnalysisData.polygon_assets[assetId];
-                        Object.keys(assetData.heatmaps).forEach(hazardType => {
-                            if (column.includes(hazardType.toLowerCase())) {
-                                const layerId = `granular-heatmap-${hazardType}`;
-                                if (map.getLayer(layerId)) {
-                                    map.removeLayer(layerId);
-                                }
-                                if (map.getSource(layerId)) {
-                                    map.removeSource(layerId);
-                                }
-                                const outlineLayerId = `${layerId}-outline`;
-                                if (map.getLayer(outlineLayerId)) {
-                                    map.removeLayer(outlineLayerId);
-                                }
-                                if (map.getSource(outlineLayerId)) {
-                                    map.removeSource(outlineLayerId);
-                                }
-                            }
-                        });
-                    });
+            if (!this.checked) {
+                // Prevent clearing the last selection
+                const currentChecked = document.querySelector('.hazard-column:checked');
+                if (!currentChecked) {
+                    this.checked = true;
                 }
             }
 
-            // Update parent checkbox state
-            updateParentCheckboxState(this);
-
-            updateMapLayers();
+            enforceSingleHazardSelection(this);
         });
     });
 
@@ -1171,10 +1143,8 @@ function setupEnhancedHazardControls() {
         });
     }
 
-    // Initialize active columns with checked boxes
-    document.querySelectorAll('.hazard-column:checked').forEach(checkbox => {
-        activeHazardColumns.add(checkbox.dataset.column);
-    });
+    // Initialize active columns with a single checked box
+    initializeSingleHazardSelection();
 }
 
 function updateParentCheckboxState(changedCheckbox) {
@@ -1195,7 +1165,68 @@ function updateParentCheckboxState(changedCheckbox) {
     });
 }
 
+function updateAllParentCheckboxStates() {
+    document.querySelectorAll('.hazard-group').forEach(parentCheckbox => {
+        const hazardGroup = parentCheckbox.dataset.hazard;
+        if (!hazardGroup) {
+            return;
+        }
+
+        const childCheckboxes = document.querySelectorAll(`.hazard-column.${hazardGroup}`);
+        const checkedChildren = document.querySelectorAll(`.hazard-column.${hazardGroup}:checked`);
+
+        if (childCheckboxes.length === 0) {
+            parentCheckbox.checked = false;
+            parentCheckbox.indeterminate = false;
+            return;
+        }
+
+        parentCheckbox.checked = checkedChildren.length > 0;
+        parentCheckbox.indeterminate = checkedChildren.length > 0 && checkedChildren.length < childCheckboxes.length;
+    });
+}
+
+function getVisibleHazardColumns() {
+    return Array.from(document.querySelectorAll('.hazard-column')).filter(checkbox => checkbox.offsetParent !== null);
+}
+
+function initializeSingleHazardSelection() {
+    const visibleColumns = getVisibleHazardColumns();
+    if (visibleColumns.length === 0) {
+        return;
+    }
+
+    const firstChecked = visibleColumns.find(checkbox => checkbox.checked) || visibleColumns[0];
+    visibleColumns.forEach(checkbox => {
+        checkbox.checked = checkbox === firstChecked;
+    });
+
+    activeHazardColumns.clear();
+    activeHazardColumns.add(firstChecked.dataset.column);
+    updateAllParentCheckboxStates();
+    updateMapLayers();
+}
+
+function enforceSingleHazardSelection(selectedCheckbox) {
+    const visibleColumns = getVisibleHazardColumns();
+    if (visibleColumns.length === 0 || !selectedCheckbox) {
+        return;
+    }
+
+    visibleColumns.forEach(checkbox => {
+        checkbox.checked = checkbox === selectedCheckbox;
+    });
+
+    activeHazardColumns.clear();
+    activeHazardColumns.add(selectedCheckbox.dataset.column);
+    updateAllParentCheckboxStates();
+    updateMapLayers();
+}
+
 function setupMapDisplayOptions() {
+    // Ensure display mode matches the current toggle state
+    currentDisplayMode = document.getElementById('show-heatmap-mode').checked ? 'heatmap' : 'markers';
+
     // Clustering toggle
     document.getElementById('enable-clustering').addEventListener('change', function() {
         updateMapLayers();
@@ -1300,34 +1331,13 @@ class HazardLayerManager {
     }
 
     createMarkerLayer(layerId, sourceId, config, columnName) {
-        const severitySizing = document.getElementById('showseverity-based-sizing').checked;
-
         this.map.addLayer({
             id: layerId,
             type: 'circle',
             source: sourceId,
             paint: {
-                'circle-radius': severitySizing ? [
-                    'interpolate',
-                    ['linear'],
-                    ['get', this.getColumnValueField(columnName)],
-                    0, 6,
-                    25, 8,
-                    50, 12,
-                    75, 18,
-                    100, 25
-                ] : 8,
-                'circle-color': severitySizing ? [
-                    'interpolate',
-                    ['linear'],
-                    ['get', this.getColumnValueField(columnName)],
-                    0, '#28a745',      // Green for low exposure (0-33%)
-                    33, '#28a745',
-                    34, '#ffc107',     // Orange for medium exposure (34-66%)
-                    66, '#ffc107',
-                    67, '#dc3545',     // Red for high exposure (67-100%)
-                    100, '#dc3545'
-                ] : config.color,
+                'circle-radius': 8,
+                'circle-color': ['get', 'exposure_color'],
                 'circle-stroke-color': '#ffffff',
                 'circle-stroke-width': 2,
                 'circle-opacity': 0.8
@@ -1399,53 +1409,45 @@ class HazardLayerManager {
         }
 
         const hazardType = memoizedGetHazardType(columnName);
-        const value = properties.hazard_values ? properties.hazard_values[hazardType] : 0;
+        const value = properties.hazard_values ? properties.hazard_values[columnName] : 'N/A';
         const config = hazardConfig[hazardType] || { color: '#007bff', icon: 'fas fa-exclamation-triangle' };
 
-        // Determine exposure level and color
-        let exposureLevel, exposureColor;
-        if (value <= 33) {
-            exposureLevel = 'Low';
-            exposureColor = '#28a745';
-        } else if (value <= 66) {
-            exposureLevel = 'Medium';
-            exposureColor = '#ffc107';
-        } else {
-            exposureLevel = 'High';
-            exposureColor = '#dc3545';
-        }
+        const exposureLevel = properties.exposure_level || 'Unknown';
+        const exposureColor = properties.exposure_color || '#6c757d';
 
         const severitySizing = document.getElementById('showseverity-based-sizing').checked;
-        const displayColor = severitySizing ? exposureColor : config.color;
+        const displayColor = exposureColor;
+
+        const safeName = properties.name || 'Unknown Asset';
+        const safeArchetype = properties.archetype || '';
+        const safeValue = (value === undefined || value === null || value === '') ? '' : value;
 
         const html = `
             <div class="enhanced-facility-popup">
                 <div class="popup-header" style="border-left: 4px solid ${displayColor};">
-                    <h6><i class="${config.icon} me-2"></i>${properties.name}</h6>
-                    <span class="facility-type-badge">${properties.archetype}</span>
+                    <h6><i class="${config.icon} me-2"></i>${safeName}</h6>
+                    ${safeArchetype ? `<span class="facility-type-badge">${safeArchetype}</span>` : ''}
                 </div>
                 <div class="popup-body">
                     <div class="hazard-display">
                         <div class="hazard-item">
                             <span class="hazard-label">${columnName}:</span>
-                            <span class="hazard-value" style="color: ${displayColor}; font-weight: bold;">${value}%</span>
-                            <span class="exposure-badge" style="background-color: ${exposureColor}; color: white; padding: 2px 6px; border-radius: 8px; font-size: 10px; margin-left: 4px;">${exposureLevel}</span>
+                            ${safeValue ? `<span class="hazard-value" style="color: ${displayColor}; font-weight: bold;">${safeValue}</span>` : ''}
+                            ${safeValue ? `<span class="exposure-badge" style="background-color: ${exposureColor}; color: white; padding: 2px 6px; border-radius: 8px; font-size: 10px; margin-left: 4px;">${exposureLevel}</span>` : ''}
                         </div>
-                        <div class="exposure-bar-container">
-                            <div class="exposure-bar">
-                                <div class="exposure-fill" style="width: ${value}%; background-color: ${displayColor};"></div>
-                            </div>
+                        ${safeValue ? `
+                        <div class="exposure-legend" style="margin-top: 8px; font-size: 11px; color: #6c757d;">
+                            <span style="display: inline-flex; align-items: center; gap: 4px;">
+                                <span style="width: 8px; height: 8px; border-radius: 50%; background-color: ${exposureColor}; display: inline-block;"></span>
+                                ${exposureLevel} Exposure
+                            </span>
                         </div>
+                        ` : ''}
                         ${severitySizing ? `<div class="exposure-level-info" style="margin-top: 8px; font-size: 11px; color: #6c757d;">
                             <i class="fas fa-info-circle me-1"></i>
-                            Colors based on exposure level: ${exposureLevel} (${value}%)
+                            Colors based on exposure level: ${exposureLevel}
                         </div>` : ''}
                     </div>
-                </div>
-                <div class="popup-actions">
-                    <button class="btn btn-sm btn-outline-primary" onclick="showDetailedAnalysis('${properties.name}')">
-                        <i class="fas fa-chart-line me-1"></i>Analysis
-                    </button>
                 </div>
             </div>
         `;
@@ -1581,20 +1583,10 @@ function showAllHazards() {
         filterHazardsBySearch('');
     }
 
-    document.querySelectorAll('.hazard-column').forEach(checkbox => {
-        checkbox.checked = true;
-        checkbox.parentElement.style.display = 'block';
-        activeHazardColumns.add(checkbox.dataset.column);
-    });
-
-    // Update parent checkboxes
-    document.querySelectorAll('.hazard-group').forEach(checkbox => {
-        checkbox.checked = true;
-        checkbox.indeterminate = false;
-        checkbox.closest('.mb-3').style.display = 'block';
-    });
-
-    updateMapLayers();
+    const visibleColumns = getVisibleHazardColumns();
+    if (visibleColumns.length > 0) {
+        enforceSingleHazardSelection(visibleColumns[0]);
+    }
 }
 
 function hideAllHazards() {
@@ -1605,17 +1597,10 @@ function hideAllHazards() {
         filterHazardsBySearch('');
     }
 
-    document.querySelectorAll('.hazard-column').forEach(checkbox => {
-        checkbox.checked = false;
-    });
-
-    document.querySelectorAll('.hazard-group').forEach(checkbox => {
-        checkbox.checked = false;
-        checkbox.indeterminate = false;
-    });
-
-    activeHazardColumns.clear();
-    updateMapLayers();
+    const visibleColumns = getVisibleHazardColumns();
+    if (visibleColumns.length > 0) {
+        enforceSingleHazardSelection(visibleColumns[0]);
+    }
 }
 
 function updateMapLayers() {
@@ -1642,21 +1627,23 @@ function updateMapLayers() {
 function createFilteredHazardData(columnName) {
     if (!hazardData || !hazardData.features) return null;
 
-    const hazardType = getHazardTypeForColumn(columnName);
-
     const filteredFeatures = hazardData.features.map(feature => {
         const properties = feature.properties;
-        const hazardValue = properties.hazard_values ? properties.hazard_values[hazardType] || 0 : 0;
+        const rawValue = properties.hazard_values ? properties.hazard_values[columnName] : null;
+        const exposureInfo = classifyExposureForColumn(columnName, rawValue);
 
         return {
             ...feature,
             properties: {
                 ...properties,
-                exposure_value: hazardValue,
-                display_column: columnName
+                exposure_value: exposureInfo.value,
+                exposure_color: exposureInfo.color,
+                exposure_level: exposureInfo.level,
+                display_column: columnName,
+                display_value: exposureInfo.displayValue
             }
         };
-    }).filter(feature => feature.properties.exposure_value > 0);
+    });
 
     return {
         type: 'FeatureCollection',
@@ -1673,6 +1660,149 @@ function getHazardTypeForColumn(columnName) {
     if (columnName.includes('Storm Surge')) return 'Storm Surge';
     if (columnName.includes('Landslide')) return 'Rainfall Induced Landslide';
     return 'Other';
+}
+
+function classifyExposureForColumn(columnName, rawValue) {
+    const hazardType = getHazardTypeForColumn(columnName);
+    const normalized = rawValue === null || rawValue === undefined ? null : rawValue;
+    const valueString = normalized !== null ? String(normalized).trim() : '';
+    const lowerValue = valueString.toLowerCase();
+    let numericValue = null;
+
+    if (normalized !== null && typeof normalized === 'number' && !Number.isNaN(normalized)) {
+        numericValue = normalized;
+    } else {
+        const parsed = parseFloat(valueString);
+        if (!Number.isNaN(parsed)) {
+            numericValue = parsed;
+        }
+    }
+
+    const exposure = {
+        level: 'Unknown',
+        color: '#6c757d',
+        value: 0,
+        displayValue: valueString || 'N/A'
+    };
+
+    const setExposure = (level, color, valueOverride = null) => {
+        exposure.level = level;
+        exposure.color = color;
+        exposure.value = valueOverride !== null ? valueOverride : (level === 'High' ? 90 : level === 'Medium' ? 60 : 20);
+    };
+
+    if (lowerValue.includes('not exposed') || lowerValue.includes('no data') || lowerValue.includes('n/a')) {
+        setExposure('Low', '#28a745', 10);
+        return exposure;
+    }
+
+    if (hazardType === 'Flood' || hazardType === 'Storm Surge') {
+        if (lowerValue.includes('>1.5') || lowerValue.includes('>=1.5')) {
+            setExposure('High', '#dc3545');
+            return exposure;
+        }
+        if (lowerValue.includes('0.5-1.5') || lowerValue.includes('0.5 to 1.5')) {
+            setExposure('Medium', '#ffc107');
+            return exposure;
+        }
+        if (lowerValue.includes('0.1-0.5') || lowerValue.includes('0.1 to 0.5')) {
+            setExposure('Low', '#28a745');
+            return exposure;
+        }
+        if (lowerValue.includes('<0.1') || lowerValue.includes('little to none')) {
+            setExposure('Low', '#28a745');
+            return exposure;
+        }
+        if (numericValue !== null) {
+            if (numericValue > 1.5) {
+                setExposure('High', '#dc3545');
+            } else if (numericValue > 0.5) {
+                setExposure('Medium', '#ffc107');
+            } else {
+                setExposure('Low', '#28a745');
+            }
+            return exposure;
+        }
+    }
+
+    if (hazardType === 'Rainfall Induced Landslide') {
+        if (lowerValue.includes('generally stable')) {
+            setExposure('Low', '#28a745');
+            return exposure;
+        }
+        if (lowerValue.includes('<1')) {
+            setExposure('High', '#dc3545');
+            return exposure;
+        }
+        if (lowerValue.includes('1-1.5') || lowerValue.includes('1 to 1.5')) {
+            setExposure('Medium', '#ffc107');
+            return exposure;
+        }
+        if (numericValue !== null) {
+            if (numericValue < 1) {
+                setExposure('High', '#dc3545');
+            } else if (numericValue < 1.5) {
+                setExposure('Medium', '#ffc107');
+            } else {
+                setExposure('Low', '#28a745');
+            }
+            return exposure;
+        }
+    }
+
+    if (hazardType === 'Tropical Cyclones') {
+        if (numericValue !== null) {
+            if (numericValue >= 178) {
+                setExposure('High', '#dc3545');
+            } else if (numericValue >= 118) {
+                setExposure('Medium', '#ffc107');
+            } else {
+                setExposure('Low', '#28a745');
+            }
+            return exposure;
+        }
+    }
+
+    if (hazardType === 'Water Stress') {
+        if (numericValue !== null) {
+            if (numericValue >= 67) {
+                setExposure('High', '#dc3545');
+            } else if (numericValue >= 34) {
+                setExposure('Medium', '#ffc107');
+            } else {
+                setExposure('Low', '#28a745');
+            }
+            return exposure;
+        }
+    }
+
+    if (hazardType === 'Sea Level Rise') {
+        if (numericValue !== null) {
+            if (numericValue > 0.5) {
+                setExposure('High', '#dc3545');
+            } else if (numericValue > 0.1) {
+                setExposure('Medium', '#ffc107');
+            } else {
+                setExposure('Low', '#28a745');
+            }
+            return exposure;
+        }
+    }
+
+    if (hazardType === 'Heat') {
+        if (numericValue !== null) {
+            if (numericValue > 50) {
+                setExposure('High', '#dc3545');
+            } else if (numericValue > 20) {
+                setExposure('Medium', '#ffc107');
+            } else {
+                setExposure('Low', '#28a745');
+            }
+            return exposure;
+        }
+    }
+
+    return exposure;
 }
 
 
@@ -2112,7 +2242,7 @@ function displayHazardData(data) {
             }
         });
         if (!bounds.isEmpty()) {
-            map.fitBounds(bounds, { padding: 50 });
+            map.fitBounds(bounds, { padding: 2 });
         }
     }
 }

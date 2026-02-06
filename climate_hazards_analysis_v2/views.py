@@ -6467,7 +6467,7 @@ class HazardExposureMapView(TemplateView):
             'selected_hazards': selected_hazards,
             'selected_hazard_configs': selected_hazard_configs,
             'has_analysis_results': bool(results_data),
-            'hazard_exposure_api_url': reverse_lazy('climate_hazards_analysis_v2:visualization_data_api'),
+            'hazard_exposure_api_url': reverse_lazy('climate_hazards_analysis_v2:get_hazard_exposure_map_data'),
             'results_url': reverse_lazy('climate_hazards_analysis_v2:show_results'),
             'select_hazards_url': reverse_lazy('climate_hazards_analysis_v2:select_hazards'),
         })
@@ -6508,8 +6508,11 @@ def get_heat_exposure_map_data(request):
     Returns spatial heat data that can be rendered as a map layer.
     """
     try:
-        # Get facility data from session
-        facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+        # Prefer exposure results data (contains hazard scenario columns)
+        results_data = request.session.get('climate_hazards_v2_results', {})
+        facility_data = results_data.get('data', []) if isinstance(results_data, dict) else []
+        if not facility_data:
+            facility_data = request.session.get('climate_hazards_v2_facility_data', [])
 
         if not facility_data:
             return JsonResponse({
@@ -6644,8 +6647,17 @@ def get_hazard_exposure_map_data(request):
 
         # Get facility data from session
         facility_data = request.session.get('climate_hazards_v2_facility_data', [])
+        results_payload = request.session.get('climate_hazards_v2_results', {})
+        results_rows = None
+        if isinstance(results_payload, dict):
+            results_rows = results_payload.get('data')
+        elif isinstance(results_payload, list):
+            results_rows = results_payload
 
-        if not facility_data:
+        if not isinstance(results_rows, list) or not results_rows:
+            results_rows = None
+
+        if not facility_data and not results_rows:
             # Check if there are any polygon assets as fallback (even without granular analysis)
             polygon_assets = Asset.objects.filter(
                 asset_type='polygon'
@@ -6669,40 +6681,80 @@ def get_hazard_exposure_map_data(request):
                 'error': 'No hazards selected'
             }, status=400)
 
-        logger.info(f"Processing hazard exposure map data for {len(facility_data)} facilities with hazards: {selected_hazards}")
+        logger.info(f"Processing hazard exposure map data for {len(results_rows or facility_data)} facilities with hazards: {selected_hazards}")
+
+        def _is_hazard_column(col_name: str) -> bool:
+            if not col_name:
+                return False
+            patterns = [
+                'Flood Depth',
+                'Water Stress Exposure',
+                'Sea Level Rise',
+                'Extreme Windspeed',
+                'Days over',
+                'Storm Surge Flood Depth',
+                'Rainfall-Induced Landslide',
+            ]
+            return any(pat in col_name for pat in patterns)
+
+        # Prefer analysis results (hazard columns) when available
+        rows_for_map = results_rows or facility_data
+
+        facility_index = {}
+        asset_cache = {}
+        for fac in facility_data:
+            fac_id = fac.get('Asset_ID') or fac.get('asset_id') or fac.get('assetId')
+            fac_name = fac.get('Facility') or fac.get('name')
+            if fac_id is not None:
+                facility_index[str(fac_id)] = fac
+            if fac_name:
+                facility_index[str(fac_name)] = fac
 
         # Process hazard exposure for each facility
         hazard_exposure_data = []
-        for facility in facility_data:
+        for facility in rows_for_map:
             try:
-                lat = float(facility.get('Lat', 0))
-                lng = float(facility.get('Long', 0))
-                facility_name = facility.get('Facility', 'Unknown')
-                archetype = facility.get('Archetype', 'default')
+                lat_value = facility.get('Lat') or facility.get('Latitude') or facility.get('latitude')
+                lng_value = facility.get('Long') or facility.get('Longitude') or facility.get('longitude')
+                facility_name = facility.get('Facility', facility.get('name', 'Unknown'))
+                archetype = facility.get('Archetype', facility.get('archetype', 'default'))
 
-                # Extract hazard values for all selected hazards
-                hazard_values = {}
-                for hazard in selected_hazards:
-                    # Try different column name patterns for each hazard
-                    possible_columns = [
-                        f'{hazard} Exposure (%)',
-                        f'{hazard} Exposure (%) - Moderate Case',
-                        f'{hazard} Exposure (%) - Worst Case',
-                        f'{hazard} Risk Score',
-                        f'{hazard} Severity',
-                        hazard  # Try just the hazard name
-                    ]
+                if lat_value in (None, '') or lng_value in (None, ''):
+                    lookup_key = facility.get('Asset_ID') or facility.get('asset_id') or facility.get('assetId') or facility_name
+                    lookup = facility_index.get(str(lookup_key))
+                    if lookup:
+                        lat_value = lat_value or lookup.get('Lat') or lookup.get('Latitude') or lookup.get('latitude')
+                        lng_value = lng_value or lookup.get('Long') or lookup.get('Longitude') or lookup.get('longitude')
+                        archetype = facility.get('Archetype', lookup.get('Archetype', archetype))
 
-                    hazard_value = 0
-                    for col in possible_columns:
-                        if col in facility and facility[col] is not None:
+                if lat_value in (None, '') or lng_value in (None, ''):
+                    asset_id = facility.get('Asset_ID') or facility.get('asset_id') or facility.get('assetId')
+                    if asset_id is not None:
+                        asset_key = str(asset_id)
+                        asset = asset_cache.get(asset_key)
+                        if asset is None:
                             try:
-                                hazard_value = float(facility[col])
-                                break
-                            except (ValueError, TypeError):
-                                continue
+                                asset = Asset.objects.filter(asset_id=asset_id).first()
+                            except Exception:
+                                asset = None
+                            asset_cache[asset_key] = asset
+                        if asset:
+                            lat_value = lat_value or asset.latitude
+                            lng_value = lng_value or asset.longitude
+                            if not facility.get('Archetype'):
+                                archetype = asset.archetype or archetype
 
-                    hazard_values[hazard] = round(hazard_value, 2) if hazard_value > 0 else 0
+                lat = float(lat_value or 0)
+                lng = float(lng_value or 0)
+
+                if lat == 0 and lng == 0:
+                    continue
+
+                # Extract hazard values per column for scenario-specific rendering
+                hazard_values = {}
+                for col_name, col_value in facility.items():
+                    if _is_hazard_column(col_name):
+                        hazard_values[col_name] = col_value
 
                 # Create point feature for map
                 feature = {

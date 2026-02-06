@@ -340,12 +340,16 @@ class AssetService:
 
             visualization_data = []
             for asset in assets:
+                coordinates = []
+                if asset.longitude is not None and asset.latitude is not None:
+                    coordinates = [float(asset.longitude), float(asset.latitude)]
+
                 asset_data = {
                     'id': asset.id,
                     'name': asset.name,
                     'archetype': asset.archetype,
                     'asset_type': asset.asset_type,
-                    'coordinates': asset.coordinates,
+                    'coordinates': coordinates,
                     'geojson': asset.geojson,
                     'properties': asset.properties,
                     'has_granular_analysis': asset.has_granular_analysis,
